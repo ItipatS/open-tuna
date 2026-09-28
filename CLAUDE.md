@@ -14,6 +14,12 @@ post stack. Built on **three.js r180 WebGPU renderer + TSL** (node shading langu
 - **Fully procedural ocean** (waves, sky, seabed, caustics, foam). Only creatures/reef come from GLB assets.
 - Style target: cinematic, clear tropical turquoise water (Abzû-like), not murky/milky.
 
+## Deploy
+
+Live: **https://itipats.github.io/open-tuna/** — GitHub Pages serves `main` branch root as-is
+(repo is public; `.nojekyll` disables Jekyll). Every push to `main` redeploys in ~1 min.
+Keep all asset paths relative (`./file.glb`) — the site lives under the `/open-tuna/` subpath.
+
 ## Run
 
 No build step, no npm dependencies. ES modules + import map (three from jsDelivr CDN, needs internet).
