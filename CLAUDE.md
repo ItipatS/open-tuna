@@ -47,6 +47,18 @@ src/director.js     cinematic camera: shot list, fade cuts, letterbox, shot chor
 *.glb               assets (Sketchfab exports) — see Assets
 ```
 
+## Stage size
+
+Everything lives in a compact play area so the action stays on screen (`STAGE = 42` m in `main.js`):
+- Tuna goal wanders ±16/±14 m; boid box half-extent = `STAGE`; plus a hard radial wall at 1.2×STAGE
+  in the compute shader (turns outward velocity back in). School footprint (`goalSpread`) scales with
+  head-count: `clamp(6 + sqrt(n)·0.38, 10, 30)` m, so 4000 tuna don't crush together.
+- Sharks: orbit 20 m around the school, lunge 1.9 s, leashed at 0.8×STAGE (slow to cruise + turn back).
+- Whale loops: humpback 44×34 m, blue whale 62×50 m. The blue whale is predator slot 2 (tuna part around it).
+- Jelly clusters within ~40 m, seagrass patches 22–77 m, coral ring 40–85 m, bubble vents 12–47 m.
+- Orbit camera max distance 140 m.
+Measured over 60 s with 4000 tuna: tuna ≤50 m from centre, sharks ≤35 m, whales on their loops.
+
 ## Architecture
 
 ### Global uniforms (`shared.js` → `U`)

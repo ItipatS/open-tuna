@@ -27,6 +27,9 @@ const CONFIG = {
   turtle: { flip: false, yaw: Math.PI / 2 }, // flipper span is wider than the shell is long
 };
 
+// radius (m) of the play area around the reef; everything is kept inside it
+const STAGE = 42;
+
 const $ = (id) => document.getElementById(id);
 const loaderEl = $('loader'), statusEl = $('status'), barEl = $('bar');
 function fail(msg) { loaderEl.classList.add('error'); statusEl.textContent = msg; throw new Error(msg); }
@@ -124,14 +127,16 @@ async function main() {
     geometry: tunaBaked.geometry,
     materials: tunaBaked.materials.map((m) => toNodeMaterial(m, { physical: true, iridescence: 0.55, clearcoat: 0.5, rim: 0.9, rimColor: new THREE.Color(0.35, 0.8, 0.9) })),
     maxCount: CONFIG.tuna.max, count: CONFIG.tuna.count,
-    center: new THREE.Vector3(0, schoolY, 0), half: new THREE.Vector3(80, 8, 80),
+    center: new THREE.Vector3(0, schoolY, 0), half: new THREE.Vector3(STAGE, 8, STAGE),
     size: [1.5, 2.3], speed: [3.2, 7.5], neighbour: 7, separation: 2.1,
     swim: { amp: 0.09, waveK: 3.0, freq: 1.5, base: 5.5 },
-    weights: { sep: 5, ali: 1.6, coh: 0.8, goal: 1.3, bound: 3, pred: 55, ray: 40 }, seed: 1, jumpers: 64,
+    weights: { sep: 5, ali: 1.6, coh: 0.8, goal: 1.3, bound: 7, pred: 55, ray: 40 }, seed: 1, jumpers: 64,
   });
   tuna.u.floorY.value = reefTop + 2;
   tuna.u.ceilY.value = -0.9;
-  tuna.u.goalSpread.value.set(20, 3, 20);
+  // school footprint grows with the head-count so dense schools don't crush together
+  const fitSchool = (n) => { const r = THREE.MathUtils.clamp(6 + Math.sqrt(n) * 0.38, 10, 30); tuna.u.goalSpread.value.set(r, 3, r); tuna.u.jumpRadius.value = Math.min(r, 14); };
+  fitSchool(CONFIG.tuna.count);
   scene.add(tuna.mesh);
   const splash = new Splash(tuna, 200);
   scene.add(splash.mesh);
@@ -144,19 +149,19 @@ async function main() {
     geometry: reefBaked.geometry,
     materials: reefBaked.materials.map((m) => toNodeMaterial(m, { rim: 0.6 })),
     maxCount: CONFIG.reef.max, count: CONFIG.reef.count,
-    center: new THREE.Vector3(0, reefTop - 1, 0), half: new THREE.Vector3(45, 5, 45),
+    center: new THREE.Vector3(0, reefTop - 1, 0), half: new THREE.Vector3(30, 5, 30),
     size: [0.2, 0.34], speed: [0.8, 2.6], neighbour: 2.2, separation: 0.45,
     swim: { amp: 0.14, waveK: 3.6, freq: 3.5, base: 8 },
     weights: { sep: 4, ali: 1.2, coh: 1.1, goal: 0.5, bound: 2, pred: 25, ray: 25 }, seed: 9,
   });
   reef.u.floorY.value = floorY + 1.2;
   reef.u.ceilY.value = reefTop + 6;
-  reef.u.goalSpread.value.set(30, 2, 30);
+  reef.u.goalSpread.value.set(18, 2, 18);
   scene.add(reef.mesh);
 
   // --- jellyfish: a procedural bioluminescent bloom + a few photoreal hero jellies
   const bloomClusters = [
-    new THREE.Vector4(-60, -8, 40, 30), new THREE.Vector4(70, -10, -30, 34), new THREE.Vector4(10, -6, -85, 26), new THREE.Vector4(-25, -11, -15, 55),
+    new THREE.Vector4(-32, -8, 22, 16), new THREE.Vector4(34, -10, -16, 18), new THREE.Vector4(6, -6, -38, 14), new THREE.Vector4(-14, -7, -10, 34),
   ];
   const jellies = createJellyBloom({ count: 520, clusters: bloomClusters });
   scene.add(jellies);
@@ -164,10 +169,10 @@ async function main() {
   // --- whales
   const whaleStyle = { rim: 0.6, physical: true, clearcoat: 0.35 };
   const hump = createFlexingWhale(G.hump, { length: 14, flip: CONFIG.humpback.flip, amp: 0.045, speed: 0.8, style: whaleStyle });
-  const humpPath = new SwimPath({ rx: 120, rz: 85, y: -7, yAmp: 2, speed: 3.2, phase: 1 });
+  const humpPath = new SwimPath({ rx: 44, rz: 34, y: -6, yAmp: 1.5, speed: 3, phase: 1 });
   scene.add(hump);
   const blue = createAnimated(G.blue, { length: 26, flip: CONFIG.bluewhale.flip, yaw: CONFIG.bluewhale.yaw, timeScale: 0.6, style: whaleStyle });
-  const bluePath = new SwimPath({ rx: 150, rz: 125, y: -15, yAmp: 3, speed: 4, phase: 3.5, dir: -1 });
+  const bluePath = new SwimPath({ rx: 62, rz: 50, y: -14, yAmp: 2, speed: 3.6, phase: 3.5, dir: -1 });
   scene.add(blue);
 
   // --- sharks hunt the tuna school; turtles cruise the reef
@@ -175,7 +180,7 @@ async function main() {
   const sharks = [0, 1].map((i) => {
     const s = createAnimated(G.shark, { length: 3.4, flip: CONFIG.shark.flip, yaw: CONFIG.shark.yaw, clone: true, timeScale: 1.1, style: { rim: 0.7, physical: true, clearcoat: 0.3 } });
     scene.add(s);
-    return new Hunter(s, { getPrey: () => schoolCenter, floorY: reefTop, seed: i });
+    return new Hunter(s, { getPrey: () => schoolCenter, floorY: reefTop, seed: i, leash: STAGE });
   });
   const turtles = [0, 1].map((i) => {
     const t = createAnimated(G.turtle, { length: 1.3, flip: CONFIG.turtle.flip, yaw: CONFIG.turtle.yaw, clone: true, timeScale: 0.8, style: { rim: 0.6 } });
@@ -185,10 +190,10 @@ async function main() {
   const animated = [blue, ...sharks.map((s) => s.obj), ...turtles.map((t) => t.obj)];
 
   // --- decoration: instanced coral, seagrass meadows, the photogrammetry soft coral
-  const inReef = (x, z) => Math.abs(x) < 50 && Math.abs(z) < 50;
+  const inReef = (x, z) => Math.abs(x) < 22 && Math.abs(z) < 22; // keep the central rock clear
   scene.add(scatterInstanced(G.coral, {
     count: 110, size: [2, 6],
-    placer: (p) => { const a = Math.random() * Math.PI * 2, r = 50 + Math.random() * 110; p.set(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = seabedHeight(p.x, p.z) - 0.3; },
+    placer: (p) => { const a = Math.random() * Math.PI * 2, r = 40 + Math.random() * 45; p.set(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = seabedHeight(p.x, p.z) - 0.3; },
   }));
   const seagrass = createSeagrass({ count: 30000, heightAt: seabedHeight, avoid: inReef });
   scene.add(seagrass);
@@ -205,7 +210,7 @@ async function main() {
   scene.add(snow);
   const vents = [];
   for (let k = 0; k < 14; k++) {
-    const a = Math.random() * Math.PI * 2, r = 20 + Math.random() * 60;
+    const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 35;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     vents.push(new THREE.Vector3(x, seabedHeight(x, z) + 0.2, z));
   }
@@ -288,7 +293,7 @@ async function main() {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.06;
-  controls.maxDistance = 600;
+  controls.maxDistance = 140;
   controls.target.set(0, schoolY, 0);
 
   const keys = new Set();
@@ -308,7 +313,7 @@ async function main() {
   function schoolGoal(t, out) {
     const surf = Math.max(school.forceSurface, THREE.MathUtils.smoothstep(Math.sin(t * 0.07), 0.1, 0.6));
     const y = THREE.MathUtils.lerp(-10 + Math.sin(t * 0.11) * 2, -2.6, surf);
-    return out.set(Math.cos(t * 0.045) * 45, y, Math.sin(t * 0.063) * 38);
+    return out.set(Math.cos(t * 0.045) * 16, y, Math.sin(t * 0.063) * 14);
   }
 
   // breach auto-framing: read back the 64-entry breach state (1 KB) a few times per second
@@ -352,9 +357,9 @@ async function main() {
   // ------------------------------------------------------------------ UI
   let renderScale = 1;
   const ui = {
-    tuna: [$('tuna'), $('vTuna'), CONFIG.tuna.count, (v) => tuna.setCount(v), (v) => v],
+    tuna: [$('tuna'), $('vTuna'), CONFIG.tuna.count, (v) => { tuna.setCount(v); fitSchool(v); }, (v) => v],
     reef: [$('reef'), $('vReef'), CONFIG.reef.count, (v) => reef.setCount(v), (v) => v],
-    jelly: [$('jelly'), $('vJelly'), 520, (v) => { jellies.count = v; }, (v) => v],
+    jelly: [$('jelly'), $('vJelly'), 360, (v) => { jellies.count = v; }, (v) => v],
     sea: [$('sea'), $('vSea'), 0.45, (v) => { oceanU.amp.value = v; oceanU.chopAmp.value = Math.min(v, 1.1); }, (v) => v.toFixed(2)],
     clarity: [$('clarity'), $('vClarity'), 0.7, (v) => { U.fogDensity.value = THREE.MathUtils.lerp(0.03, 0.006, v); }, (v) => `${Math.round(v * 100)}%`],
     sun: [$('sun'), $('vSun'), 55, (v) => setSun(v), (v) => `${v}°`],
@@ -448,6 +453,7 @@ async function main() {
     tuna.u.jumpChance.value = school.jumpBoost > 0 ? 0.55 : nearSurface ? 0.14 : 0.03;
 
     sharks.forEach((s, i) => { s.update(dt); tuna.setPredator(i, s.obj.position, s.lunging ? 16 : 9); reef.setPredator(i, s.obj.position, 6); });
+    tuna.setPredator(2, blue.position, 14); // tuna part around the blue whale
     humpPath.step(hump, dt);
     bluePath.step(blue, dt);
     turtles.forEach((tt) => tt.path.step(tt.obj, dt));

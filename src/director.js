@@ -44,7 +44,7 @@ export class Director {
         enter: () => {
           // start the hunt close to the school (hidden by the fade-in)
           const s = sharks[0], g = goal(), a = Math.random() * Math.PI * 2;
-          s.obj.position.set(g.x + Math.cos(a) * 26, g.y - 2, g.z + Math.sin(a) * 26);
+          s.obj.position.set(g.x + Math.cos(a) * 20, g.y - 2, g.z + Math.sin(a) * 20);
           s.dir.set(-Math.cos(a), 0, -Math.sin(a));
           s.state = 'stalk'; s.timer = 1.5;
         },
@@ -78,7 +78,7 @@ export class Director {
         cam: (t, p, l) => {
           const f = fwdOf(blue);
           const side = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize();
-          p.copy(blue.position).addScaledVector(f, 30 - t * 1.2).addScaledVector(side, 22).add(new THREE.Vector3(0, -4, 0));
+          p.copy(blue.position).addScaledVector(f, 26 - t * 1.2).addScaledVector(side, 20).add(new THREE.Vector3(0, -3, 0));
           l.copy(blue.position);
         },
       },

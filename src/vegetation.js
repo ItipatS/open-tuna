@@ -29,7 +29,7 @@ export function createSeagrass({ count = 26000, heightAt, avoid }) {
   const data = new Float32Array(count * 4);
   const patches = [];
   for (let k = 0; k < 22; k++) {
-    const a = Math.random() * Math.PI * 2, r = 30 + Math.random() * 120;
+    const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 55;
     patches.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, s: 6 + Math.random() * 14 });
   }
   let n = 0;

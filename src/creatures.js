@@ -179,8 +179,8 @@ export function scatterInstanced(gltf, { count, placer, size = [1, 2], upright =
 // Shark hunting AI: cruise circles around the school, stalk in, then a fast lunge straight
 // through it (the tuna scatter via the predator uniforms), then peel away and repeat.
 export class Hunter {
-  constructor(obj, { getPrey, cruise = 4.2, stalk = 6.5, lunge = 15, turn = 1.1, floorY = -20, seed = 0 }) {
-    Object.assign(this, { obj, getPrey, cruise, stalkSpeed: stalk, lungeSpeed: lunge, turn, floorY });
+  constructor(obj, { getPrey, cruise = 4.2, stalk = 6.5, lunge = 15, turn = 1.1, floorY = -20, seed = 0, leash = 44 }) {
+    Object.assign(this, { obj, getPrey, cruise, stalkSpeed: stalk, lungeSpeed: lunge, turn, floorY, leash });
     this.dir = new THREE.Vector3(Math.cos(seed * 3), 0, Math.sin(seed * 3));
     this.speed = cruise;
     this.state = 'cruise';
@@ -191,7 +191,7 @@ export class Hunter {
     this.lock = new THREE.Vector3();
     this.yawRate = 0;
     const prey = getPrey();
-    obj.position.set(prey.x + 35 * Math.cos(this.orbit), prey.y - 3, prey.z + 35 * Math.sin(this.orbit));
+    obj.position.set(prey.x + 22 * Math.cos(this.orbit), prey.y - 3, prey.z + 22 * Math.sin(this.orbit));
   }
   get lunging() { return this.state === 'lunge'; }
   update(dt) {
@@ -200,7 +200,7 @@ export class Hunter {
     this.timer -= dt;
     if (this.state === 'cruise') {
       this.orbit += this.orbitDir * dt * 0.12;
-      this.aim.set(prey.x + Math.cos(this.orbit) * 30, prey.y - 3 + Math.sin(this.orbit * 2) * 2, prey.z + Math.sin(this.orbit) * 30);
+      this.aim.set(prey.x + Math.cos(this.orbit) * 20, prey.y - 3 + Math.sin(this.orbit * 2) * 2, prey.z + Math.sin(this.orbit) * 20);
       if (this.timer < 0) { this.state = 'stalk'; this.timer = 3.5; }
     } else if (this.state === 'stalk') {
       target = this.stalkSpeed;
@@ -208,14 +208,17 @@ export class Hunter {
       this.aim.copy(prey).addScaledVector(away, 12);
       this.aim.y = prey.y - 1;
       if (this.timer < 0 || p.distanceTo(this.aim) < 5) {
-        this.state = 'lunge'; this.timer = 2.8;
-        this.lock.copy(prey).addScaledVector(prey.clone().sub(p).normalize(), 18);
+        this.state = 'lunge'; this.timer = 1.9;
+        this.lock.copy(prey).addScaledVector(prey.clone().sub(p).normalize(), 10);
       }
     } else if (this.state === 'lunge') {
       target = this.lungeSpeed; turn = this.turn * 0.6;
       this.aim.copy(this.lock);
+      if (p.distanceTo(prey) > 32) this.timer = 0; // leash: don't overshoot out of the stage
       if (this.timer < 0) { this.state = 'cruise'; this.timer = 9 + Math.random() * 8; this.orbit = Math.atan2(p.z - prey.z, p.x - prey.x); this.orbitDir *= -1; }
     }
+    // stage leash: past the edge, head back toward the school whatever the state
+    if (Math.hypot(p.x, p.z) > this.leash * 0.8) { this.aim.copy(prey); turn = this.turn * 2; target = this.cruise; if (this.state === 'lunge') this.timer = 0; }
     // steer with a limited turn rate
     const want = this.aim.clone().sub(p).normalize();
     const ang = this.dir.angleTo(want);
@@ -229,7 +232,7 @@ export class Hunter {
     let dy = Math.atan2(this.dir.x, this.dir.z) - prevYaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     this.yawRate = THREE.MathUtils.lerp(this.yawRate, dy / Math.max(dt, 1e-4), 0.08);
-    this.speed = THREE.MathUtils.lerp(this.speed, target, 1 - Math.exp(-dt * (this.state === 'lunge' ? 3 : 1)));
+    this.speed = THREE.MathUtils.lerp(this.speed, target, 1 - Math.exp(-dt * (this.state === 'lunge' || target === this.cruise ? 3 : 1)));
     p.addScaledVector(this.dir, this.speed * dt);
     p.y = THREE.MathUtils.clamp(p.y, this.floorY + 2, -1.8);
     this.obj.lookAt(p.clone().add(this.dir));

@@ -184,6 +184,16 @@ export class FishSwarm {
           const target = clamp(sp, u.minSpeed, u.maxSpeed);
           vel.assign(vel.div(max(sp, 0.0001)).mul(mix(sp, target, clamp(u.dt.mul(4), 0, 1))));
         });
+        // hard stage wall: past 1.2x the box radius, turn the horizontal velocity back inward
+        If(mode.equal(0), () => {
+          const rxz = pos.xz.sub(u.center.xz);
+          const rl = length(rxz);
+          If(rl.greaterThan(u.half.x.mul(1.2)), () => {
+            const n = rxz.div(rl);
+            const vn = dot(vel.xz, n);
+            If(vn.greaterThan(0), () => { vel.x.subAssign(n.x.mul(vn).mul(1.6)); vel.z.subAssign(n.y.mul(vn).mul(1.6)); });
+          });
+        });
         pos.addAssign(vel.mul(u.dt));
 
         const spd = clamp(length(vel), u.minSpeed, u.maxSpeed);
