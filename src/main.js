@@ -16,10 +16,12 @@ import { Splash, createMarineSnow, createBubbles } from './particles.js';
 import { createJellyBloom } from './jellies.js';
 import { createSeagrass } from './vegetation.js';
 import { Director } from './director.js';
+import { Story, flightTargets } from './story.js';
+import { bakeGlyph, createWaterGlyph, createGlyphDrips } from './glyph.js';
 
 // Per-model orientation overrides (flip = the artist's pivot/forward axis points the wrong way).
 const CONFIG = {
-  tuna: { max: 4096, count: 700, flip: false },
+  tuna: { max: 4096, count: 2000, flip: false },
   reef: { max: 2048, count: 600, flip: true }, // head detected at the tail end
   humpback: { flip: true },
   bluewhale: { flip: true, yaw: 0 },
@@ -35,6 +37,10 @@ const loaderEl = $('loader'), statusEl = $('status'), barEl = $('bar');
 function fail(msg) { loaderEl.classList.add('error'); statusEl.textContent = msg; throw new Error(msg); }
 
 async function main() {
+  const params = new URLSearchParams(location.search);
+  const LAB = params.has('lab'); // playground panel + shot director instead of the scroll story
+  if (!LAB) document.documentElement.classList.add('story');
+
   // ------------------------------------------------------------------ WebGPU only
   if (!navigator.gpu) fail('WebGPU is not available in this browser.\nUse a current Chrome / Edge (or Safari 26+, Firefox 141+ on Windows).');
   const adapter = await navigator.gpu.requestAdapter();
@@ -80,33 +86,15 @@ async function main() {
   manager.onProgress = (url, done, total) => { barEl.style.width = `${(done / total) * 100}%`; statusEl.textContent = `Loading ${url.split('/').pop()}  (${done}/${total})`; };
   const loader = createLoader(manager);
   const files = {
-    env: 'underwater_environment.glb', tuna: 'tuna_fish.glb', reef: 'coral_fish.glb', coral: 'coral_piece.glb',
-    star: 'starfish__sarcophyton_-_agisoftnaturechallenge.glb', shark: 'model_54a_-_caribbean_reef_shark.glb',
+    tuna: 'tuna_fish.glb', reef: 'coral_fish.glb', coral: 'coral_piece.glb', shark: 'model_54a_-_caribbean_reef_shark.glb',
     turtle: 'model_50a_-_hawksbill_sea_turtle.glb', blue: 'blue_whale_-_textured.glb', hump: 'game-ready_humpback_whale.glb',
   };
   const G = Object.fromEntries(await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loader.loadAsync(`./${f}`)])));
   statusEl.textContent = 'Preparing scene…';
   await new Promise((r) => setTimeout(r, 0));
 
-  // --- environment (reef, rocks, wreck) fitted to ~140 m and set on the seabed
-  const env = G.env.scene;
-  // hide the square sand slab and the baked fake light-shaft cards (we render real volumetric rays)
-  env.traverse((o) => { if (o.isMesh && /^(Plane049|Object1035|Object1040)/.test(o.name)) o.visible = false; });
-  convertMaterials(env, { rim: 0.25 });
-  env.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  let box = new THREE.Box3().setFromObject(env);
-  const esize = box.getSize(new THREE.Vector3());
-  let es = 140 / Math.max(esize.x, esize.z);
-  if (esize.y * es > 15) es = 15 / esize.y;
-  env.scale.setScalar(es);
-  box = new THREE.Box3().setFromObject(env);
-  const ec = box.getCenter(new THREE.Vector3());
-  env.position.x -= ec.x; env.position.z -= ec.z;
-  env.position.y += seabedHeight(0, 0) - 2.2 - box.min.y;
-  scene.add(env);
-  box = new THREE.Box3().setFromObject(env);
-  const reefTop = Math.min(box.max.y, -7);
   const floorY = seabedHeight(0, 0);
+  const reefTop = floorY + 5;
 
   // --- tuna: bind pose baked, oriented from bones, one instanced draw call, can breach
   const tunaRoot = G.tuna.scene;
@@ -123,6 +111,7 @@ async function main() {
   if (CONFIG.tuna.flip) fwd.negate();
   canonicalize(tunaBaked.geometry, fwd, up);
   const schoolY = -7;
+  const glyphInfo = bakeGlyph({ text: '50', width: 40, bottom: 1.8, thick: 5 });
   const tuna = new FishSwarm({
     geometry: tunaBaked.geometry,
     materials: tunaBaked.materials.map((m) => toNodeMaterial(m, { physical: true, iridescence: 0.55, clearcoat: 0.5, rim: 0.9, rimColor: new THREE.Color(0.35, 0.8, 0.9) })),
@@ -130,15 +119,17 @@ async function main() {
     center: new THREE.Vector3(0, schoolY, 0), half: new THREE.Vector3(STAGE, 8, STAGE),
     size: [1.5, 2.3], speed: [3.2, 7.5], neighbour: 7, separation: 2.1,
     swim: { amp: 0.09, waveK: 3.0, freq: 1.5, base: 5.5 },
-    weights: { sep: 5, ali: 1.6, coh: 0.8, goal: 1.3, bound: 7, pred: 55, ray: 40 }, seed: 1, jumpers: 64,
+    weights: { sep: 5, ali: 1.6, coh: 0.8, goal: 1.3, bound: 7, pred: 55, ray: 40 }, seed: 1, jumpers: 256,
+    targets: flightTargets(glyphInfo, CONFIG.tuna.max),
   });
   tuna.u.floorY.value = reefTop + 2;
   tuna.u.ceilY.value = -0.9;
   // school footprint grows with the head-count so dense schools don't crush together
   const fitSchool = (n) => { const r = THREE.MathUtils.clamp(6 + Math.sqrt(n) * 0.38, 10, 30); tuna.u.goalSpread.value.set(r, 3, r); tuna.u.jumpRadius.value = Math.min(r, 14); };
   fitSchool(CONFIG.tuna.count);
+  tuna.u.hole.value.copy(glyphInfo.hole);
   scene.add(tuna.mesh);
-  const splash = new Splash(tuna, 200);
+  const splash = new Splash(tuna, 110);
   scene.add(splash.mesh);
 
   // --- reef fish: static mesh, same GPU swarm system, smaller & twitchier
@@ -190,20 +181,17 @@ async function main() {
   const animated = [blue, ...sharks.map((s) => s.obj), ...turtles.map((t) => t.obj)];
 
   // --- decoration: instanced coral, seagrass meadows, the photogrammetry soft coral
-  const inReef = (x, z) => Math.abs(x) < 22 && Math.abs(z) < 22; // keep the central rock clear
   scene.add(scatterInstanced(G.coral, {
-    count: 110, size: [2, 6],
-    placer: (p) => { const a = Math.random() * Math.PI * 2, r = 40 + Math.random() * 45; p.set(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = seabedHeight(p.x, p.z) - 0.3; },
+    count: 160, size: [2, 6],
+    placer: (p) => { const a = Math.random() * Math.PI * 2, r = 14 + Math.random() * 70; p.set(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = seabedHeight(p.x, p.z) - 0.3; },
   }));
-  const seagrass = createSeagrass({ count: 30000, heightAt: seabedHeight, avoid: inReef });
+  const seagrass = createSeagrass({ count: 30000, heightAt: seabedHeight });
   scene.add(seagrass);
-  const star = G.star.scene;
-  convertMaterials(star);
-  const sb = new THREE.Box3().setFromObject(star), ss = sb.getSize(new THREE.Vector3());
-  star.scale.setScalar(5 / Math.max(ss.x, ss.z));
-  const sb2 = new THREE.Box3().setFromObject(star), sc2 = sb2.getCenter(new THREE.Vector3());
-  star.position.set(22 - sc2.x, seabedHeight(22, 30) - sb2.min.y - 0.2, 30 - sc2.z);
-  scene.add(star);
+
+  // --- the water 50 (story only)
+  const glyph = createWaterGlyph(glyphInfo), drips = createGlyphDrips(glyphInfo);
+  glyph.visible = drips.visible = false;
+  if (!LAB) scene.add(glyph, drips);
 
   // --- particles
   const snow = createMarineSnow(26000, 46);
@@ -256,6 +244,30 @@ async function main() {
     return res;
   });
 
+  // Sky god rays (above water): radial blur of the bright sky/sun toward the sun's screen position.
+  // Fish and the sea write depth and occlude; the water 50 doesn't, so light streams through it.
+  const uSunUV = uniform(new THREE.Vector2(0.5, 0.2)), uSunVis = uniform(0), uSkyRayK = uniform(0.6);
+  const skyRays = Fn(() => {
+    const res = vec3(0).toVar();
+    If(U.under.lessThan(0.5).and(uSunVis.greaterThan(0.001)), () => {
+      const N = 56;
+      const delta = uSunUV.sub(screenUV).div(N);
+      const jitter = fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)).mul(52.9829189));
+      const suv = screenUV.add(delta.mul(jitter)).toVar();
+      const acc = vec3(0).toVar(), w = float(1).toVar();
+      Loop(N, () => {
+        suv.addAssign(delta);
+        const c = min(sceneColor.sample(suv).rgb, vec3(2.5));
+        const open = step(0.99999, sceneDepth.sample(suv).x);
+        const lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        acc.addAssign(c.mul(smoothstep(0.9, 2.2, lum).mul(open)).mul(w));
+        w.mulAssign(0.965);
+      });
+      res.assign(acc.div(N).mul(uSunVis).mul(uSkyRayK).mul(vec3(1.0, 0.8, 0.5)));
+    });
+    return res;
+  });
+
   // Colour grade in display space: teal shadows / warm highlights underwater, a clean warm
   // tropical grade above; filmic contrast, saturation, vignette.
   const grade = Fn(([c]) => {
@@ -278,7 +290,7 @@ async function main() {
     const caK = mix(0.0012, 0.0035, U.under);
     const suv = screenUV.add(wob);
     let col = vec3(sceneColor.sample(suv.add(dc.mul(caK))).r, sceneColor.sample(suv).g, sceneColor.sample(suv.sub(dc.mul(caK))).b);
-    if (opts.godRays) col = col.add(godRays());
+    if (opts.godRays) col = col.add(godRays()).add(skyRays());
     if (opts.bloom) col = col.add(bloom(vec4(col, 1), 0.28, 0.45, 0.9).rgb);
     const mapped = renderOutput(vec4(col, 1));
     const aa = fxaa(vec4(grade(mapped.rgb), 1));
@@ -302,8 +314,8 @@ async function main() {
 
   const pointer = new THREE.Vector2(9, 9);
   let pointerIn = false;
-  renderer.domElement.addEventListener('pointermove', (e) => { pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); pointerIn = true; });
-  renderer.domElement.addEventListener('pointerleave', () => { pointerIn = false; });
+  addEventListener('pointermove', (e) => { pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); pointerIn = true; });
+  document.addEventListener('pointerleave', () => { pointerIn = false; });
   renderer.domElement.addEventListener('pointerdown', () => director.stop());
   renderer.domElement.addEventListener('wheel', () => director.stop(), { passive: true });
   const raycaster = new THREE.Raycaster();
@@ -338,6 +350,8 @@ async function main() {
     camera, controls, uFade, uLetterbox, school, tuna, breachFocus, sharks, blue, hump, turtles, bloomClusters, reefTop,
     onChange: (on) => { $('cine').classList.toggle('on', on); $('cine').textContent = on ? 'Cinematic ● ON' : 'Cinematic'; },
   });
+
+  const story = LAB ? null : new Story({ camera, tuna, glyph, drips, G: glyphInfo, setSun: (d, a) => setSun(d, a), captions: document.querySelectorAll('.cap') });
 
   let camTween = null;
   const presets = {
@@ -375,8 +389,8 @@ async function main() {
   $('shadows').addEventListener('change', (e) => { sun.shadow.intensity = e.target.checked ? 1 : 0; sun.shadow.autoUpdate = e.target.checked; sun.shadow.needsUpdate = true; });
   $('panelHead').addEventListener('click', () => $('panel').classList.toggle('collapsed'));
 
-  function setSun(deg) {
-    const el = THREE.MathUtils.degToRad(deg), az = 0.9;
+  function setSun(deg, az = 0.9) {
+    const el = THREE.MathUtils.degToRad(deg);
     U.sunDir.value.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)).normalize();
     const warm = 1 - THREE.MathUtils.smoothstep(Math.sin(el), 0.05, 0.5);
     U.sunColor.value.setRGB(1, THREE.MathUtils.lerp(0.96, 0.62, warm), THREE.MathUtils.lerp(0.9, 0.38, warm));
@@ -396,10 +410,10 @@ async function main() {
   }
   addEventListener('resize', onResize);
 
-  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, env, sun, opts, buildPost };
+  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, glyph, glyphInfo };
 
   // ?debug: velocity arrows (true travel direction) to verify each model faces forward
-  const debug = new URLSearchParams(location.search).has('debug');
+  const debug = params.has('debug');
   const arrows = [];
   if (debug) {
     for (const o of [...sharks.map((s) => s.obj), ...turtles.map((t) => t.obj), blue, hump]) {
@@ -429,7 +443,7 @@ async function main() {
   statusEl.textContent = 'Compiling shaders…';
   await renderer.compileAsync(scene, camera);
   loaderEl.classList.add('hidden');
-  if (!new URLSearchParams(location.search).has('free')) director.start();
+  if (LAB && !params.has('free')) director.start();
 
   // ------------------------------------------------------------------ loop
   let last = performance.now(), t = 0;
@@ -444,7 +458,7 @@ async function main() {
     U.time.value = t;
 
     // school & predators
-    schoolGoal(t, tuna.u.goal.value);
+    if (!story) schoolGoal(t, tuna.u.goal.value);
     schoolCenter.copy(tuna.u.goal.value);
     breachFocus.lerp(breachTarget.lengthSq() ? breachTarget : tuna.u.goal.value, 1 - Math.exp(-dt * 0.8));
     reef.u.goal.value.set(Math.cos(t * 0.03 + 2) * 12, reefTop + 1, Math.sin(t * 0.04) * 12);
@@ -460,7 +474,8 @@ async function main() {
     for (const a of animated) a.userData.mixer.update(dt);
 
     // camera
-    if (director.active) director.update(dt, t);
+    if (story) story.update(dt, t);
+    else if (director.active) director.update(dt, t);
     else {
       if (camTween) {
         camTween.k = Math.min(1, camTween.k + dt / 2.2);
@@ -512,6 +527,10 @@ async function main() {
     uCamWorld.value.copy(camera.matrixWorld);
     uProjInv.value.copy(camera.projectionMatrixInverse);
     uCamPos.value.copy(camera.position);
+    const sunNdc = tmpV.copy(camera.position).addScaledVector(U.sunDir.value, 4000).project(camera);
+    const facing = camera.getWorldDirection(fwdV).dot(U.sunDir.value);
+    uSunUV.value.set(sunNdc.x * 0.5 + 0.5, 0.5 - sunNdc.y * 0.5);
+    uSunVis.value = facing > 0 ? THREE.MathUtils.smoothstep(facing, 0.2, 0.6) * (1 - THREE.MathUtils.smoothstep(Math.hypot(sunNdc.x, sunNdc.y), 1.2, 2.2)) : 0;
 
     post.render();
 

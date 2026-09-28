@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu';
 import {
   Fn, If, Loop, uniform, uint, float, vec3, vec4, instancedArray, instanceIndex, hash, attribute,
   normalLocal, normalize, cross, dot, length, max, clamp, pow, sin, cos, mix, smoothstep, select,
-  inverseSqrt, abs, sign, floor,
+  inverseSqrt, abs, sign, floor, fract,
 } from 'three/tsl';
 import { U, WATER_Y } from './shared.js';
 
@@ -15,12 +15,21 @@ const MAX_PREDATORS = 3;
 export class FishSwarm {
   constructor({ geometry, materials, maxCount, count, center, half, size = [1, 1], speed = [2, 6],
     swim = { amp: 0.1, waveK: 3.2, freq: 1.2, base: 4 }, neighbour = 6, separation = 1.6,
-    weights = { sep: 3.0, ali: 1.4, coh: 0.9, goal: 1.2, bound: 5, pred: 30, ray: 26 }, seed = 0, jumpers = 0 }) {
+    weights = { sep: 3.0, ali: 1.4, coh: 0.9, goal: 1.2, bound: 5, pred: 30, ray: 26 }, seed = 0, jumpers = 0,
+    targets = null }) {
     this.maxCount = maxCount;
     this.jumpers = jumpers;
     this.pos = instancedArray(maxCount, 'vec4'); // xyz + swim phase
     this.vel = instancedArray(maxCount, 'vec4'); // xyz + speed
     this.state = instancedArray(Math.max(jumpers, 1), 'vec4'); // mode, crossX, crossZ, crossTime
+    // scripted flights: targets = Float32Array(maxCount*4). w < 0: school only.
+    // 0 <= w < 1: "inside" fish, xyz = spot inside the water glyph, w = launch delay on `form`.
+    // w >= 10: "hoop" fish leaping through the hole on a loop, xyz = lane jitter, w-10 = loop phase.
+    this.formation = !!targets;
+    if (targets) {
+      this.target = instancedArray(targets, 'vec4');
+      this.origin = instancedArray(maxCount, 'vec4'); // last schooling position (launch point)
+    }
 
     this.u = {
       count: uniform(count, 'uint'),
@@ -49,6 +58,9 @@ export class FishSwarm {
       jumpDepth: uniform(9.0), // only fish shallower than this start a run
       jumpSpeed: uniform(12.5),
       jumpRadius: uniform(14), // only fish near the school centre breach (keeps the action framed)
+      // formation (scroll-scrubbed): form 0 = all schooling, 1 = every fish holding its target
+      form: uniform(0), formSpan: uniform(0.5), lift: uniform(0),
+      hoop: uniform(0), hole: uniform(new THREE.Vector3()), hoopPeriod: uniform(7), hoopAir: uniform(0.55), hoopReach: uniform(13),
     };
     this.frame = 0;
     this._buildCompute(seed);
@@ -70,9 +82,67 @@ export class FishSwarm {
       if (JUMPERS) If(i.lessThan(uint(JUMPERS)), () => { S.element(i).assign(vec4(0, 0, 0, -100)); });
     })().compute(this.maxCount);
 
+    const FORM = this.formation;
+    const TG = this.target, OR = this.origin;
+
     this.updateNode = Fn(() => {
       const idx = instanceIndex;
-      If(idx.lessThan(u.count), () => {
+
+      // Scripted flights are pure functions of (launch point, s), so scrubbing the scroll rewinds
+      // exactly. The launch point is wherever the fish was schooling when s left 0.
+      const finish = (pos, dir) => {
+        const Pi = P.element(idx), Vi = Vb.element(idx);
+        if (JUMPERS) {
+          // surface crossings feed the splash system (same contract as breaching)
+          If(idx.lessThan(uint(JUMPERS)), () => {
+            const St = S.element(idx);
+            St.x.assign(0);
+            const oldY = Pi.y;
+            If(oldY.lessThan(WATER_Y).and(pos.y.greaterThanEqual(WATER_Y)).or(oldY.greaterThanEqual(WATER_Y).and(pos.y.lessThan(WATER_Y))), () => {
+              St.assign(vec4(0, pos.x, pos.z, U.time));
+            });
+          });
+        }
+        const phase = Pi.w.add(u.dt.mul(u.maxSpeed.mul(u.freq).add(u.baseFreq))).mod(628.3185);
+        Pi.assign(vec4(pos, phase));
+        Vi.assign(vec4(dir.mul(u.maxSpeed), u.maxSpeed));
+      };
+
+      // "inside": swim up into the water glyph and mill there, carried by its lift
+      const flyInside = (T, s) => {
+        const O = OR.element(idx).xyz;
+        const h1 = hash(idx.add(uint(seed + 701))), h2 = hash(idx.add(uint(seed + 1709))), h3 = hash(idx.add(uint(seed + 2903)));
+        const Tw = T.xyz.add(vec3(0, u.lift, 0));
+        const e = s.mul(s).mul(float(3).sub(s.mul(2)));
+        const P1 = vec3(mix(O.x, Tw.x, 0.6), mix(O.y, Tw.y, 0.3), mix(O.z, Tw.z, 0.6));
+        const B = mix(mix(O, P1, e), mix(P1, Tw, e), e);
+        const dB = P1.sub(O).mul(float(1).sub(e)).add(Tw.sub(P1).mul(e));
+        const a = U.time.mul(h1.mul(0.5).add(0.45)).add(h2.mul(6.283));
+        const r = h3.mul(0.5).add(0.3);
+        const off = vec3(cos(a).mul(r.mul(2.2)), sin(a.mul(2)).mul(0.2), sin(a).mul(r));
+        const dOff = vec3(sin(a).negate().mul(2.2), cos(a.mul(2)).mul(0.3), cos(a));
+        const hk = smoothstep(0.6, 1, s);
+        finish(B.add(off.mul(hk)), normalize(mix(normalize(dB.add(vec3(0, 0.0001, 0))), normalize(dOff), hk).add(vec3(0.0001, 0, 0))));
+      };
+
+      // "hoop": ballistic leap through the hole (either direction), easing in from the school
+      const flyHoop = (T, s) => {
+        const O = OR.element(idx).xyz;
+        const dirZ = select(T.z.greaterThan(0), float(1), float(-1));
+        const x = u.hole.x.add(T.x);
+        const apex = u.hole.y.add(T.y).add(u.lift);
+        const zs = u.hoopReach.mul(dirZ);
+        const y0 = float(-2.5);
+        const k = s.mul(2).sub(1);
+        const arc = vec3(x, mix(y0, apex, float(1).sub(k.mul(k))), mix(zs, zs.negate(), s));
+        const dArc = vec3(0, apex.sub(y0).mul(k).mul(-4), zs.mul(-2));
+        const blend = smoothstep(0, 0.18, s);
+        const pos = mix(O, arc, blend);
+        const dir = normalize(mix(arc.sub(O).add(vec3(0, 0.0001, 0)), dArc, blend).add(vec3(0.0001, 0, 0)));
+        finish(pos, dir);
+      };
+
+      const simulate = () => {
         const Pi = P.element(idx), Vi = Vb.element(idx);
         const pos = Pi.xyz.toVar(), vel = Vi.xyz.toVar();
         const mode = float(0).toVar();
@@ -201,6 +271,18 @@ export class FishSwarm {
         phase = select(phase.greaterThan(628.3185), phase.sub(628.3185), phase);
         Pi.assign(vec4(pos, phase));
         Vi.assign(vec4(vel, spd));
+        if (FORM) OR.element(idx).assign(vec4(pos, 0));
+      };
+
+      If(idx.lessThan(u.count), () => {
+        if (!FORM) return simulate();
+        const T = TG.element(idx);
+        const ph = fract(U.time.div(u.hoopPeriod).add(T.w));
+        If(T.w.greaterThanEqual(10).and(u.hoop.greaterThan(0.5)).and(ph.lessThan(u.hoopAir)), () => {
+          flyHoop(T, ph.div(u.hoopAir));
+        }).ElseIf(T.w.greaterThanEqual(0).and(T.w.lessThan(1)).and(u.form.greaterThan(T.w)), () => {
+          flyInside(T, clamp(u.form.sub(T.w).div(u.formSpan), 0, 1));
+        }).Else(simulate);
       });
     })().compute(this.maxCount);
   }

@@ -49,7 +49,30 @@
   #help { position: fixed; left: 14px; bottom: 12px; color: var(--dim); font-size: 12px; z-index: 10; text-shadow: 0 1px 2px #000; pointer-events: none; }
   #help b { color: var(--text); font-weight: 600; }
   @media (max-width: 600px) { #panel { width: calc(100vw - 28px); } #help { display: none; } }
+
+  /* ---- story mode (default; ?lab restores the playground panel) */
+  html.story, html.story body { overflow-x: hidden; overflow-y: auto; height: auto; }
+  html.story canvas { position: fixed; inset: 0; pointer-events: none; }
+  html.story #panel, html.story #help { display: none; }
+  #scrollspace { display: none; }
+  html.story #scrollspace { display: block; height: 900vh; }
+  .cap { display: none; position: fixed; left: 0; right: 0; z-index: 5; text-align: center; pointer-events: none; opacity: 0;
+    color: #f4fbff; text-shadow: 0 2px 24px rgba(0, 20, 30, .55); will-change: opacity, transform; }
+  html.story .cap { display: block; }
+  .cap small { display: block; font: 600 12px/1 "Inter", system-ui, sans-serif; letter-spacing: .5em; text-transform: uppercase; opacity: .85; margin-bottom: 18px; }
+  .cap h1, .cap h2 { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 500; margin: 0; letter-spacing: .01em; }
+  .cap h1 { font-size: clamp(44px, 7vw, 104px); line-height: .98; }
+  .cap h2 { font-size: clamp(30px, 4.2vw, 60px); line-height: 1.05; }
+  .cap p { font: 500 11px/1 "Inter", system-ui, sans-serif; letter-spacing: .4em; text-transform: uppercase; margin-top: 34px; opacity: .8; }
+  .cap-hero { top: 34vh; }
+  .cap-mid { top: 42vh; }
+  .cap-end { bottom: 7vh; }
+  .cap-end h2 { background: linear-gradient(180deg, #fff3cf, #e0a943 60%, #b87a1f); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
+    filter: drop-shadow(0 2px 16px rgba(80, 40, 0, .45)); }
 </style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@500;600&display=swap" rel="stylesheet">
 <script type="importmap">
 {
   "imports": {
@@ -92,6 +115,11 @@
     </div>
   </div>
 </div>
+<div class="cap cap-hero" data-in="-0.1" data-out="0.12"><small>Thai Union</small><h1>Fifty years<br>of the open ocean</h1><p>Scroll</p></div>
+<div class="cap cap-mid" data-in="0.14" data-out="0.28"><h2>It all begins beneath the surface</h2></div>
+<div class="cap cap-mid" data-in="0.32" data-out="0.47"><h2>Rising, together</h2></div>
+<div class="cap cap-end" data-in="0.9" data-out="1.5"><small>1977 — 2027</small><h2>Thai Union · Fifty Years</h2></div>
+<div id="scrollspace"></div>
 <div id="help"><b>Drag</b> orbit · <b>Wheel</b> zoom · <b>WASD / QE</b> swim · <b>Move cursor</b> through the school to scatter it · <b>Click</b> the scene to take the camera</div>
 
 <script type="module" src="./src/main.js"></script>
