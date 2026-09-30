@@ -5,7 +5,7 @@ import {
   Fn, If, uniform, float, vec2, vec3, attribute, varying, sin, cos, normalize, length, dot, max, min, pow,
   mix, smoothstep, exp, saturate, reflect, refract, clamp, screenUV, positionView, positionWorld, cameraPosition,
   viewportTexture, viewportDepthTexture, perspectiveDepthToViewZ, cameraNear, cameraFar, texture,
-  mx_noise_float, color, bumpMap,
+  mx_noise_float, color, bumpMap, abs,
 } from 'three/tsl';
 import { U, WATER_Y, SEABED_BASE, skyColor, underwaterColor, causticLight, causticTex } from './shared.js';
 
@@ -33,11 +33,11 @@ export const WAVES = (() => {
 const DETAIL = (() => {
   const r = rng(99), out = [];
   let L = 7;
-  for (let i = 0; i < 10; i++) {
-    const a = WIND + (r() - 0.5) * 3.2;
+  for (let i = 0; i < 5; i++) {
+    const a = WIND + (r() - 0.5) * 2.4;
     const k = (Math.PI * 2) / L;
-    out.push({ dx: Math.cos(a), dz: Math.sin(a), L, k, w: Math.sqrt(G * k), A: L * 0.0075, phase: r() * 6.283 });
-    L *= 0.74;
+    out.push({ dx: Math.cos(a), dz: Math.sin(a), L, k, w: Math.sqrt(G * k), A: L * 0.005, phase: r() * 6.283 });
+    L *= 0.66;
   }
   return out;
 })();
@@ -144,53 +144,59 @@ export function createOcean() {
     const out = vec3(0).toVar();
 
     If(U.under.lessThan(0.5), () => {
-      // ---------------- seen from above ----------------
-      const Nf = normalize(mix(N, vec3(0, 1, 0), smoothstep(200, 2500, d))); // calm far normals (anti-shimmer)
+      // ---------------- seen from above (stylised) ----------------
+      const Nf = normalize(mix(N, vec3(0, 1, 0), smoothstep(120, 1600, d))); // calm far normals (no shimmer)
       const R = reflect(V.negate(), Nf);
       const Rup = normalize(vec3(R.x, max(R.y, 0.01), R.z));
       const NdV = saturate(dot(Nf, V));
-      const fres = float(0.02).add(pow(float(1).sub(NdV), 5).mul(0.98));
-      const refl = skyColor(Rup, true);
+      const fres = smoothstep(0.0, 1.0, pow(float(1).sub(NdV), 4)).mul(0.85).add(0.03);
+      const refl = skyColor(Rup, false);
+      const lit = U.sunIntensity.mul(0.85).add(0.15);
 
-      // screen-space refraction with Beer–Lambert absorption through the water column
-      const ruv = clamp(screenUV.add(Nf.xz.mul(0.02).div(max(d.mul(0.05), 1))), 0.001, 0.999);
+      // two-tone body: bright turquoise looking down, deep teal toward grazing angles
+      const body = mix(vec3(0.004, 0.09, 0.16), vec3(0.02, 0.42, 0.5), smoothstep(0.05, 0.75, NdV)).mul(lit);
+      // screen-space refraction keeps fish just under the surface visible
+      const ruv = clamp(screenUV.add(Nf.xz.mul(0.015).div(max(d.mul(0.05), 1))), 0.001, 0.999);
       const behind = viewportTexture(ruv, null, sceneCopy).rgb;
       const sceneZ = perspectiveDepthToViewZ(viewportDepthTexture(ruv).x, cameraNear, cameraFar);
-      const thick = max(positionView.z.sub(sceneZ), 0).add(0.2);
-      const trans = exp(vec3(0.3, 0.05, 0.034).mul(thick).negate());
-      const scatter = mix(U.mid, U.shallow, 0.45).mul(U.sunIntensity.mul(0.9).add(0.1));
-      const refr = behind.mul(trans).add(scatter.mul(float(1).sub(trans)));
+      const thick = max(positionView.z.sub(sceneZ), 0);
+      const see = exp(thick.mul(-0.22)).mul(smoothstep(0.1, 0.5, NdV));
+      const water = mix(body, behind, see.mul(0.8));
 
-      // subsurface glow on crests facing away from the sun
-      const crest = saturate(vHeight.mul(0.35).add(0.35));
-      const back = pow(saturate(dot(normalize(vec3(V.x.negate(), 0.2, V.z.negate())), vec3(L.x, 0, L.z).normalize())), 3);
-      const sss = U.shallow.mul(U.sunColor).mul(crest.mul(back).mul(0.55).add(crest.mul(0.08))).mul(U.sunIntensity);
+      // crest glow: wave tops light up turquoise / warm when the sun is behind them
+      const crest = smoothstep(-0.1, 0.9, vHeight);
+      const back = pow(saturate(dot(vec3(V.x.negate(), 0, V.z.negate()).normalize(), vec3(L.x, 0, L.z).normalize())), 2);
+      const glow = mix(vec3(0.05, 0.6, 0.62), U.sunColor.mul(vec3(1.0, 0.75, 0.45)), back.mul(0.6)).mul(crest.mul(back.mul(0.7).add(0.15))).mul(lit);
 
-      // sun glints
-      const spec = pow(max(dot(R, L), 0), 1100).mul(90).add(pow(max(dot(R, L), 0), 110).mul(1.2));
+      // stylised sun path: soft sheen + crisp star glints
+      const rl = max(dot(R, L), 0);
+      const sheen = pow(rl, 60).mul(1.1);
+      const glint = smoothstep(0.9975, 0.9992, rl).mul(26);
 
-      // whitecaps from Gerstner Jacobian, broken up by a scrolling pattern
-      const pat = texture(causticTex, vWorld.xz.mul(0.09).add(vec2(t.mul(0.01), 0))).r;
-      const foamRaw = float(1).sub(smoothstep(0.12, 0.65, vJac)).mul(smoothstep(0.0, 0.3, vHeight));
-      const foam = saturate(foamRaw.mul(1.6).sub(float(1).sub(pat).mul(0.7))).mul(float(1).sub(smoothstep(300, 900, d)));
-      const foamCol = vec3(0.92, 0.95, 0.97).mul(U.sunIntensity.mul(saturate(dot(Nf, L)).mul(0.7).add(0.3)));
+      // crisp foam: thresholded pattern on steep crests
+      const pat = texture(causticTex, vWorld.xz.mul(0.07).add(vec2(t.mul(0.012), t.mul(0.006)))).r;
+      const foamRaw = float(1).sub(smoothstep(0.2, 0.7, vJac)).mul(smoothstep(0.1, 0.5, vHeight));
+      const foam = smoothstep(0.45, 0.55, foamRaw.add(pat.mul(0.6)).sub(0.35)).mul(float(1).sub(smoothstep(150, 600, d)));
+      const foamCol = vec3(0.95, 0.98, 1.0).mul(lit);
 
-      let c = mix(refr.add(sss), refl, fres).add(U.sunColor.mul(spec).mul(U.sunIntensity).mul(float(1).sub(foam)));
-      c = mix(c, foamCol, foam);
-      const haze = float(1).sub(exp(d.mul(-0.00022)));
+      let c = mix(water.add(glow), refl, fres).add(U.sunColor.mul(sheen.add(glint)).mul(U.sunIntensity).mul(float(1).sub(foam)));
+      c = mix(c, foamCol, foam.mul(0.9));
+      const haze = float(1).sub(exp(d.mul(-0.00028)));
       out.assign(mix(c, skyColor(normalize(vec3(V.x.negate(), 0.015, V.z.negate())), false), haze));
     }).Else(() => {
-      // ---------------- seen from below: Snell's window + total internal reflection ----------------
+      // ---------------- seen from below: soft, widened Snell's window (stylised) ----------------
       const I = V.negate();
-      const Nd = N.negate();
-      const T = refract(I, Nd, 1.333);
-      const tir = float(1).sub(smoothstep(0.0, 0.02, dot(T, T)));
-      const cosI = saturate(dot(I.negate(), Nd));
-      const edge = smoothstep(0.64, 0.8, float(1).sub(cosI.mul(cosI)).mul(1.777)); // brighten rim of the window
-      const through = skyColor(normalize(T.add(vec3(0, 0.0001, 0))), true).mul(1.25).add(U.sunColor.mul(pow(max(dot(T, L), 0), 400).mul(30)));
-      const reflUnder = underwaterColor(normalize(reflect(I, Nd))).mul(0.9);
-      let c = mix(through.mul(float(1).sub(edge.mul(0.5))), reflUnder, tir);
-      const fogAmt = float(1).sub(exp(d.mul(-0.021)));
+      const Nd = normalize(mix(N, vec3(0, 1, 0), 0.5)).negate(); // calmer normals from below
+      const cosI = saturate(dot(I, Nd.negate()));
+      const eta = 1.18; // < 1.333: a wider window so the sky reads from shallower angles
+      const k = float(1).sub(float(eta * eta).mul(float(1).sub(cosI.mul(cosI))));
+      const win = smoothstep(0.0, 0.3, k);
+      const T = refract(I, Nd, eta);
+      const through = skyColor(normalize(T.add(vec3(0, 0.02, 0))), true).mul(1.15).add(U.sunColor.mul(pow(max(dot(normalize(T.add(vec3(0, 0.02, 0))), L), 0), 300).mul(20)));
+      const ripple = texture(causticTex, vWorld.xz.mul(0.05).add(vec2(t.mul(0.01), t.mul(-0.008)))).r;
+      const mirror = mix(U.shallow.mul(0.9), U.shallow.mul(1.6).add(0.02), ripple.mul(0.5)).mul(U.sunIntensity.mul(0.8).add(0.2));
+      const c = mix(mirror, through, win).add(U.shallow.mul(smoothstep(0.3, 0.0, abs(k.sub(0.02))).mul(0.6))); // bright rim at the window edge
+      const fogAmt = float(1).sub(exp(d.mul(-0.018)));
       out.assign(mix(c, underwaterColor(I), fogAmt));
     });
     return out;

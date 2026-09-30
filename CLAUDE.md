@@ -4,20 +4,26 @@ Scroll-driven, cinematic brand experience for **Thai Union's 50th anniversary (1
 internal sales pitch / mock-up (see `HANDOFF.md` for vision, status and next steps).
 Underwater world (GPU tuna school hunted by sharks, whales, turtles, bioluminescent jellies,
 procedural ocean/sky/seabed, particles, colour-graded post) → camera rises out of the sea →
-a **"50" sculpted from golden water** rises from the ocean under a golden-hour sun and god rays,
-with tuna leaping through it and swimming inside it.
+**tentacles of water** rise from the sea braided like a vortex, unfurl, and their tips **draw a monoline "50"**
+(glimpses of golden thread spiral around them), at golden hour, while tuna leap across the camera (a few through the 0).
 Built on **three.js r180 WebGPU renderer + TSL** (node shading language).
 
 ## Hard requirements (from the owner)
 
 - **100% WebGPU.** No WebGL fallback. `main.js` refuses to run if `renderer.backend.isWebGPUBackend`
   is false. Do not add `forceWebGL` or a fallback path.
-- **Spectacle first.** It's a pitch: extravagant, over-the-top visuals matter most. Performance is
-  secondary but keep it presentable — ~2000 tuna runs on a MacBook Air M1 and that's "good enough".
+- **Spectacle first, but smooth.** It's a pitch: extravagant visuals, yet it must stay fluid on mid-range hardware.
 - **At least 200 tuna** swimming as a swarm (slider min 200; default 2000; max 4096). Simulation stays
   on the GPU; each creature system is one instanced draw.
-- **The "50" is made of water (golden water + god rays), NOT of fish.** A tuna-shaped 50 was tried and
-  rejected as uncanny. Tuna are accents: normal breaching, leaping through/past the 50, a few swimming inside it.
+- **The "50" is water, NOT fish** (a tuna-shaped 50 was rejected as uncanny). Reference look: glossy translucent
+  blue **water tentacles** with glowing rims rising from the sea (owner's reference image, "tentacle + vortex").
+  **Multiple streams fly and forge the 50, smooth and seamless — nothing pops in randomly.** **Not all gold**:
+  only glimpses of golden thread. No brand label text on screen ("Thai Union" labels removed as unprofessional).
+- **Tuna**: most leap around / across / over the camera; only a few leap through the hole of the 0.
+- **Must not lag on a mid-range device** (an M1 Air "exploded" on the old ray-marched 50 — never again).
+  No full-screen ray marching; prefer particles + cheap shading. Check fps at every story point.
+- **Ocean is stylised** (clean two-tone water, crisp foam/glints), and the sky must be visible from underwater.
+  Don't spend effort on the seabed or underwater caustics.
 - **Fully procedural ocean** (waves, sky, seabed, caustics, foam) and procedural 50. Only creatures/reef
   pieces come from GLB assets. No pre-rendered video, no AI video.
 - Style target: cinematic, clear tropical turquoise water (Abzû-like) underwater; warm golden hour above.
@@ -42,6 +48,7 @@ Modes / URL flags:
 - default — **story mode**: page scrolls (900vh spacer), canvas fixed, captions overlaid, no UI panel.
 - `?lab` — the old playground: slider panel, orbit camera, looping shot director.
 - `?lab&free` — lab without the director (free orbit camera).
+- `?noauto` — disable dynamic resolution (use for screenshots/perf comparisons).
 - `?debug` — velocity arrows on tuna, a reef fish, sharks, turtles and whales (verify facing).
 
 Browser: current Chrome/Edge (WebGPU). The page shows an error panel if WebGPU is unavailable.
@@ -51,8 +58,9 @@ Browser: current Chrome/Edge (WebGPU). The page shows an error panel if WebGPU i
 ```
 index.html          story captions (.cap, data-in/data-out = progress window), scroll spacer, lab panel, import map, fonts
 src/main.js         bootstrap, asset loading/placement, post-processing (underwater + sky god rays), UI, main loop
-src/story.js        Story: scroll progress -> camera, sun, school, glyph rise, tuna stunts, captions; flightTargets()
-src/glyph.js        bakeGlyph (text -> SDF texture + hole/anchors/inside points), createWaterGlyph (ray-marched water 50), createGlyphDrips
+src/story.js        Story: scroll progress -> camera, sun, school, tentacles, tuna leap gates, captions; flightTargets()
+src/tentacles.js    createWaterTentacles: the water 50 — CPU-built tentacle paths -> float texture -> instanced water tubes,
+                    gold thread helices, root foam; also exports the 0's hole for the hoop tuna
 src/shared.js       global uniforms U, palette, baked caustic texture, sky, underwater colour, fog, IBL env
 src/ocean.js        Gerstner ocean surface (polar grid), sky dome, seabed (+ CPU wave height query)
 src/swarm.js        FishSwarm: compute-shader boids + breach state machine + scripted flights (inside/hoop) + instanced swim-wave rendering
@@ -60,7 +68,7 @@ src/particles.js    Splash (spray + foam, driven by the swarm `state` buffer), m
 src/jellies.js      procedural bioluminescent jellyfish bloom (generated geometry, GPU animated)
 src/vegetation.js   procedural seagrass meadows (instanced blades, vertex sway)
 src/creatures.js    whale flex shader, animated (skinned) model wrapper, SwimPath, Hunter (shark AI), scatterInstanced
-src/models.js       GLTF loader (+ KHR_materials_pbrSpecularGlossiness plugin), bakeModel, axis canonicalisation, material conversion
+src/models.js       GLTF loader (+ spec/gloss plugin), bakeModel, axis canonicalisation, simplifyGeometry (meshoptimizer), material conversion
 src/director.js     lab-mode cinematic camera: shot list, fade cuts, letterbox, shot choreography
 *.glb               assets (Sketchfab exports) — see Assets
 ```
@@ -73,15 +81,17 @@ All state is a pure function of p (plus time for idle motion), so scrolling back
 | p | What happens |
 |---|---|
 | 0 – 0.30 | Underwater. Camera arcs around the school at y≈-9 (radius 26). Hero caption. |
-| 0.22 – 0.46 | School goal gathers under the glyph (y -4.5). |
-| 0.30 – 0.50 | Camera ascends (0,-9,26) → (0,5,50), breaks the surface ~0.43, tilts up to the glyph. |
-| 0.40 – 0.66 | Sun: 55° / az 0.9 (midday) → 9° / az π-0.1 (golden hour, behind the 50 as seen from +z). |
-| 0.44 – 0.62 | "Inside" tuna swim into the (still submerged) glyph. |
-| 0.48 – 0.68 | Glyph rises from lift -(height+4) to 0; drips strong 0.5–0.7, then a trickle. |
-| 0.50 – 0.78 | Liquid tendrils join glyph to sea; snap off 0.71–0.78. |
-| 0.50 – 1.00 | Above water: camera arcs (a 0→-0.3 rad) and pushes in (r 50→42), looks at glyph centre. |
-| > 0.72 | "Hoop" tuna loop-leap through the hole of the 0. |
-| 0.90 – 1 | End caption "1977 — 2027 / Thai Union · Fifty Years". |
+| 0.22 – 0.46 | School goal gathers to (0, -4.5, 18) — under the leap band in front of the 50. |
+| 0.30 – 0.50 | Camera ascends (0,-9,26) → (0,5,50), breaks the surface ~0.43. |
+| 0.40 – 0.66 | Sun: 55° / az 0.9 → 7° / az 0.42-π (golden hour, left of the 50). Az swings *behind the camera* so the sun never crosses the frame. |
+| 0.43 – 0.46 | Tentacles fade in (`u.visible`). `form = range(p, 0.44, 0.92)` → `tentacles.userData.update(form, t)`. |
+| form 0 – 0.38 | Six tentacles grow ~20 m out of the sea, braided around one rising axis (vortex), staggered starts. |
+| form 0.36 – 0.72 | Braid → final shapes (unfurl), sway fades. |
+| form 0.42 – 0.90 | Growth continues: each stroke tentacle's rounded tip travels along its stroke and draws it. |
+| form 0.86 – 1 | Stroke tentacles' stems retract up into the letters (rounded tail) → the 50 floats; side tentacles stay. |
+| > 0.50 | "Free" tuna leaps on (across / over / away from the camera). |
+| > 0.84 | "Hoop" tuna leaps through the 0 on. |
+| 0.50 – 1.00 | Camera arcs (a 0→-0.3 rad) and pushes in (r 50→42); look-at rises from the braid (y 4) to the 50's centre (y 13). |
 
 ## Stage size
 
@@ -93,8 +103,8 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
 - Sharks: orbit 20 m around the school, lunge 1.9 s, leashed at 0.8×STAGE.
 - Whale loops: humpback 44×34 m, blue whale 62×50 m (predator slot 2).
 - Corals 160 instanced at r 14–84 m, seagrass 30k blades everywhere, bubble vents 12–47 m.
-- Glyph: 40 m wide × ~21.6 m tall × 5 m thick, centred x=0,z=0, bottom at y=1.8 when risen.
-  Hole of the "0" and its size are measured from the canvas (`G.hole`, `G.holeSize`).
+- The 50: monoline strokes at z=0, x −19..19, y 2..24 (tube radius 1.75); "0" is an ellipse centre (11, 13),
+  rx 7.6, ry 10.8. Stems root at z −10..−14 (behind the letters). Side tentacles at x ±28. Tuna leap band: z 10–64.
 
 ## Architecture
 
@@ -104,19 +114,25 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
 `WATER_Y = 0`, `SEABED_BASE = -24`. `setSun(elevationDeg, azimuth = 0.9)` in `main.js` sets sun dir/colour/
 intensity + light, hemi, env intensity; story calls it every frame.
 
-### Water "50" (`glyph.js`)
-- `bakeGlyph({ text, width, bottom, thick })`: draws the text on a canvas (`900 560px "Arial Black"`),
-  downsamples to 512×320, runs a CPU Felzenszwalb EDT inside+outside → signed distance in metres
-  stored as an R16F `DataTexture` (row 0 = bottom). Also returns `hole` / `holeSize` (counter of the "0"),
-  tendril `anchors` (x of columns touching the glyph bottom), `insidePoints(n, margin)`.
-- `createWaterGlyph(G)`: a box mesh (transparent, `depthWrite:false`, renderOrder 14) whose fragment
-  ray-marches (80 steps, slab-clipped) the SDF: extruded 2D SDF with rounded edges (R=0.9) + flowing
-  `mx_noise` displacement (0.32 m) + smooth-min capsule tendrils down to the sea. Hits below y=-0.2 are discarded.
-  Shading: tetrahedral normal; Fresnel sky reflection (`skyColor`); screen-space refraction through its own
-  HalfFloat `FramebufferTexture` (so fish inside/behind show through) with thickness from a short inward march;
-  Beer–Lambert gold absorption; caustic veins; sun specular; gold rim + back-lit translucency (`glow`).
-  Uniforms (`mesh.userData.u`): `lift`, `tendril`, `glow`.
-- `createGlyphDrips(G)`: 7k procedural sprites falling from inside the letters (`lift`, `drip` 0..1 amount).
+### Water "50" (`tentacles.js`)
+- `tentacleDefs()`: 4 stroke tentacles (5: top bar + upright; 5: bowl; 0: left half; 0: right half, overlapping
+  so the 0 closes) — each = stem control points from the sea + stroke control points (`strokeFrom` = first
+  stroke point) — plus 2 decorative curling tentacles. Final shapes: centripetal Catmull-Rom, resampled by
+  arc length to SEG=256 points; `stemFrac` = stem length / total.
+- `update(form, t)` (CPU, every frame while visible, 6×256 points): braid position (helix around x=0,z=−4,
+  radius 4.2+, turning with time) lerped to the final shape by `m`; sway (fades with `m`) + breathing;
+  parallel-transport frames; radius profile (stem 2.0→1.25, stroke 1.75, decor root→tip taper, ×0.72 while
+  braiding); growth `g` with a rounded travelling tip; stem retraction with a rounded tail (`settle`).
+  Uploaded to a `DataTexture` (RGBA32F, SEG × tentacles·3 rows: pos+radius, normal+arc length, binormal+g).
+- Water tubes: one `InstancedMesh` (22 radial segments) — vertices read the texture with `textureLoad`.
+  **Triangle winding must face outward** (it was inverted once: every pixel became rim glow). Shading: screen-space
+  refraction of the scene (own HalfFloat copy) absorbed toward deep blue, flowing caustic veins up the tube
+  (kept dim — bright veins bleach the tube white), glowing cyan Fresnel rim, faint sky reflection, sun glint.
+- Gold threads: 2 thin helices per tentacle (`InstancedMesh`, radius 0.1) at 1.12× the tube radius, visible
+  only in travelling stretches (`sin` mask) → glimpses. HDR amber, bloomed.
+- Root foam: 420 sprites per tentacle churning around the texture sample 10 points up from the root.
+- Precompiled at load (`tentacles.visible = true` during `compileAsync`) so there is no hitch when it appears.
+- Cost: negligible in headless tests (60 fps cap held).
 
 ### Fish school (`swarm.js` — `FishSwarm`)
 - Storage buffers (`instancedArray`): `pos` (xyz + swim phase), `vel` (xyz + speed), `state` (jumpers only),
@@ -124,17 +140,19 @@ intensity + light, hemi, env intensity; story calls it every frame.
 - Compute boids: separation/alignment/cohesion, personal goal offsets, soft box, floor/ceiling,
   up to 3 predators (uniform vec4 xyz+radius), cursor-ray scare. Neighbour scan is exhaustive up to
   256 fish, above that a rotating strided sample of 256 (cost stays flat as count grows).
-- **Scripted flights** (`targets` Float32Array(max·4), built by `flightTargets()` in story.js):
-  - `w < 0` — plain schooling.
-  - `0 ≤ w < 1` — **inside** fish: xyz = spot inside the glyph, w = launch delay. When `form > w`,
-    s = (form-w)/formSpan; quadratic Bezier from `origin` to target(+`lift`), then milling loops.
-  - `w ≥ 10` — **hoop** fish: xyz = lane jitter (x, y, sign(z) = direction), w-10 = loop phase. While
-    `hoop` is on and fract(time/hoopPeriod + w) < hoopAir, flies a parabola through `hole` (apex = hole.y+lift),
-    easing in from its schooling position over the first 18%.
-  - Flights write `origin` only while schooling, so a fish resumes boids exactly where the flight left it.
-    Surface crossings during flights write `state` → splashes. Indices: inside 0..89, hoop 90..229 (< jumpers 256).
+- **Scripted leaps** (`targets = { launch, land }`, Float32Array(max·4) each, built by `flightTargets()` in story.js):
+  launch = (x, y, z, w): `w < 0` plain schooling; `10 ≤ w < 11` "hoop" group (gate `u.hoop`); `20 ≤ w < 21`
+  "free" group (gate `u.free`); `fract(w)` = loop phase. land = (x, y, z, apexY).
+  Each fish loops on its own period (`leapPeriod` 14 s × 0.6–1.5): schooling, then a ballistic arc launch → land
+  whose duration matches real gravity for that apex (+20%), easing in from its schooling position over the
+  first 20%. `origin` is written only while schooling, so boids resume exactly where the leap ends.
+  Surface crossings write `state` → splashes. Default: 14 hoop (idx 0–13), 70 free (idx 14–83), all < jumpers.
+  Free leaps: 60% across the view (z 10–32), 20% toward/over the camera (z 18→64, apex 8–11), 20% from under
+  the camera away toward the 50.
 - Rendering: the skinned tuna GLB is **baked to a static bind pose** (`bakeModel`), canonicalised to
-  forward=+Z, up=+Y, length 1, then drawn as ONE `InstancedMesh`. A thunniform travelling wave
+  forward=+Z, up=+Y, length 1, **simplified 6k → ~2.1k tris in story mode** (`simplifyGeometry`, meshoptimizer
+  from jsDelivr via the import map), then drawn as ONE `InstancedMesh`. Story mode uses a plain standard
+  material (lab keeps iridescence + clearcoat). Above water only the first 800 instances are drawn. A thunniform travelling wave
   (amplitude ∝ tail distance^2.4) bends the body in `positionNode`; normals are rotated with the slope.
   Orientation from velocity.
 - Breaching (only fish `idx < jumpers`, tuna uses 256): state machine
@@ -161,8 +179,8 @@ placement (4 clusters), additive glow with manual fog attenuation (`fog:false`).
 
 ### Post (`main.js`)
 `pass(scene)` → chromatic aberration → + underwater god rays (28-step march on blurred caustics, under water only)
-→ + **sky god rays** (above water: 56-sample radial blur toward the sun's screen position `uSunUV`, samples
-clamped to 2.5, mask `smoothstep(0.9, 2.2, lum)` × "open" (depth == 1: sky and the non-depth-writing glyph),
+→ + **sky god rays** (above water: 24-sample radial blur toward the sun's screen position `uSunUV`, samples
+clamped to 2.5, mask `smoothstep(0.9, 2.2, lum)` × "open" (depth == 1: sky only; fish, sea and the water tentacles occlude),
 × `uSunVis` (sun in front / near screen), × `uSkyRayK` 0.6, warm tint) → + bloom → `renderOutput` (ACES)
 → colour grade → FXAA → grain, letterbox, fade. `buildPost()` rebuilds the graph when toggles change.
 
@@ -192,22 +210,35 @@ Orientation rule: if a creature swims backwards/sideways, fix it with `CONFIG` i
 
 - Do **not** toggle `light.castShadow` at runtime in WebGPU — throws `reading 'depthTexture'` every frame.
   The Shadows toggle uses `shadow.intensity = 0` + `shadow.autoUpdate = false` instead.
-- Refraction copy textures must be `HalfFloatType` (scene target is rgba16float). Ocean and glyph each own one.
+- Refraction copy textures must be `HalfFloatType` (scene target is rgba16float).
 - The ocean grid needs a `normal` attribute even though the shader computes normals.
 - `hash()` seeds: add `uint(...)`, never raw JS numbers derived from nodes.
 - Additive materials must set `fog:false` and attenuate manually.
 - Keep the camera away from exactly `y = wave height` (clamped to ±0.35 m).
-- `main.js` already has a `G` (loaded GLTFs) — the glyph info object is `glyphInfo`.
+- `main.js` has a `G` (loaded GLTFs) — don't shadow it.
 - The HDR sun disk is ~40× the sky; anything screen-space that samples it must clamp or it whites out the frame.
+- Python's http.server occasionally resets a connection mid-load (`ERR_CONNECTION_RESET`) — just retry.
 - In story mode the canvas has `pointer-events:none` (so the page scrolls); pointer listeners are on `window`.
+
+## Ocean look (`ocean.js`, stylised)
+- Above: two-tone body (deep teal at grazing → turquoise looking down), light screen-space refraction
+  (fish under the surface), Fresnel sky reflection *without* per-pixel clouds, crest glow (turquoise, warm
+  when backlit), soft sun sheen + crisp star glints, thresholded foam; only 5 small detail waves, far normals
+  calmed from 120 m.
+- Below: widened, soft-edged Snell's window (eta 1.18 instead of 1.333, `smoothstep` on the refraction
+  discriminant), bright rim at the window edge, turquoise rippled mirror (TIR) outside it.
 
 ## Performance reference
 
-- Old build (RTX-class desktop, 1360×780): 700 tuna + 600 reef + 520 jellies ~75–90 fps; 3000 tuna ~45–75 fps.
-- Story build on the dev Mac in *headless* Chrome: ~20–27 fps at 2000 tuna (headless numbers are not
-  reliable — measure in a real window). Owner reports 2000 tuna fine on an M1 Air (old build).
-- Biggest costs: shadow map, jellies, glyph ray-march (80 steps + noise per step, full-screen-ish box),
-  sky god rays (56 taps). Render-scale slider (lab) is the escape hatch.
+Measures (story mode): pixel ratio capped at 1.5 then **dynamic resolution** (`adaptResolution`: −15% after ~1 s
+under 45 fps, down to 50%; +8% after ~3 s over 58 fps; label shows "% res"), **no shadow map** (`sun.castShadow
+= LAB`), tuna simplified + standard material, only 800 tuna drawn above water, underwater-only systems
+(seagrass, jellies, bubbles, snow, reef fish) hidden and not simulated when above water, seagrass 14k,
+snow 16k, jellies 220, reef fish 400, sky rays 24 taps.
+
+Headless Chrome on the dev Mac, 1360×780, `?noauto`, 2000 tuna: underwater ~47 fps, whole above-water act
+60 fps (capped). Before these changes: ~20 fps, and the ray-marched 50 froze an M1 Air.
+Biggest remaining cost: drawing 2000 tuna underwater (vertex-bound). Next lever: GPU culling / distance LOD.
 
 ## Testing
 
@@ -220,11 +251,12 @@ persistent headless Chrome and reuse it (headless WebGPU works on macOS/Metal):
 ```
 
 Then a puppeteer-core script (`puppeteer-core@19` works with Node 16) does
-`puppeteer.connect({ browserURL: 'http://127.0.0.1:9333' })`, reuses the first tab, waits for
+`puppeteer.connect({ browserURL: 'http://127.0.0.1:9333' })`, reuses the first tab, **`page.setCacheEnabled(false)`**
+(otherwise stale JS modules are served), loads `?noauto`, waits for
 `window.__ocean` + loader hidden, sets `__ocean.story.forceP = p` for each progress point, waits ~2.5 s,
 screenshots, collects console errors, then navigates the tab to `about:blank` and disconnects.
 Lab shots: `__ocean.director.shotIndex = n - 1; __ocean.director.next()`.
-`window.__ocean` exposes camera, controls, tuna, reef, sharks, turtles, director, story, glyph, glyphInfo,
+`window.__ocean` exposes camera, controls, tuna, reef, sharks, turtles, director, story, tentacles, opts, buildPost,
 renderer, scene and systems.
 
 Before claiming a visual change works: screenshot the affected progress points and check zero console errors.

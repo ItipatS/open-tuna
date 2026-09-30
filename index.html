@@ -66,9 +66,6 @@
   .cap p { font: 500 11px/1 "Inter", system-ui, sans-serif; letter-spacing: .4em; text-transform: uppercase; margin-top: 34px; opacity: .8; }
   .cap-hero { top: 34vh; }
   .cap-mid { top: 42vh; }
-  .cap-end { bottom: 7vh; }
-  .cap-end h2 { background: linear-gradient(180deg, #fff3cf, #e0a943 60%, #b87a1f); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
-    filter: drop-shadow(0 2px 16px rgba(80, 40, 0, .45)); }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -79,7 +76,8 @@
     "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
     "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
     "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "meshoptimizer/simplifier": "https://cdn.jsdelivr.net/npm/meshoptimizer@0.22.0/meshopt_simplifier.module.js"
   }
 }
 </script>
@@ -115,10 +113,9 @@
     </div>
   </div>
 </div>
-<div class="cap cap-hero" data-in="-0.1" data-out="0.12"><small>Thai Union</small><h1>Fifty years<br>of the open ocean</h1><p>Scroll</p></div>
+<div class="cap cap-hero" data-in="-0.1" data-out="0.12"><h1>Fifty years<br>of the open ocean</h1><p>Scroll</p></div>
 <div class="cap cap-mid" data-in="0.14" data-out="0.28"><h2>It all begins beneath the surface</h2></div>
 <div class="cap cap-mid" data-in="0.32" data-out="0.47"><h2>Rising, together</h2></div>
-<div class="cap cap-end" data-in="0.9" data-out="1.5"><small>1977 — 2027</small><h2>Thai Union · Fifty Years</h2></div>
 <div id="scrollspace"></div>
 <div id="help"><b>Drag</b> orbit · <b>Wheel</b> zoom · <b>WASD / QE</b> swim · <b>Move cursor</b> through the school to scatter it · <b>Click</b> the scene to take the camera</div>
 

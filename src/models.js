@@ -4,6 +4,7 @@ import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { materialColor, vec3, float, pow, saturate, abs, dot, normalView, positionViewDirection } from 'three/tsl';
+import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { causticLight, U } from './shared.js';
 
 // three.js dropped KHR_materials_pbrSpecularGlossiness; several of these Sketchfab exports use it.
@@ -91,6 +92,24 @@ export function bakeModel(root) {
 
   const geometry = mergeGeometries(geos, true);
   return { geometry, materials: mats };
+}
+
+// Reduce triangles per material group (meshoptimizer); vertices/UVs are kept, seams locked.
+export async function simplifyGeometry(geometry, ratio, error = 0.01) {
+  await MeshoptSimplifier.ready;
+  const pos = geometry.attributes.position.array, src = geometry.index.array;
+  const groups = geometry.groups.length ? geometry.groups : [{ start: 0, count: src.length, materialIndex: 0 }];
+  const out = [], kept = [];
+  for (const g of groups) {
+    const idx = new Uint32Array(src.subarray(g.start, g.start + g.count));
+    const [res] = MeshoptSimplifier.simplify(idx, pos, 3, Math.max(3, Math.floor((idx.length * ratio) / 3) * 3), error, ['LockBorder']);
+    kept.push({ start: out.length, count: res.length, materialIndex: g.materialIndex });
+    for (const v of res) out.push(v);
+  }
+  geometry.setIndex(out);
+  geometry.clearGroups();
+  for (const g of kept) geometry.addGroup(g.start, g.count, g.materialIndex);
+  return geometry;
 }
 
 // Longest horizontal axis = forward, world Y = up. Sign is guessed (thicker end = head) and can
