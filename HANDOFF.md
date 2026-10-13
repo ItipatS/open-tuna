@@ -82,20 +82,25 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 - **Timeline organisation**: lanes hold many clips (layers / paths) like video-editor tracks, groups fold tracks
   away, every row collapses; drop files straight onto a lane at a time; an Assets tab lists / reuses everything in
   assets/. The demo now sits in one group with 7 lanes (was 22 separate rows); story beats are in a collapsed group.
+- **3D model clips**: every `.glb` (the built-in creatures or uploads) is an asset that can be dropped on a lane and
+  keyframed (position / rotation / size / opacity, Move + Rotate gizmo), with its animation looping or scrubbed by
+  the scroll. Editor side panels are resizable (drag the edges).
+- **Docs restructured for AI agents**: CLAUDE.md is now a short index → `docs/` (ai-workflows, story-format,
+  architecture, editor, dev-server, assets, testing, gotchas). AGENTS.md points there.
 - **Creature paths have priority**: no sliding / snapping, the school ignores predators + cursor on a path, creatures
   resume their own behaviour where the path left them. Cursor scaring is off in the story by default (param).
 - Fixed: tuna leaps teleporting into the sky (fish now swim to the launch point and only leap in cycles that
   started while leaps were on); jellyfish cut off by the sea surface / poking out of the water / sliced by the
   camera; story.json save conflicts between the editor and outside edits (Claude, git) are now detected.
 - Fixed a **black-screen bug** on the live site: resizing the window wider than at load (or going fullscreen
-  on a wider screen) dropped every frame — a three r180 bug, patched in `main.js` (see CLAUDE.md → Gotchas).
+  on a wider screen) dropped every frame — a three r180 bug, patched in `main.js` (see docs/gotchas.md).
 - Underwater act: school, sharks, whales, jellies, particles, god rays; stylised Snell's window shows the sky.
 - Ascent through a stylised sea; sun swings from midday to a low golden sun left of the 50 (never crossing the frame).
 - Water tentacles: six translucent blue tubes with glowing rims braid up out of the foaming sea, unfurl,
   and four of them draw a monoline "50" with their tips (two curl beside it); stems then retract so the 50
   floats. Golden threads spiral around the water in travelling glimpses.
 - ~70 tuna leap across / over / away from the camera on staggered loops, 14 leap through the 0 once it exists.
-- Performance measures: see CLAUDE.md → Performance reference (dynamic resolution, no shadows in story,
+- Performance measures: see docs/architecture.md → Performance notes (dynamic resolution, no shadows in story,
   simplified tuna, underwater-only systems culled above water, etc.).
 
 ## Known issues / next steps (priority order)

@@ -221,7 +221,7 @@ export class Inspector {
 
   layer(el, t) {
     const { ed } = this, lt = ed.lt, world = t.space === 'world';
-    const KINDS = { image: 'Image', video: 'Video', html: 'HTML / GUI', iframe: 'Web page', text: 'Text', glass: 'Glass panel' };
+    const KINDS = { image: 'Image', video: 'Video', html: 'HTML / GUI', iframe: 'Web page', text: 'Text', glass: 'Glass panel', model: '3D model' };
     const gpu = isGPU(t);
     this.header(el, t.label || 'Layer', `${KINDS[t.kind] || t.kind} layer · ${world ? 'in the 3D world' : gpu ? 'in the scene (shader)' : 'HTML overlay'} · ${fmtTime(t.a)} → ${fmtTime(t.b)}`);
     el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
@@ -234,14 +234,24 @@ export class Inspector {
       el.append(this.select('Align', { center: 'Centre', left: 'Left', right: 'Right' }, () => t.align || 'center', (v) => { t.align = v; }));
       el.append(this.text('Colour', () => t.color ?? '#f4fbff', (v) => { t.color = v; }, { placeholder: '#f4fbff' }));
     } else if (t.kind !== 'glass') el.append(this.text(t.kind === 'iframe' ? 'Page URL' : 'File / URL', () => t.src, (v) => { t.src = v; }));
+    if (t.kind === 'model') {
+      const it = ed.app.layers.item(t.id);
+      el.append(this.num('Size (m)', () => t.w ?? 6, (v) => { t.w = v; }, { step: 0.1, min: 0.05, max: 500, dec: 2 }));
+      el.append(this.check('Flip facing', () => t.flip, (v) => { if (v) t.flip = true; else delete t.flip; }));
+      el.append(this.select('Animation', { '': `${it?.anims?.[0] ?? 'first'} (default)`, none: 'None (still)', ...Object.fromEntries((it?.anims ?? []).map((n) => [n, n])) }, () => t.anim ?? '', (v) => { if (v) t.anim = v; else delete t.anim; }));
+      el.append(this.check('Scrub with story', () => t.scrub !== false, (v) => { if (v) delete t.scrub; else t.scrub = false; }));
+      el.append(this.num('Anim speed', () => t.rate ?? 1, (v) => { t.rate = v; }, { step: 0.05, min: 0, max: 10, dec: 2 }));
+      el.append(this.select('Gizmo', { move: 'Move', rotate: 'Rotate' }, () => ed.gizmos.layerMode, (v) => { ed.gizmos.layerMode = v; }));
+      el.append(h('div', { class: 'hint' }, 'Size = its length along the way it faces (it faces +Z after loading; tick Flip facing if it swims backwards). Scrub with story: its animation follows the scroll (rewinds when scrolling back). Move / rotate it in the Scene view; keys hold position, rotation, scale and opacity.'));
+    }
     this.buttons(el,
-      t.kind === 'image' || t.kind === 'video' || t.kind === 'iframe' ? btn('Replace file…', () => lt.replace(t)) : null,
+      t.kind === 'image' || t.kind === 'video' || t.kind === 'iframe' || t.kind === 'model' ? btn('Replace file…', () => lt.replace(t)) : null,
       t.src ? this.free(btn('Open ↗', () => window.open(t.src, '_blank'))) : null,
     );
     if ((t.kind === 'image' || t.kind === 'video') && !world) {
       el.append(this.select('Render', { gpu: 'In the scene (shader effects)', dom: 'HTML overlay (plain)' }, () => t.render || 'dom', (v) => { t.render = v; if (v === 'gpu') t.depth ??= 8; }));
     }
-    if (t.kind !== 'html' && t.kind !== 'iframe') {
+    if (t.kind !== 'html' && t.kind !== 'iframe' && t.kind !== 'model') {
       el.append(this.select('Where', { screen: 'On screen (follows the camera)', world: 'In the 3D world' }, () => t.space || 'screen', (v) => {
         t.space = v;
         t.w = v === 'world' ? 8 : 30;
@@ -272,6 +282,7 @@ export class Inspector {
       el.append(h('div', { class: 'hint' }, 'The reveal plays over the Fade time at the start and end. Colour split grows when the visitor scrolls fast. Frosted glass shows the live scene behind it, blurred. Turning glass on / off rebuilds the shader (a short pause).'));
     }
 
+    if (t.kind === 'model') { /* size above */ } else {
     this.sec(el, world ? 'Size (3D)' : 'Size & stacking');
     if (world) {
       el.append(this.num('Width (m)', () => t.w ?? 8, (v) => { t.w = v; }, { step: 0.1, min: 0.1, max: 500, dec: 2 }));
@@ -288,6 +299,7 @@ export class Inspector {
         el.append(this.check('Clickable', () => t.interactive, (v) => { if (v) t.interactive = true; else delete t.interactive; }));
         el.append(h('div', { class: 'hint' }, 'Height 0 = automatic. Captions are at stack order 10 — higher goes over them. Clickable lets visitors use links / buttons / web pages (scrolling stops while the mouse is over it).'));
       }
+    }
     }
     if (t.kind === 'video') {
       this.sec(el, 'Video');
@@ -385,12 +397,13 @@ export class Inspector {
     this.header(el, `${t.label} — key`, `layer key · ${fmtTime(k.t)}`);
     el.append(this.time('Time (s)', () => k.t, (v) => { k.t = v; }));
     if (world) el.append(this.vec('Position xyz', () => (k.pos ??= [0, 8, 10])));
+    if (t.kind === 'model') el.append(this.vec('Rotation xyz (°)', () => (k.rot ??= [0, 0, 0]), { step: 1, dec: 1 }));
     else {
       el.append(this.num('X (% view)', () => k.x ?? 50, (v) => { k.x = v; }, { step: 0.5, min: -300, max: 400, dec: 2 }));
       el.append(this.num('Y (% view)', () => k.y ?? 50, (v) => { k.y = v; }, { step: 0.5, min: -300, max: 400, dec: 2 }));
     }
     el.append(this.num('Scale', () => k.s ?? 1, (v) => { k.s = v; }, { step: 0.01, min: 0.01, max: 50, dec: 3 }));
-    if (!world || t.billboard === false) el.append(this.num('Rotation (°)', () => k.r ?? 0, (v) => { k.r = v; }, { step: 1, min: -3600, max: 3600, dec: 1 }));
+    if ((!world || t.billboard === false) && t.kind !== 'model') el.append(this.num('Rotation (°)', () => k.r ?? 0, (v) => { k.r = v; }, { step: 1, min: -3600, max: 3600, dec: 1 }));
     el.append(this.num('Opacity', () => k.o ?? 1, (v) => { k.o = v; }, { step: 0.01, min: 0, max: 1, dec: 2 }));
     el.append(this.select('Ease to next', Object.fromEntries(Object.keys(EASES).map((e) => [e, e])), () => k.ease || 'smooth', (v) => { k.ease = v; }));
     this.buttons(el, this.free(btn('Go to', () => ed.setTime(k.t))), this.free(btn('Layer', () => ed.select({ kind: 'track', track: t }))), btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));

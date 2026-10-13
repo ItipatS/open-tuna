@@ -7,7 +7,7 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
   --text: #d9dee6; --dim: #8b93a0; --faint: #5d6470; --accent: #4fb8ff; --accent2: #2d6fa3;
   --play: #ff9f43; --good: #4cd17a; --warn: #f5c542; --bad: #ff5d5d;
   position: fixed; inset: 0; z-index: 30; display: grid;
-  grid-template-columns: 220px 1fr 320px; grid-template-rows: 42px 1fr var(--tl-h, 300px);
+  grid-template-columns: var(--left-w, 220px) 1fr var(--right-w, 320px); grid-template-rows: 42px 1fr var(--tl-h, 300px);
   grid-template-areas: "bar bar bar" "left view right" "tl tl tl";
   background: var(--bg); color: var(--text); font: 12px/1.35 "Inter", "Segoe UI", system-ui, sans-serif;
   user-select: none;
@@ -220,3 +220,14 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 .ed-asset .nm { padding: 4px 6px; font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ed-ahint { padding: 6px 10px 12px; font-size: 11px; color: var(--faint); line-height: 1.45; }
 #ed-left.drop, #ed-left .drop { outline: 2px dashed #f78fb3; outline-offset: -4px; }
+
+/* ---- side panel resize grips */
+/* grips sit on the editor frame at the panel edges (the panels themselves scroll) */
+.ed-vsplit { position: absolute; top: 42px; bottom: var(--tl-h, 300px); width: 8px; cursor: ew-resize; z-index: 6; }
+.ed-vsplit.l { left: calc(var(--left-w, 220px) - 4px); }
+.ed-vsplit.r { right: calc(var(--right-w, 320px) - 4px); }
+#ed.max .ed-vsplit { display: none; }
+.ed-vsplit:hover, .ed-vsplit:active { background: rgba(79, 184, 255, .35); }
+
+.ed-asset .th .bi { position: absolute; left: 4px; top: 4px; padding: 1px 5px; border-radius: 4px; background: #2d3340; color: #b9c4d0; font: 600 9px/14px Inter, system-ui, sans-serif; letter-spacing: .04em; }
+.ed-asset .th .sz { position: absolute; left: 4px; bottom: 4px; color: var(--faint); font: 10px/1 Inter, system-ui, sans-serif; }

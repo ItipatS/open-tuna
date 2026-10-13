@@ -11,6 +11,7 @@ export class SceneGizmos {
     const { scene, camera, renderer, controls, story } = ed.app;
     this.ed = ed;
     this.mode = 'pos'; // what the move gizmo edits: the key's camera position or its look target
+    this.layerMode = 'move'; // 3D model layers: 'move' | 'rotate'
     this.version = -1;
     const g = this.group = new THREE.Group();
     g.visible = false;
@@ -62,7 +63,10 @@ export class SceneGizmos {
       const tg = this.target(), p = this.proxy.position.toArray().map((v) => +v.toFixed(3));
       if (tg?.cam) (this.mode === 'look' ? tg.key.look : tg.key.pos).splice(0, 3, ...p);
       else if (tg?.path) tg.key.pos = p;
-      else if (tg?.layer && this.dragKey) this.dragKey.pos = p;
+      else if (tg?.layer && this.dragKey) {
+        if (this.tc.mode === 'rotate') { const r = this.proxy.rotation, g = THREE.MathUtils.radToDeg; this.dragKey.rot = [g(r.x), g(r.y), g(r.z)].map((v) => +v.toFixed(1)); }
+        else this.dragKey.pos = p;
+      }
       else return;
       ed.changed();
     });
@@ -78,8 +82,8 @@ export class SceneGizmos {
       const r = canvas.getBoundingClientRect();
       ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, camera);
-      const pickables = [...this.markers.filter((m) => m.visible), ...ed.app.layers.group.children.filter((m) => m.visible)];
-      const hit = ray.intersectObjects(pickables, false)[0];
+      const hit = ray.intersectObjects(this.markers.filter((m) => m.visible), false)[0]
+        ?? ray.intersectObjects(ed.app.layers.group.children.filter((m) => m.visible), true)[0]; // models: any of their meshes
       if (!hit) return;
       const lid = hit.object.userData.layerId;
       if (lid) {
@@ -193,8 +197,11 @@ export class SceneGizmos {
     const tg = this.target();
     if (tg && !ed.isLocked(ed.sel)) {
       if (!this.tc.dragging) {
-        this.proxy.position.fromArray(tg.cam ? (this.mode === 'look' ? tg.key.look : tg.key.pos)
-          : tg.path ? tg.key.pos : tg.key?.pos ?? ed.app.layers.state(tg.layer, ed.time).pos);
+        const ks = tg.layer && (tg.key ?? ed.app.layers.state(tg.layer, ed.time));
+        this.proxy.position.fromArray(tg.cam ? (this.mode === 'look' ? tg.key.look : tg.key.pos) : tg.path ? tg.key.pos : ks.pos);
+        const rot = tg.layer?.kind === 'model' ? ks.rot ?? [0, 0, 0] : [0, 0, 0], d = THREE.MathUtils.degToRad;
+        this.proxy.rotation.set(d(rot[0]), d(rot[1]), d(rot[2]), 'YXZ');
+        this.tc.setMode(tg.layer?.kind === 'model' && this.layerMode === 'rotate' ? 'rotate' : 'translate');
       }
       if (this.tc.object !== this.proxy) this.tc.attach(this.proxy);
       this.tcHelper.visible = true;

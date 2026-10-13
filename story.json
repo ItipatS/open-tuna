@@ -55,7 +55,8 @@
         { "t": 124, "pos": [-36, 1.6, 30], "look": [-20, 0, 12], "follow": 0.3, "fov": 52 },
         { "t": 132, "pos": [-34, 4.5, 40], "look": [-12, 2, 14], "follow": 0, "fov": 50 },
         { "t": 150, "pos": [-22, 7, 50], "look": [-2, 9, 2], "follow": 0, "fov": 50 }
-      ]
+      ],
+      "collapsed": true
     },
     {
       "id": "captions",
@@ -66,7 +67,8 @@
         { "a": 8.4, "b": 16.8, "size": "medium", "y": 42, "title": "It all begins beneath the surface", "sub": "" },
         { "a": 19.2, "b": 28.2, "size": "medium", "y": 42, "title": "Rising, together", "sub": "" },
         { "a": 61, "b": 69, "size": "medium", "y": 42, "title": "The journey continues", "sub": "Placeholder", "fade": 1.5 }
-      ]
+      ],
+      "collapsed": true
     },
     { "id": "group-beats", "type": "group", "label": "Story beats", "collapsed": true },
     {
@@ -146,7 +148,7 @@
       ],
       "parent": "group-beats"
     },
-    { "id": "group-demo", "type": "group", "label": "Demo — The Journey" },
+    { "id": "group-demo", "type": "group", "label": "Demo — The Journey", "collapsed": true },
     { "id": "lane-creatures", "type": "lane", "label": "Creatures", "parent": "group-demo" },
     { "id": "lane-text", "type": "lane", "label": "Text", "parent": "group-demo" },
     { "id": "lane-cards", "type": "lane", "label": "Cards", "parent": "group-demo" },
@@ -675,6 +677,7 @@
         { "t": 135, "x": 23, "y": 52, "s": 1, "r": 0, "o": 1 }
       ],
       "lane": "lane-iframe"
-    }
+    },
+    { "id": "lane-mv6j5ihs8", "type": "lane", "label": "Layers" }
   ]
 }

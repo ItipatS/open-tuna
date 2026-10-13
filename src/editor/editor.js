@@ -183,7 +183,35 @@ export class Editor {
     const split = h('div', { id: 'ed-split', title: 'Drag to resize' });
     const tlEl = h('section', { id: 'ed-tl' }, split, tlbar, this.$tlwrap);
 
-    this.$root = h('div', { id: 'ed' }, bar, left, view, this.$right, tlEl);
+    // side panels resize by dragging their inner edge (widths remembered per browser)
+    const grip = (side) => {
+      const g = h('div', { class: `ed-vsplit ${side}`, title: 'Drag to resize · double-click to reset' });
+      const save = () => {
+        try { localStorage.setItem('openTuna.panels', JSON.stringify({ l: this.$root.style.getPropertyValue('--left-w'), r: this.$root.style.getPropertyValue('--right-w') })); } catch { /* storage unavailable */ }
+      };
+      g.addEventListener('dblclick', () => { this.$root.style.removeProperty(side === 'l' ? '--left-w' : '--right-w'); save(); });
+      g.addEventListener('pointerdown', (e) => {
+        g.setPointerCapture(e.pointerId);
+        const x0 = e.clientX, w0 = (side === 'l' ? left : this.$right).getBoundingClientRect().width;
+        const mv = (ev) => {
+          const w = Math.round(Math.min(innerWidth * 0.45, Math.max(160, w0 + (side === 'l' ? 1 : -1) * (ev.clientX - x0))));
+          this.$root.style.setProperty(side === 'l' ? '--left-w' : '--right-w', `${w}px`);
+        };
+        const up = () => {
+          g.removeEventListener('pointermove', mv); g.removeEventListener('pointerup', up);
+          save();
+        };
+        g.addEventListener('pointermove', mv);
+        g.addEventListener('pointerup', up);
+      });
+      return g;
+    };
+    this.$root = h('div', { id: 'ed' }, bar, left, view, this.$right, tlEl, grip('l'), grip('r'));
+    try {
+      const pw = JSON.parse(localStorage.getItem('openTuna.panels') || 'null');
+      if (pw?.l) this.$root.style.setProperty('--left-w', pw.l);
+      if (pw?.r) this.$root.style.setProperty('--right-w', pw.r);
+    } catch { /* storage unavailable */ }
     document.body.append(this.$root);
     // a clicked button keeps focus and would also react to Space (play / pause)
     this.$root.addEventListener('click', (e) => e.target.closest?.('button')?.blur());

@@ -26,6 +26,9 @@ installed, otherwise a built-in PowerShell server, so there's nothing to install
 | **Inspector** (right) | Settings of whatever you selected. With nothing selected, it shows the project and scene settings. |
 | **Timeline** (bottom) | The whole story in real time (m:ss). The orange line is the playhead; the pink **END** flag is the end of the story. |
 
+Drag the thin edge between the left panel and the viewport, or between the viewport and the Inspector, to make
+a panel wider or narrower. Double-click the edge to reset it. The sizes are remembered.
+
 ## Play vs Auto-play
 
 - **▶ Play (Space)** works like the real website. Nothing moves until you scroll: use the mouse wheel over
@@ -72,6 +75,19 @@ thumbnails. The pink number on a thumbnail is how many layers use that file.
 - Right-click an asset to add it in the 3D world, see which layer uses it, copy its path, or delete it. Deleting
   warns you if the file is in use.
 - **Upload…**, or drop files onto the panel, to add files without placing them yet.
+- The project's **3D models** (`.glb`: shark, turtle, whales, tuna, coral…) are listed too, marked *built-in*.
+  You can place them, but not delete them. Uploaded `.glb` / `.gltf` files work the same way.
+
+### 3D model clips
+
+Drop a model on a lane (or use **Layer ▾ ▸ 3D model (.glb)**) to get a **model clip**: the model placed in the 3D
+world for that stretch of time. You can key it like any layer:
+- Select the clip, move the playhead, and drag the model in the **Scene** view. Use the gizmo's **Move / Rotate**
+  buttons in the Inspector. Each change becomes a key at the playhead.
+- Inspector: **Size**, **Flip facing** (if it swims backwards), **Animation** (choose the model's clip),
+  **Scrub** (the animation follows the scroll, so it rewinds when you scroll back) and **Anim speed**. You can
+  also use opacity, reveal effects and fade like other layers.
+- *Copy ref* includes model clips, so you can ask Claude things like "make the shark clip at 1:40 circle the can".
 
 ## Timeline basics
 

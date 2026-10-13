@@ -171,6 +171,9 @@ function Editor($ctx, [string]$path) {
           $list += [ordered]@{ file = ($_.FullName.Substring($root.Length + 1) -replace '\\', '/'); size = $_.Length; mtime = [int][double]::Parse((Get-Date $_.LastWriteTimeUtc -UFormat %s)) }
         }
       }
+      Get-ChildItem -Path $root -File | Where-Object { $_.Extension -in '.glb', '.gltf' } | Sort-Object Name | ForEach-Object {
+        $list += [ordered]@{ file = $_.Name; size = $_.Length; mtime = [int][double]::Parse((Get-Date $_.LastWriteTimeUtc -UFormat %s)); builtin = $true }
+      }
       SendJson $ctx 200 @{ assets = $list }; return
     }
     '/__editor/asset-delete' {

@@ -1,6 +1,7 @@
 // Editor tools for media layers (src/layers.js): add from file / URL / HTML, drag & drop files onto the
 // viewport, move / scale screen layers directly in the Game view (auto-keying when a layer has motion),
 // parallax presets, and the layer right-click menu.
+import * as THREE from 'three/webgpu';
 import { h } from './dom.js';
 import { dialog } from './menu.js';
 import { evalKeys, fmtTime } from '../timeline.js';
@@ -42,6 +43,7 @@ export class LayerTools {
       { label: 'Text with shader effects', onClick: () => this.add({ kind: 'text', label: 'Headline' }) },
       { label: 'Glass panel (refracts the scene)', onClick: () => this.add({ kind: 'glass', label: 'Glass panel' }) },
       { label: 'Image or video from file…', onClick: () => this.fromFile('screen') },
+      { label: '3D model (.glb) from file…', onClick: () => this.fromFile('world', '.glb,.gltf') },
       { label: 'Image / video / page from a URL…', onClick: () => this.fromUrl() },
       { label: 'Web page (iframe)…', onClick: () => this.fromUrl('iframe') },
       { label: 'HTML / text / button block', onClick: () => this.add({ kind: 'html', html: HTML_SAMPLE, label: 'HTML block' }) },
@@ -52,18 +54,18 @@ export class LayerTools {
     ];
   }
 
-  async fromFile(space) {
-    const f = await this.ed.saves.pickFile(space === 'world' ? '.png,.jpg,.jpeg,.webp,.gif,.avif,.mp4,.webm,.mov,.m4v' : ACCEPT);
+  async fromFile(space, accept) {
+    const f = await this.ed.saves.pickFile(accept ?? (space === 'world' ? '.png,.jpg,.jpeg,.webp,.gif,.avif,.mp4,.webm,.mov,.m4v,.glb,.gltf' : ACCEPT));
     if (f) await this.addFile(f, { space });
   }
 
   async addFile(file, opts = {}) {
     const kind = kindOf(file.name);
-    if (!kind) return this.ed.toast(`Can't use ${file.name} — images, videos or .html pages only`, true);
+    if (!kind) return this.ed.toast(`Can't use ${file.name} — images, videos, .glb models or .html pages only`, true);
     try {
       this.ed.toast(`Adding ${file.name}…`);
       const src = await this.ed.saves.upload(file);
-      const space = kind === 'iframe' ? 'screen' : opts.space || 'screen';
+      const space = kind === 'iframe' ? 'screen' : kind === 'model' ? 'world' : opts.space || 'screen';
       const t = this.add({ kind, src, label: file.name.replace(/\.[^.]+$/, ''), ...opts, space });
       this.ed.assets?.refresh();
       return t;
@@ -95,7 +97,8 @@ export class LayerTools {
     const ed = this.ed, D = ed.duration;
     const a = r4(Math.min(at ?? ed.time, Math.max(0, D - 0.5))), b = r4(Math.min(D, a + 8));
     const world = space === 'world';
-    const key = world ? { t: a, pos: (pos ?? this.worldSpot()).map(r2), s: 1, r: 0, o: 1 } : { t: a, x: r2(x), y: r2(y), s: 1, r: 0, o: 1 };
+    const key = kind === 'model' ? { t: a, pos: (pos ?? this.worldSpot()).map(r2), rot: [0, 0, 0], s: 1, o: 1 }
+      : world ? { t: a, pos: (pos ?? this.worldSpot()).map(r2), s: 1, r: 0, o: 1 } : { t: a, x: r2(x), y: r2(y), s: 1, r: 0, o: 1 };
     const id = `layer-${Date.now().toString(36)}`;
     const t = { id, type: 'layer', label: label || kind, kind, src, space, a, b, fade: 0.6, z: 5, w: world ? 8 : kind === 'html' ? 40 : 30, keys: [key] };
     if (kind === 'html') t.html = html ?? HTML_SAMPLE;
@@ -110,6 +113,7 @@ export class LayerTools {
     if (kind === 'text') Object.assign(t, { kicker: 'Chapter', title: 'Your headline', body: '', w: 60, size: 180, glass: 0 });
     if (kind === 'glass') Object.assign(t, { w: 30, h: 40, glass: 1, caustic: 0.35 });
     if (kind === 'iframe') { t.h = 50; t.w = 50; t.interactive = true; }
+    if (kind === 'model') { t.w = 6; t.fade = 1; }
     if (kind === 'video') t.loop = true;
     t.lane = (lane ?? ed.defaultLane('layer', 'Layers')).id;
     ed.tl.tracks.push(t);
@@ -117,6 +121,16 @@ export class LayerTools {
     ed.select({ kind: 'track', track: t });
     ed.toast(`Layer “${t.label}” added at ${fmtTime(a)} — drag it in the ${world ? 'Scene' : 'Game'} view to place it`);
     return t;
+  }
+
+  // a point in the world under the cursor (on the sea surface plane if the ray hits it, else 20 m out)
+  dropPoint(e) {
+    const ed = this.ed, cv = ed.app.renderer.domElement, r = cv.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), ed.app.camera);
+    const d = ray.ray.direction, o = ray.ray.origin;
+    const t = Math.abs(d.y) > 1e-3 ? (-4 - o.y) / d.y : -1; // a plane 4 m under the surface
+    return o.clone().addScaledVector(d, t > 0 && t < 120 ? t : 20).toArray();
   }
 
   // where a new 3D layer goes: the Scene view's orbit target, or what the story camera looks at
@@ -166,7 +180,7 @@ export class LayerTools {
   addAsset(src, opts = {}) {
     const kind = kindOf(src);
     if (!kind) return this.ed.toast(`Can't use ${src}`, true);
-    return this.add({ kind, src, label: src.split('/').pop().replace(/\.[^.]+$/, ''), ...opts, space: kind === 'iframe' ? 'screen' : opts.space || 'screen' });
+    return this.add({ kind, src, label: src.split('/').pop().replace(/\.[^.]+$/, ''), ...opts, space: kind === 'iframe' ? 'screen' : kind === 'model' ? 'world' : opts.space || 'screen' });
   }
 
   // ------------------------------------------------------------------ keys
@@ -241,12 +255,13 @@ export class LayerTools {
   // ------------------------------------------------------------------ menus
   contextItems(t) {
     const ed = this.ed, L = !!t.locked, world = t.space === 'world';
-    const canFx = t.kind !== 'html' && t.kind !== 'iframe';
+    const canFx = t.kind !== 'html' && t.kind !== 'iframe' && t.kind !== 'model';
     return [
       canFx ? { label: 'Look', disabled: L, items: Object.entries(LOOKS).map(([k, v]) => ({ label: v.label, onClick: () => this.applyLook(t, k) })) } : null,
       { label: `Go to start (${fmtTime(t.a)})`, onClick: () => ed.setTime(t.a) },
       { label: `Add key at playhead (${fmtTime(ed.time)})`, shortcut: 'K', disabled: L, onClick: () => this.addKey(t) },
       { label: 'Make parallax…', disabled: L || world, onClick: () => this.parallaxDialog(t) },
+      t.kind === 'model' ? { label: 'Show in Scene view', onClick: () => { ed.select({ kind: 'track', track: t }); ed.setView('scene'); const k = this.layers.state(t, ed.time); ed.app.controls.target.fromArray(k.pos); } } : null,
       { label: `Set start to playhead`, disabled: L || ed.time >= t.b, onClick: () => { t.a = r4(ed.time); ed.commit(); } },
       { label: `Set end to playhead`, disabled: L || ed.time <= t.a, onClick: () => { t.b = r4(ed.time); ed.commit(); } },
       '-',
@@ -369,7 +384,7 @@ export class LayerTools {
       wrap.classList.remove('drop');
       const r = ed.$stage.getBoundingClientRect();
       const x = Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100)), y = Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100));
-      const where = ed.sceneView ? { space: 'world' } : { x, y };
+      const where = ed.sceneView ? { space: 'world', pos: this.dropPoint(e) } : { x, y };
       const asset = e.dataTransfer.getData('application/x-opentuna-asset');
       if (asset) return this.addAsset(asset, where);
       for (const f of e.dataTransfer.files) await this.addFile(f, where);
@@ -400,7 +415,7 @@ export class LayerTools {
     for (const t of this.ed.tl.layers()) {
       const k = this.layers.state(t, x);
       if (k.o <= 0.01) continue;
-      const where = t.space === 'world' ? `3D at [${k.pos.map((v) => v.toFixed(1)).join(', ')}]` : `screen x ${k.x.toFixed(0)}% y ${k.y.toFixed(0)}%`;
+      const where = t.space === 'world' ? `3D at [${k.pos.map((v) => v.toFixed(1)).join(', ')}]${k.rot ? ` rot [${k.rot.map((v) => v.toFixed(0)).join(', ')}]°` : ''}` : `screen x ${k.x.toFixed(0)}% y ${k.y.toFixed(0)}%`;
       out.push(`"${t.label}" (${t.kind}${t.src ? ` ${t.src}` : ''}, ${where}, scale ${k.s.toFixed(2)}, opacity ${k.o.toFixed(2)}, ${t.a}–${t.b} s)`);
     }
     return out.length ? `layers on screen: ${out.join(' · ')}` : '';

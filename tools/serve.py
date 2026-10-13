@@ -18,7 +18,7 @@ tools/serve.ps1 is the same server for Windows machines without Python - keep th
     POST /__editor/delete?file=<path>    delete a checkpoint
     GET  /__editor/git/status            {branch, upstream, changes}
     POST /__editor/upload?name=file.png  body = file bytes -> assets/<name> (never overwrites) -> {file}
-    GET  /__editor/assets                every file under assets/ {file, size, mtime}
+    GET  /__editor/assets                every file under assets/ {file, size, mtime} + the root *.glb models (builtin)
     POST /__editor/asset-delete?file=    delete one file under assets/
     POST /__editor/git/commit            body {message} -> commits story.json + saves/checkpoints + assets
     POST /__editor/git/push              pushes the current branch
@@ -228,6 +228,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         full = os.path.join(dirpath, n)
                         out.append({'file': os.path.relpath(full, ROOT).replace(os.sep, '/'), 'size': os.path.getsize(full), 'mtime': int(os.path.getmtime(full))})
                 out.sort(key=lambda a: -a['mtime'])
+                # the project's own creature / reef models (repo root) are assets too, but can't be deleted
+                for n in sorted(os.listdir(ROOT)):
+                    if n.lower().endswith(('.glb', '.gltf')):
+                        full = os.path.join(ROOT, n)
+                        out.append({'file': n, 'size': os.path.getsize(full), 'mtime': int(os.path.getmtime(full)), 'builtin': True})
                 return self.reply(200, {'assets': out})
             if path == '/__editor/git/status':
                 if not has_git():

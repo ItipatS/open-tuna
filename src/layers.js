@@ -15,10 +15,22 @@ import {
 } from 'three/tsl';
 import { evalKeys, captionOpacity } from './timeline.js';
 import { U, causticTex } from './shared.js';
+import { createLoader } from './models.js';
+import { createAnimated } from './creatures.js';
 
 export const SCREEN_KEY = { x: 50, y: 50, s: 1, r: 0, o: 1 };
 export const WORLD_KEY = { pos: [0, 8, 10], s: 1, r: 0, o: 1 };
-export const MEDIA_EXT = { image: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif'], video: ['mp4', 'webm', 'mov', 'm4v'], iframe: ['html', 'htm'] };
+export const MODEL_KEY = { pos: [0, -6, 10], rot: [0, 0, 0], s: 1, o: 1 };
+export const MEDIA_EXT = { image: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif'], video: ['mp4', 'webm', 'mov', 'm4v'], iframe: ['html', 'htm'], model: ['glb', 'gltf'] };
+
+// GLB models: loaded once per file, cloned per clip (skinned models included)
+const gltfCache = new Map();
+let gltfLoader = null;
+export function loadGLTF(src) {
+  gltfLoader ??= createLoader(new THREE.LoadingManager());
+  if (!gltfCache.has(src)) gltfCache.set(src, gltfLoader.loadAsync(src));
+  return gltfCache.get(src);
+}
 export const REVEALS = { fade: 0, dissolve: 1, wipe: 2, ripple: 3 };
 export const FX = ['distort', 'caustic', 'chroma', 'glow', 'glass']; // 0..1 shader amounts on a GPU layer
 
@@ -28,7 +40,7 @@ export function kindOf(name) {
 }
 
 // GPU or DOM? html / iframe are always DOM (they are real web content); text / glass are always GPU
-export const isGPU = (t) => t.kind === 'text' || t.kind === 'glass' || t.space === 'world' || ((t.kind === 'image' || t.kind === 'video') && t.render === 'gpu');
+export const isGPU = (t) => t.kind === 'text' || t.kind === 'glass' || t.kind === 'model' || t.space === 'world' || ((t.kind === 'image' || t.kind === 'video') && t.render === 'gpu');
 
 // ---------------------------------------------------------------------------------------------
 // Text drawn into a canvas (brand fonts) so it can be a GPU layer with the same effects as images.
@@ -186,7 +198,7 @@ export class Layers {
       seen.add(t.id);
       const gpu = isGPU(t);
       const text = t.kind === 'text' ? [t.kicker, t.title, t.body, t.size, t.align, t.color, t.accent, this.fontsReady].join('¦') : '';
-      const sig = [t.kind, gpu, t.src, t.kind === 'html' ? t.html : '', (t.glass ?? 0) > 0, text].join('|');
+      const sig = [t.kind, gpu, t.src, t.kind === 'html' ? t.html : '', (t.glass ?? 0) > 0, text, t.kind === 'model' ? `${!!t.flip}:${t.anim ?? ''}` : ''].join('|');
       let it = this.items.get(t.id);
       if (!it || it.sig !== sig) {
         if (it) this.dispose(it);
@@ -230,7 +242,7 @@ export class Layers {
       });
     } else if (t.kind === 'text') {
       m = drawText(t);
-    } else if (t.kind === 'glass') {
+    } else if (t.kind === 'glass' || t.kind === 'model') {
       m = null;
     } else {
       m = document.createElement('div');
@@ -251,6 +263,7 @@ export class Layers {
       this.wrap.append(el);
       return it;
     }
+    if (t.kind === 'model') return this.buildModel(it, t);
     // GPU plane: built once the image / video knows its size (text and glass right away)
     const make = () => {
       if (it.disposed || it.mesh) return;
@@ -274,21 +287,50 @@ export class Layers {
     return it;
   }
 
+  // a GLB clip: a holder group in the scene (picking / visibility), the model added once loaded
+  buildModel(it, t) {
+    const holder = it.mesh = new THREE.Group();
+    holder.userData.layerId = t.id;
+    holder.visible = false;
+    this.group.add(holder);
+    it.loading = loadGLTF(t.src).then((gltf) => {
+      if (it.disposed) return;
+      // createAnimated: forward = +Z, length 1 m (scaled by the clip's width), materials converted, mixer
+      const model = createAnimated(gltf, { length: 1, flip: !!t.flip, clone: true, style: { rim: 0.6 } });
+      model.traverse((o) => {
+        o.userData.layerId = t.id;
+        if (!o.isMesh) return;
+        o.castShadow = false;
+        for (const m of [o.material].flat()) { m.transparent = true; m.depthWrite = true; } // fades via opacity (set once: no recompile)
+      });
+      const mixer = model.userData.mixer;
+      mixer.stopAllAction();
+      const clip = gltf.animations.find((a) => a.name === t.anim) ?? gltf.animations[0];
+      if (clip) { it.action = mixer.clipAction(clip); it.action.play(); it.clipLen = clip.duration; }
+      it.anims = gltf.animations.map((a) => a.name);
+      it.model = model;
+      holder.add(model);
+    }).catch((e) => { console.warn(`model ${t.src}:`, e.message); });
+    return it;
+  }
+
   dispose(it) {
     it.disposed = true;
     it.el?.remove();
     if (it.media?.tagName === 'VIDEO') { it.media.pause(); it.media.removeAttribute('src'); it.media.load(); }
     if (it.mesh) {
       this.group.remove(it.mesh);
-      it.mesh.geometry.dispose();
-      it.tex?.dispose();
-      it.mesh.material.dispose();
+      if (it.mesh.isMesh) {
+        it.mesh.geometry.dispose();
+        it.tex?.dispose();
+        it.mesh.material.dispose();
+      }
     }
   }
 
-  // current state of a layer at story time x: { o (incl. fade), f (fade / reveal 0..1), x, y | pos, s, r }
+  // current state of a layer at story time x: { o (incl. fade), f (fade / reveal 0..1), x, y | pos (+ rot), s, r }
   state(t, x) {
-    const k = evalKeys(t.keys ?? [], x, { ...(t.space === 'world' ? WORLD_KEY : SCREEN_KEY) });
+    const k = evalKeys(t.keys ?? [], x, { ...(t.kind === 'model' ? MODEL_KEY : t.space === 'world' ? WORLD_KEY : SCREEN_KEY) });
     k.f = this.tl.muted(t) ? 0 : captionOpacity(t, x, this.tl.duration);
     k.o = (k.o ?? 1) * k.f;
     return k;
@@ -313,6 +355,7 @@ export class Layers {
       const t = it.track, k = this.state(t, x), on = k.f > 0.002 && k.o > 0.002;
       const m = it.media;
       if (m?.tagName === 'VIDEO') this.video(m, t, x, on);
+      if (t.kind === 'model') { this.model(it, t, k, on, x); continue; }
       if (it.gpu) { this.gpu(it, t, k, on, view, shot, speed); continue; }
       const st = it.el.style;
       st.display = on ? '' : 'none';
@@ -367,6 +410,26 @@ export class Layers {
     u.aspect.value = aspect;
   }
 
+  model(it, t, k, on, x) {
+    const h = it.mesh;
+    if (!h) return;
+    h.visible = on && !!it.model;
+    if (!h.visible) return;
+    h.position.fromArray(k.pos);
+    const r = k.rot ?? [0, 0, 0], d = THREE.MathUtils.degToRad;
+    h.rotation.set(d(r[0]), d(r[1]), d(r[2]), 'YXZ');
+    h.scale.setScalar((t.w ?? 6) * k.s);
+    if (k.o !== it.lastO) {
+      it.lastO = k.o;
+      it.model.traverse((o) => { if (o.isMesh) for (const m of [o.material].flat()) m.opacity = k.o; });
+    }
+    // its own animation: scrubbed by the story time (scroll back = rewind) or running on its own
+    if (it.action && t.anim !== 'none') {
+      const time = t.scrub === false ? performance.now() / 1000 * (t.rate ?? 1) : Math.max(0, x - t.a) * (t.rate ?? 1);
+      it.model.userData.mixer.setTime(it.clipLen ? time % it.clipLen : time);
+    }
+  }
+
   // looping videos play while visible; "scrub" videos follow the story time (scrolling plays them)
   video(v, t, x, on) {
     if (!on) { if (!v.paused) v.pause(); return; }
@@ -386,6 +449,7 @@ export class Layers {
   ready(ms) {
     const waits = [];
     for (const it of this.items.values()) {
+      if (it.loading) { waits.push(it.loading); continue; }
       const m = it.media;
       if (!it.gpu || it.mesh || !m) continue;
       if (m.tagName === 'IMG') waits.push(new Promise((r) => { m.addEventListener('load', r, { once: true }); m.addEventListener('error', r, { once: true }); }));

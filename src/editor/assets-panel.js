@@ -60,9 +60,10 @@ export class AssetsPanel {
       const used = this.usage(a.file).length;
       const thumb = kind === 'image' ? h('img', { src: a.file, loading: 'lazy', draggable: false })
         : kind === 'video' ? h('video', { src: `${a.file}#t=0.5`, muted: true, preload: 'metadata' })
-          : h('div', { class: 'ico' }, kind === 'iframe' ? 'HTML' : (a.file.split('.').pop() || '?').toUpperCase());
+          : h('div', { class: 'ico' }, kind === 'iframe' ? 'HTML' : kind === 'model' ? '3D MODEL' : (a.file.split('.').pop() || '?').toUpperCase());
       const el = h('div', { class: 'ed-asset', draggable: true, title: `${a.file}\n${kb(a.size)}${used ? ` · used by ${used} layer(s)` : ''}` },
-        h('div', { class: 'th' }, thumb, used ? h('span', { class: 'used' }, String(used)) : null),
+        h('div', { class: 'th' }, thumb, used ? h('span', { class: 'used' }, String(used)) : null,
+          a.builtin ? h('span', { class: 'bi' }, 'built-in') : null, kind === 'model' ? h('span', { class: 'sz' }, kb(a.size)) : null),
         h('div', { class: 'nm' }, a.file.replace(/^assets\//, '')));
       el.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('application/x-opentuna-asset', a.file);
@@ -74,12 +75,12 @@ export class AssetsPanel {
         e.preventDefault();
         this.ed.contextMenuItems(e.clientX, e.clientY, [
           { label: 'Add at the playhead', onClick: () => this.ed.lt.addAsset(a.file) },
-          kind !== 'iframe' ? { label: 'Add in the 3D world', onClick: () => this.ed.lt.addAsset(a.file, { space: 'world' }) } : null,
+          kind !== 'iframe' && kind !== 'model' ? { label: 'Add in the 3D world', onClick: () => this.ed.lt.addAsset(a.file, { space: 'world' }) } : null,
           { label: used ? `Used by ${used} layer(s) — select the first` : 'Not used yet', disabled: !used, onClick: () => { const t = this.usage(a.file)[0]; this.ed.select({ kind: 'track', track: t }); this.ed.setTime(t.a); } },
           { label: 'Copy path', onClick: () => navigator.clipboard?.writeText(a.file) },
           { label: 'Open ↗', onClick: () => window.open(a.file, '_blank') },
           '-',
-          { label: 'Delete file…', danger: true, onClick: () => this.remove(a, used) },
+          { label: a.builtin ? 'Built-in model (used by the scene) — can’t be deleted here' : 'Delete file…', danger: !a.builtin, disabled: !!a.builtin, onClick: () => this.remove(a, used) },
         ]);
       });
       return el;
