@@ -31,7 +31,7 @@ export class AssetsPanel {
       e.preventDefault();
       root.classList.remove('drop');
       const tuna = [...e.dataTransfer.files].find((f) => /\.tuna$/i.test(f.name));
-      if (tuna) return this.ed.project.openTuna(tuna);
+      if (tuna) return this.ed.importer.offer(tuna);
       for (const f of e.dataTransfer.files) await this.uploadOne(f);
       this.refresh();
     });
@@ -83,6 +83,7 @@ export class AssetsPanel {
           { label: 'Add at the playhead', onClick: () => this.ed.lt.addAsset(a.file) },
           kind !== 'iframe' && kind !== 'model' ? { label: 'Add in the 3D world', onClick: () => this.ed.lt.addAsset(a.file, { space: 'world' }) } : null,
           { label: used ? `Used by ${used} layer(s) — select the first` : 'Not used yet', disabled: !used, onClick: () => { const t = this.usage(a.file)[0]; this.ed.select({ kind: 'track', track: t }); this.ed.setTime(t.a); } },
+          { label: 'Replace everywhere with…', disabled: !used || !!a.builtin, onClick: () => this.replaceDialog(a.file) },
           { label: 'Copy path', onClick: () => navigator.clipboard?.writeText(a.file) },
           { label: 'Open ↗', onClick: () => window.open(assetURL(a.file), '_blank') },
           '-',
@@ -91,6 +92,28 @@ export class AssetsPanel {
       });
       return el;
     }));
+  }
+
+  // every layer using `file` uses another asset (or a newly uploaded file) instead — one undoable edit
+  replaceDialog(file) {
+    const ed = this.ed, kind = kindOf(file);
+    const others = this.items.filter((x) => x.file !== file && kindOf(x.file) === kind);
+    const sel = h('select', {}, others.map((x) => h('option', { value: x.file }, x.file.replace(/^assets\//, ''))));
+    const n = this.usage(file).length;
+    dialog({
+      title: `Replace ${file.replace(/^assets\//, '')}`,
+      body: [h('p', {}, `${n} layer${n === 1 ? '' : 's'} use it. They will use this file instead:`), others.length ? sel : h('p', { class: 'muted' }, `No other ${kind} in assets/ — upload one.`)],
+      buttons: [
+        { label: 'Cancel' },
+        { label: 'Upload a new file…', onClick: async () => {
+          const f = await ed.saves.pickFile(ACCEPT);
+          if (!f) return false;
+          try { const nf = await ed.saves.upload(f); this.refresh(); ed.replaceAsset(file, nf); } catch (e) { ed.toast(e.message, true); }
+          return true;
+        } },
+        ...(others.length ? [{ label: 'Replace', primary: true, onClick: () => { ed.replaceAsset(file, sel.value); } }] : []),
+      ],
+    });
   }
 
   async uploadOne(f) {

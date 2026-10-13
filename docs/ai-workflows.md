@@ -49,6 +49,8 @@ The designer may have the editor open, and it **autosaves story.json about every
    fs.writeFileSync('story.json', tl.serialize());
    ```
    Hand edits are fine too, as long as the result stays valid JSON with the same field names.
+   **Keep the `id`s** of keys, clips, chapters and notes you change; leave `id` out on items you add (they get one).
+   Don't copy an item with its id.
 3. **Respect `locked: true`.** The designer locked those items. Don't change them unless asked to.
 4. After writing, tell the user: *"reload the editor, or choose **Load theirs** when it says story.json changed"*.
    The server refuses saves from a tab that loaded an older file (409), so nothing is silently lost. But until

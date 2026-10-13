@@ -129,11 +129,44 @@ world for that stretch of time. You can key it like any layer:
 - The bottom lane, **Performance**, fills in as you play: green ≥ 55 fps, yellow ≥ 40, red below.
   Red patches show where the story will stutter on slower laptops.
 
+## Editing many things at once
+
+- **Select several:** **Shift-click** adds to the selection, **Ctrl/Cmd-click** adds or removes. **Drag on empty
+  space** in the timeline to draw a box around keys, captions and clips. **Ctrl+A** selects everything;
+  Edit ▸ *Select everything after the playhead* / *in In–Out*; right-click a track ▸ *Select all keys on this
+  track*. The corner of the timeline says how many are selected.
+- **Move them together:** drag any selected item and the rest follow (snapping uses the one you hold).
+  **Alt+← / →** nudges the selection by one frame (Shift: one second).
+- **Copy by dragging:** **Alt-drag** drags a copy and leaves the originals where they were.
+- **Stretch the timing:** with two or more things selected, a white bracket appears on the ruler over them. Drag
+  either end to make that whole passage longer or shorter (everything inside moves proportionally). For an exact
+  value: right-click ▸ **Stretch timing…** (a percentage or a new length, kept in place at its start, end or the
+  playhead).
+- **Line them up:** right-click ▸ **Align starts to the playhead**, **Spread evenly**, **Close the gaps** (one
+  right after another).
+- **Split (S):** splits the selected captions, layers and creature paths at the playhead. The two halves join
+  without a fade.
+- **Copy / paste keeps the timing:** **Ctrl+C** a selection (even across tracks), move the playhead, **Ctrl+V**:
+  everything lands with the same spacing, the earliest item at the playhead. Whole tracks, lanes (with their
+  clips) and groups can be copied too. The copy also goes on your computer's clipboard, so you can paste into
+  another project or another computer's studio; the media files come along. **Ctrl+Shift+V** (Paste special):
+  at the original times, into the selected track, or *values onto the selection* (e.g. one key's ease and values
+  onto ten others, keeping their times). Paste images or videos from the clipboard to add them as layers.
+- **Edit together:** with several things selected, the Inspector shows what they have in common: change the
+  ease of 20 keys, the FOV of 5 camera keys, or the size of every selected caption at once (*— mixed —* means
+  they differ).
+- **In / Out:** **I** and **O** mark a stretch of time (a blue band on the ruler; drag its edges; **Alt+X**
+  clears it). View ▸ **Loop playback in In–Out** replays just that part. **Shift+Del** (or right-click the ruler)
+  **deletes that time from the whole story**: what's inside goes, clips across it get shorter, and everything after
+  it moves earlier. Right-click the ruler ▸ **Insert time…** does the opposite.
+- **Filter** (timeline bar): type part of a track's name, type, parameter or file name to see only those rows.
+- **Colours:** right-click a track, lane or group ▸ **Colour** to colour-code it.
+
 ## Right-click menus
 
 Right-click works on **anything**: keys, captions, clip bars, track names, empty lanes, the ruler,
 chapters, notes, objects in the Scene list, and the camera balls in the Scene view. You get the options
-that fit, for example:
+that fit (right-click part of a multi-selection for options that apply to all of it), for example:
 - **Cut / Copy / Paste / Duplicate.** Paste and Duplicate drop the copy at the playhead.
 - **Lock / Unlock** and **Delete**.
 - On captions and clip bars: **Set start / end to playhead**, **Split at playhead**, change the ease.
@@ -162,6 +195,21 @@ at the moments you want and set each key's value.
 
 **Leave feedback.** Press **+ Note** at the moment something should change ("tentacle pops in here,
 should grow smoothly"). Notes are saved in `story.json`, so a developer or Claude can read them.
+**File ▸ Copy link to this moment** gives a link that opens the editor at the same second.
+
+**Bring in another project.** **File ▸ Import into this story…** (or drop a `.tuna` on the timeline ▸ *Import into
+this story*): tick the chapters, tracks, lanes and groups you want, and place them at the playhead (on top of what's
+there, or pushing everything after it later) or at their original times. Its media files are copied in. Camera
+keys and captions merge into yours; a parameter you already animate gets its keys merged. One Ctrl+Z undoes it.
+
+**Check before you hand over.** **File ▸ Check project…** lists what would look broken or confuse someone:
+missing media files (with *Relink…*), `{{bindings}}` to data sources that don't exist, things after the end of the
+story, two tracks fighting over one parameter, invisible layers, empty captions, slow moments, notes and locks. *Build site* shows the same count. In the Assets tab, right-click a file ▸ **Replace everywhere
+with…** swaps it in every layer at once.
+
+**A video for people without WebGPU.** **File ▸ Record a review video…** plays the story (or the In–Out range) at
+1× and records it with the captions to an MP4, for a deck or a chat. It's only for review: the site itself stays
+the real-time story.
 
 **Ask Claude for a change.** Go to the moment, click **Copy ref**, paste it into Claude, and say what you
 want. The reference says exactly where you are (time, chapter, which beats are active, camera keys,
@@ -288,14 +336,16 @@ Once the site is handed over, the customer only edits the CMS. Design the parts 
 | **Import / Export** | File ▸ Import / Export a story JSON, to send one by chat or try someone else's. |
 | **Git** (demos only) | File ▸ **Commit to git…** commits the demo's folder (story, checkpoints, `assets/`; never code) with your message. Tick *Also push* to upload to GitHub. Pushing the **main** branch updates the **public** website, and the dialog warns you about that. |
 
-Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps).
+Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps). The Edit menu names the step (*Undo Moved 3 keys*).
 
 ## Shortcuts
 
 `Space` play (scroll like the website) / pause · wheel, `↑ ↓`, `PgUp PgDn` scroll while playing · `Esc` stop / deselect · `← →` one frame (Shift: 1 s) · `Home / End` ·
 `, .` previous / next key · `K` add key · `L` lock · `Del` delete · `Ctrl C / X / V` copy / cut / paste ·
-`Ctrl D` duplicate · `Ctrl Z / Y` undo / redo · `Ctrl S` save · `Ctrl Shift S` checkpoint · `Ctrl O` open a .tuna ·
-`1 / 2` Scene / Game · `F` fit timeline. Help ▸ Keyboard shortcuts shows them all.
+`Ctrl Shift V` paste special · `Ctrl D` duplicate · `Ctrl A` select all · Shift-click / Ctrl-click add / toggle ·
+drag empty space: box select · `Alt`-drag a copy · `Alt ← →` nudge · `S` split · `I / O` In / Out (`Alt X` clears) ·
+`Shift Del` delete the In–Out time · `Ctrl Z / Y` undo / redo · `Ctrl S` save · `Ctrl Shift S`
+checkpoint · `Ctrl O` open a .tuna · `1 / 2` Scene / Game · `F` fit timeline. Help ▸ Keyboard shortcuts shows them all.
 
 ## What the editor doesn't do (yet)
 

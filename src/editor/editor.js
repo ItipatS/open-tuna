@@ -20,16 +20,21 @@ import { Saves } from './saves.js';
 import { LayerTools } from './layer-tools.js';
 import { AssetsPanel } from './assets-panel.js';
 import { DataPanel } from './data-panel.js';
+import { editOps } from './edit-ops.js';
+import { Importer } from './import.js';
+import { Checker } from './check.js';
+import { Recorder } from './recorder.js';
 import { ProjectFiles } from './project.js';
 import { ModelThumbs } from './thumbs.js';
 import { SiteBuilder } from './build.js';
-import { PROJECT, playURL } from '../project.js';
+import { PROJECT, playURL, editorURL } from '../project.js';
 import { listPaths } from '../data.js';
 import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime, migrate } from '../timeline.js';
+import { ensureIds, roundAll, clone, diffDocs, apply, invert, stillValid, entities, summarize, itemOf, parseKey } from './doc.js';
 
 const ASPECTS = { '16:9': 16 / 9, '16:10': 16 / 10, '21:9': 21 / 9, '4:3': 4 / 3, '9:19.5': 9 / 19.5, free: 0 };
-const CLIP_KEY = 'openTuna.clipboard.v2';
+const CLIP_KEY = 'openTuna.clipboard.v2'; // (also edit-ops.js)
 const PERF_STEP = 0.5; // s per fps bucket
 const r4 = (x) => Math.round(x * 1e4) / 1e4;
 const isMac = /Mac/.test(navigator.platform);
@@ -41,6 +46,14 @@ export class Editor {
     this.tl = app.timeline;
     this.story = app.story;
     this.story.authored = true; // the playhead is story time: stretch regions show one cycle (story.previewItem)
+    // every key / clip / marker gets a permanent id; `base` = the story as last committed (edits are diffs from it)
+    ensureIds(this.tl.data);
+    roundAll(this.tl.data);
+    this.tl.changed();
+    this.base = clone(this.tl.data);
+    this.undoStack = []; // edits: { changes, label }
+    this.redoStack = [];
+    this.edits = 0; // committed edits this session
     this.time = 0; // playhead (s)
     this.playing = false;
     this.playFrom = 0;
@@ -51,11 +64,13 @@ export class Editor {
     this.aspect = '16:9';
     this.maxOnPlay = false;
     this.snap = true;
-    this.sel = null;
+    this.range = null; // In / Out { a, b } (s): loop playback, select / delete time
+    this.loop = false;
+    this.sel = null; // the primary selection (the inspector shows it)
+    this.sels = []; // everything selected (shift / ctrl-click, box select)
+    this.selItems = new Set();
     this.perf = new Float32Array(Math.ceil(this.tl.duration / PERF_STEP) + 1); // fps measured along the story
     this.born = performance.now();
-    this.history = [this.tl.serialize()];
-    this.hi = 0;
     this.sceneCam = null; // remembered Scene view pose
     try { this.clipboard = JSON.parse(localStorage.getItem(CLIP_KEY) || 'null'); } catch { this.clipboard = null; }
 
@@ -64,6 +79,9 @@ export class Editor {
     this.project = new ProjectFiles(this);
     this.thumbs = new ModelThumbs(this.app.renderer);
     this.builder = new SiteBuilder(this);
+    this.importer = new Importer(this);
+    this.checker = new Checker(this);
+    this.recorder = new Recorder(this);
     this.buildDOM();
     this.inspector = new Inspector(this, this.$right);
     this.timeline = new TimelineView(this, this.$tlwrap);
@@ -73,9 +91,11 @@ export class Editor {
     this.dataPanel = new DataPanel(this, this.$data);
     this.buildOutliner();
     this.bindKeys();
+    this.bindClipboard();
     this.setView('game');
     this.select(null);
-    this.setTime(0);
+    const t0 = parseFloat(new URLSearchParams(location.search).get('t'));
+    this.setTime(Number.isFinite(t0) ? t0 : 0);
     this.saves.ping();
     this.saves.checkDraft();
     setInterval(() => this.saves.tick(), 1000);
@@ -84,9 +104,11 @@ export class Editor {
     this.syncTitle();
   }
 
+  get hi() { return this.undoStack.length; } // (older tests: `while (ed.hi > 0) ed.undo()`)
   get sceneView() { return this.view === 'scene' && !this.playing; }
   get duration() { return this.tl.duration; }
   current() { return this.tl.serialize(); }
+  get mod() { return mod; }
 
   // ------------------------------------------------------------------ layout
   buildDOM() {
@@ -195,9 +217,12 @@ export class Editor {
       btn('Fit', () => { this.timeline.fit(); }, { title: 'Show the whole story (F)' }),
       this.$tInput,
       this.$len,
-      h('span', { class: 'hint' }, 'Right-click anything for options · drag the ruler to scrub · Ctrl+wheel zoom · Shift+wheel pan'),
+      this.$filter = h('input', { type: 'search', class: 'ed-filter', placeholder: 'Filter tracks…', title: 'Show only tracks whose name, type, parameter or file matches' }),
+      h('span', { class: 'hint' }, 'Right-click for options · drag empty space to box-select · Alt-drag copies · Ctrl+wheel zoom'),
       h('div', { class: 'grow' }),
     );
+    this.$filter.addEventListener('input', () => { this.timeline.filter = this.$filter.value.trim().toLowerCase(); this.timeline.scrollY = 0; this.timeline.draw(); });
+    this.$filter.addEventListener('keydown', (e) => { if (e.key === 'Escape') { this.$filter.value = ''; this.$filter.dispatchEvent(new Event('input')); this.$filter.blur(); } });
     this.$tlwrap = h('div', { id: 'ed-tlwrap' });
     const split = h('div', { id: 'ed-split', title: 'Drag to resize' });
     const tlEl = h('section', { id: 'ed-tl' }, split, tlbar, this.$tlwrap);
@@ -352,29 +377,51 @@ export class Editor {
       { label: 'Autosave', items: [0, 30, 60, 300].map((v) => ({ label: v ? (v < 60 ? `Every ${v} s` : `Every ${v / 60} min`) : 'Off', checked: A === v, onClick: () => s.setAutosave(v) })) },
       { label: 'Revert to saved file', onClick: () => s.revert(), disabled: !s.dirty },
       '-',
-      { label: 'Import story JSON…', onClick: () => s.importFile() },
+      { label: 'Import into this story… (.tuna / story.json)', onClick: () => this.importer.pick(), disabled: !s.server },
+      { label: 'Replace the story with a story JSON…', onClick: () => s.importFile() },
       { label: 'Export / download story JSON', onClick: () => s.exportFile() },
       '-',
       { label: 'Commit to git…', onClick: () => s.gitDialog(), disabled: !s.git },
       '-',
+      { label: 'Check project…', onClick: () => this.checker.dialog() },
       { label: 'Build site… (standalone, for any host)', onClick: () => this.builder.dialog() },
       { label: 'Preview (play.html) at this moment ↗', onClick: () => this.openSite() },
+      { label: 'Copy link to this moment (for the team)', onClick: () => this.copyLink() },
       { label: 'Snapshot (PNG of the viewport)', onClick: () => this.snapshot() },
+      { label: this.recorder.rec ? 'Stop recording' : 'Record a review video… (MP4)', onClick: () => this.recorder.dialog() },
     ];
   }
 
   menuEdit() {
-    const s = this.sel, locked = this.isLocked(s);
+    const s = this.sel, locked = this.sels.some((q) => this.isLocked(q)), n = this.sels.length, any = this.copyable(s);
+    const cut = (x) => (x.length > 46 ? `${x.slice(0, 45)}…` : x);
     return [
-      { label: 'Undo', shortcut: `${mod}Z`, onClick: () => this.undo(), disabled: this.hi <= 0 },
-      { label: 'Redo', shortcut: `${mod}Y`, onClick: () => this.redo(), disabled: this.hi >= this.history.length - 1 },
+      { label: this.undoStack.length ? cut(`Undo ${this.undoStack.at(-1).label}`) : 'Undo', shortcut: `${mod}Z`, onClick: () => this.undo(), disabled: !this.undoStack.length },
+      { label: this.redoStack.length ? cut(`Redo ${this.redoStack.at(-1).label}`) : 'Redo', shortcut: `${mod}Y`, onClick: () => this.redo(), disabled: !this.redoStack.length },
       '-',
-      { label: 'Cut', shortcut: `${mod}X`, onClick: () => this.cut(), disabled: !this.copyable(s) || locked },
-      { label: 'Copy', shortcut: `${mod}C`, onClick: () => this.copy(), disabled: !this.copyable(s) },
+      { label: n > 1 ? `Cut ${n} items` : 'Cut', shortcut: `${mod}X`, onClick: () => this.cut(), disabled: !any || locked },
+      { label: n > 1 ? `Copy ${n} items` : 'Copy', shortcut: `${mod}C`, onClick: () => this.copy(), disabled: !any },
       { label: `Paste at ${fmtTime(this.time)}`, shortcut: `${mod}V`, onClick: () => this.paste(), disabled: !this.clipboard },
-      { label: 'Duplicate at playhead', shortcut: `${mod}D`, onClick: () => this.duplicate(), disabled: !this.copyable(s) },
-      { label: 'Delete', shortcut: 'Del', onClick: () => this.deleteSelection(), disabled: !s || s.kind === 'object' || locked, danger: true },
+      { label: 'Paste special', items: this.pasteSpecialItems() },
+      { label: 'Duplicate at playhead', shortcut: `${mod}D`, onClick: () => this.duplicate(), disabled: !any },
+      { label: n > 1 ? `Delete ${n} items` : 'Delete', shortcut: 'Del', onClick: () => this.deleteSelection(), disabled: !s || s.kind === 'object' || locked, danger: true },
       '-',
+      { label: 'Select all', shortcut: `${mod}A`, onClick: () => this.selectAll() },
+      { label: `Select everything after ${fmtTime(this.time)}`, onClick: () => this.selectAfter() },
+      { label: 'Select everything in In–Out', disabled: !this.range, onClick: () => this.selectInRange() },
+      '-',
+      { label: 'Timing', items: [
+        { label: 'Nudge earlier (1 frame)', shortcut: 'Alt+←', disabled: !any, onClick: () => this.nudge(-1 / 30) },
+        { label: 'Nudge later (1 frame)', shortcut: 'Alt+→', disabled: !any, onClick: () => this.nudge(1 / 30) },
+        { label: 'Split at playhead', shortcut: 'S', disabled: !any, onClick: () => this.splitAtPlayhead() },
+        { label: 'Stretch timing…', disabled: !any, onClick: () => this.scaleDialog() },
+        { label: 'Align starts to the playhead', disabled: !any, onClick: () => this.alignToPlayhead() },
+        { label: 'Spread evenly', disabled: n < 2, onClick: () => this.distribute(false) },
+        { label: 'Close the gaps', disabled: n < 2, onClick: () => this.distribute(true) },
+        '-',
+        { label: `Insert time at ${fmtTime(this.time)}…`, onClick: () => this.insertTimeDialog() },
+        { label: 'Delete the In–Out time (ripple)', shortcut: '⇧Del', disabled: !this.range, onClick: () => this.rippleDelete() },
+      ] },
       { label: locked ? 'Unlock' : 'Lock', shortcut: 'L', onClick: () => this.toggleLock(), disabled: !s || s.kind === 'object' },
       '-',
       { label: 'Add key at playhead', shortcut: 'K', onClick: () => this.addKey() },
@@ -396,6 +443,10 @@ export class Editor {
       { label: 'Maximize on Play', checked: this.maxOnPlay, onClick: () => this.toggleMax() },
       '-',
       { label: 'Snap on timeline', checked: this.snap, onClick: () => this.toggleSnap() },
+      { label: 'Set In at playhead', shortcut: 'I', onClick: () => this.setIn() },
+      { label: 'Set Out at playhead', shortcut: 'O', onClick: () => this.setOut() },
+      { label: 'Clear In / Out', shortcut: 'Alt+X', disabled: !this.range, onClick: () => this.clearRange() },
+      { label: 'Loop playback in In–Out', checked: !!this.loop, onClick: () => this.toggleLoop() },
       { label: 'Fit timeline', shortcut: 'F', onClick: () => this.timeline.fit() },
       { label: 'Zoom timeline to 10 s around playhead', onClick: () => this.timeline.zoomTo(this.time - 5, this.time + 5) },
       '-',
@@ -472,7 +523,7 @@ export class Editor {
           { label: `Go to start (${fmtTime(c.a)})`, onClick: () => this.setTime(c.a) },
           { label: `Set start to playhead (${fmtTime(this.time)})`, disabled: L || this.time >= c.b, onClick: () => { c.a = r4(this.time); this.commit(); } },
           { label: `Set end to playhead (${fmtTime(this.time)})`, disabled: L || this.time <= c.a, onClick: () => { c.b = r4(this.time); this.commit(); } },
-          isCap ? { label: 'Split at playhead', disabled: L || this.time <= c.a || this.time >= c.b, onClick: () => this.splitCaption(tg.track, c) } : null,
+          isCap ? { label: 'Split at playhead', shortcut: 'S', disabled: L || this.time <= c.a || this.time >= c.b, onClick: () => this.splitAtPlayhead() } : null,
           !isCap ? { label: 'Ease', disabled: L, items: [...Object.keys(EASES).filter((e) => e !== 'hold'), 'gate'].map((e) => ({ label: e, checked: (c.ease || 'linear') === e, onClick: () => { c.ease = e; this.commit(); } })) } : null,
           '-', ...(isCap ? [...ccp(s), paste, '-', lockItem(s), del(s)] : this.trackMenuTail(tg.track)),
         ].flat();
@@ -491,6 +542,8 @@ export class Editor {
           { label: L ? 'Unlock track' : 'Lock track', shortcut: 'L', onClick: () => this.toggleLock() },
           '-',
           { label: t.collapsed ? 'Expand row' : 'Collapse row', onClick: () => { if (t.collapsed) delete t.collapsed; else t.collapsed = true; this.commit(); } },
+          t.keys?.length || t.clips?.length ? { label: `Select all ${t.keys ? 'keys' : 'captions'} on this track`, onClick: () => this.selectTrack(t) } : null,
+          { label: 'Colour', items: this.colorItems(this.multi && this.isSel(t) ? this.sels.filter((q) => q.kind === 'track').map((q) => q.track) : [t]) },
           { label: 'Move up', disabled: i <= 0, onClick: () => this.moveTrack(t, -1) },
           { label: 'Move down', disabled: i >= this.tl.tracks.length - 1, onClick: () => this.moveTrack(t, 1) },
           this.groupMenu(t),
@@ -525,6 +578,8 @@ export class Editor {
           { label: 'Set start to playhead', disabled: L || this.time >= t.b, onClick: () => { t.a = r4(this.time); this.commit(); } },
           { label: 'Set end to playhead', disabled: L || this.time <= t.a, onClick: () => { t.b = r4(this.time); this.commit(); } },
           this.laneMenu(t),
+          { label: 'Split at playhead', shortcut: 'S', disabled: L || this.time <= t.a || this.time >= t.b, onClick: () => this.splitAtPlayhead() },
+          { label: 'Colour', items: this.colorItems([t]) },
           '-', ...this.trackMenuTail(t),
           { label: 'Delete path', danger: true, disabled: L, onClick: () => this.deleteSelection() },
         ];
@@ -544,7 +599,15 @@ export class Editor {
           go,
           { label: `Add chapter ${here}`, onClick: () => { this.setTime(at); this.addChapter(); } },
           { label: `Add note ${here}`, onClick: () => { this.setTime(at); this.addNote(); } },
-          { label: 'Paste marker', disabled: !['chapter', 'note'].includes(this.clipboard?.kind), onClick: () => { this.setTime(at); this.paste(); } },
+          { label: `Paste ${here}`, disabled: !this.clipboard, onClick: () => { this.setTime(at); this.paste(); } },
+          '-',
+          { label: `Set In ${here}`, shortcut: 'I', onClick: () => { this.setTime(at); this.setIn(); } },
+          { label: `Set Out ${here}`, shortcut: 'O', onClick: () => { this.setTime(at); this.setOut(); } },
+          this.range ? { label: 'Clear In / Out', onClick: () => this.clearRange() } : null,
+          this.range ? { label: 'Loop playback in In–Out', checked: !!this.loop, onClick: () => this.toggleLoop() } : null,
+          this.range ? { label: 'Select everything in In–Out', onClick: () => this.selectInRange() } : null,
+          this.range ? { label: `Delete the In–Out time (${fmtTime(this.range.b - this.range.a)}, ripple)…`, danger: true, onClick: () => this.rippleDelete() } : null,
+          { label: `Insert time ${here}…`, onClick: () => { this.setTime(at); this.insertTimeDialog(); } },
           '-',
           { label: 'Make the story longer', items: [10, 30, 60, 300, 600].map((d) => ({ label: `+ ${d < 60 ? `${d} s` : `${d / 60} min`}`, onClick: () => this.setDuration(this.duration + d) })) },
           { label: `End the story here (${fmtTime(at)})`, disabled: at < this.tl.contentEnd(), onClick: () => this.setDuration(at) },
@@ -593,6 +656,9 @@ export class Editor {
     return [
       { label: 'Rename…', onClick: () => this.inspector.focus('Name') },
       { label: t.collapsed ? 'Expand' : 'Collapse', onClick: () => { if (t.collapsed) delete t.collapsed; else t.collapsed = true; this.commit(); } },
+      { label: `Select everything in this ${isG ? 'group' : 'lane'}`, onClick: () => this.selectTrack(t) },
+      { label: 'Copy (with everything in it)', onClick: () => { this.select({ kind: 'track', track: t }); this.copy(); } },
+      { label: 'Colour', items: this.colorItems([t]) },
       !isG ? { label: 'Drop files here: drag them from your computer or the Assets tab', disabled: true } : null,
       '-',
       { label: t.mute ? `Unmute ${isG ? 'group' : 'lane'}` : `Mute ${isG ? 'group' : 'lane'} (everything in it)`, onClick: () => { if (t.mute) delete t.mute; else t.mute = true; this.commit(); } },
@@ -728,11 +794,79 @@ export class Editor {
   }
 
   // ------------------------------------------------------------------ selection, locks & editing
-  select(sel) {
-    this.sel = sel;
-    for (const o of this.app.objects) o.el?.classList.toggle('sel', sel?.kind === 'object' && sel.item === o);
+  // select one thing (replaces the selection) — or with mode 'add' / 'toggle' grow the multi-selection
+  select(sel, mode) {
+    if (sel?.kind === 'object' || !mode || !sel) this.sels = sel ? [sel] : [];
+    else {
+      this.sels = this.sels.filter((q) => q.kind !== 'object');
+      const i = this.sels.findIndex((q) => sameSel(q, sel));
+      if (i < 0) this.sels.push(sel);
+      else if (mode === 'toggle') this.sels.splice(i, 1);
+      else this.sels.push(...this.sels.splice(i, 1)); // already in: becomes the primary
+    }
+    this.sel = this.sels.at(-1) ?? null;
+    this.selItems = new Set(this.sels.map((q) => q.item ?? q.track));
+    for (const o of this.app.objects) o.el?.classList.toggle('sel', this.sel?.kind === 'object' && this.sel.item === o);
     this.inspector.show();
     this.timeline.draw();
+  }
+
+  selectMany(list, mode) {
+    if (!mode) this.sels = [];
+    for (const s of list) if (!this.sels.some((q) => sameSel(q, s))) this.sels.push(s);
+    this.select(this.sels.at(-1) ?? null, 'add');
+  }
+
+  isSel(x) { return this.selItems.has(x); }
+  get multi() { return this.sels.length > 1; }
+
+  // entity keys of the selection (src/editor/doc.js)
+  keyOf(s) {
+    if (!s || s.kind === 'object') return null;
+    if (s.kind === 'track') return `t:${s.track.id}`;
+    if (s.kind === 'key') return `k:${s.track.id}:${s.item.id}`;
+    if (s.kind === 'clip') return `c:${s.track.id}:${s.item.id}`;
+    if (s.kind === 'chapter') return `ch:${s.item.id}`;
+    if (s.kind === 'note') return `n:${s.item.id}`;
+    return null;
+  }
+  selectionKeys() { return this.sels.map((q) => this.keyOf(q)).filter(Boolean); }
+
+  // an entity key -> a selection (null if it's not in the story)
+  selFor(e) {
+    const p = parseKey(e), d = this.tl.data;
+    const track = p.track ? d.tracks.find((t) => t.id === p.track) : null;
+    const item = itemOf(d, e);
+    if (!item) return null;
+    if (p.kind === 't') return { kind: 'track', track: item };
+    if (p.kind === 'k') return { kind: 'key', track, item };
+    if (p.kind === 'c') return { kind: 'clip', track, item };
+    if (p.kind === 'ch') return { kind: 'chapter', item };
+    if (p.kind === 'n') return { kind: 'note', item };
+    return null;
+  }
+
+  selectEntities(keys) {
+    const list = [...new Set(keys)].map((e) => this.selFor(e)).filter(Boolean);
+    // keys / clips win over the track they sit on (an undo touches both)
+    const items = list.filter((q) => q.kind !== 'track' || !list.some((r) => r.track === q.track && r.kind !== 'track'));
+    this.selectMany(items.slice(0, 500));
+  }
+
+  // after undo: forget selected things that are gone
+  validateSelection() {
+    const d = this.tl.data;
+    const alive = (q) => {
+      if (q.kind === 'object') return true;
+      if (q.kind === 'chapter') return d.chapters.includes(q.item);
+      if (q.kind === 'note') return d.notes.includes(q.item);
+      if (!d.tracks.includes(q.track)) return false;
+      if (q.kind === 'key') return q.track.keys?.includes(q.item);
+      if (q.kind === 'clip') return q.track.clips?.includes(q.item);
+      return true;
+    };
+    const keep = this.sels.filter(alive);
+    if (keep.length !== this.sels.length) { this.sels = keep; this.select(keep.at(-1) ?? null, keep.length ? 'add' : undefined); }
   }
 
   // locked: the item itself, or the track it lives on
@@ -744,16 +878,44 @@ export class Editor {
   toggleLock() {
     const s = this.sel;
     if (!s || s.kind === 'object') return;
-    const own = s.kind === 'track' ? s.track : s.item;
-    if (!own.locked && s.track?.locked && s.kind !== 'track') return this.toast('The whole track is locked — unlock the track', true);
-    if (own.locked) delete own.locked; else own.locked = true;
-    this.commit();
-    this.toast(own.locked ? 'Locked' : 'Unlocked');
+    const targets = (this.multi ? this.sels : [s]).filter((q) => q.kind !== 'object');
+    const own = (q) => (q.kind === 'track' ? q.track : q.item);
+    const locking = !own(s).locked;
+    if (locking && s.track?.locked && s.kind !== 'track') return this.toast('The whole track is locked — unlock the track', true);
+    for (const q of targets) {
+      const o = own(q);
+      if (locking) o.locked = true; else delete o.locked;
+    }
+    this.commit(`${locking ? 'Locked' : 'Unlocked'} ${targets.length > 1 ? `${targets.length} items` : this.describe(s)}`);
+    this.toast(locking ? 'Locked' : 'Unlocked');
+  }
+
+  describe(s) {
+    if (!s) return '';
+    if (s.kind === 'track') return `“${s.track.label || s.track.id}”`;
+    if (s.kind === 'key') return `key at ${fmtTime(s.item.t)}`;
+    if (s.kind === 'clip') return `caption “${(s.item.title || '').replace(/\s+/g, ' ').slice(0, 24)}”`;
+    if (s.kind === 'chapter') return `chapter “${s.item.name}”`;
+    if (s.kind === 'note') return 'note';
+    return s.kind;
+  }
+
+  confirm(title, text, ok = 'OK', danger = false) {
+    return new Promise((res) => {
+      let done = false;
+      const end = (v) => { if (!done) { done = true; res(v); } };
+      dialog({ title, body: [h('p', {}, text)], buttons: [{ label: 'Cancel', onClick: () => end(false) }, { label: ok, primary: !danger, danger, onClick: () => end(true) }], onClose: () => end(false) });
+    });
   }
 
   // refuses (with a message) when the selection is locked
   guard(s = this.sel) {
-    if (this.isLocked(s)) { this.toast('Locked — right-click ▸ Unlock (or press L) to change it', true); return false; }
+    const list = s === this.sel && this.multi ? this.sels : [s];
+    const bad = list.find((q) => this.isLocked(q));
+    if (bad) {
+      this.toast('Locked — right-click ▸ Unlock (or press L) to change it', true);
+      return false;
+    }
     return true;
   }
 
@@ -808,16 +970,25 @@ export class Editor {
     this.timeline.draw();
   }
 
-  // finish an edit: one undo step, draft + autosave bookkeeping
-  commit() {
+  // finish an edit: whatever changed since the last commit becomes ONE undo step, + draft / autosave bookkeeping.
+  // `label` names it in the Edit menu ("Undo Moved 3 keys").
+  commit(label, { stack, stackLabel } = {}) {
     this.tl.changed();
-    const s = this.tl.serialize();
-    if (s === this.history[this.hi]) return;
-    this.history.splice(this.hi + 1);
-    this.history.push(s);
-    if (this.history.length > 300) this.history.shift();
-    this.hi = this.history.length - 1;
-    this.afterEdit(s);
+    ensureIds(this.tl.data);
+    roundAll(this.tl.data);
+    const changes = diffDocs(this.base, this.tl.data);
+    if (!changes.length) return;
+    apply(this.base, changes);
+    label ??= summarize(changes, this.tl.data);
+    const step = { changes, label: stackLabel ?? label };
+    if (stack) stack.push(step);
+    else {
+      this.undoStack.push(step);
+      if (this.undoStack.length > 300) this.undoStack.shift();
+      this.redoStack = [];
+    }
+    this.edits++;
+    this.afterEdit(this.tl.serialize());
   }
 
   afterEdit(s) {
@@ -833,56 +1004,45 @@ export class Editor {
     this.timeline.draw();
   }
 
-  restore(s) {
-    const path = this.selPath();
-    this.tl.set(JSON.parse(s));
-    this.sel = this.resolve(path);
-    const n = this.tl.data.settings.tunaCount;
+  // the runtime follows story-level settings that need more than a redraw
+  afterData() {
+    const n = this.tl.data.settings?.tunaCount;
     if (n && n !== this.app.tuna.count) this.app.setTunaCount(n);
     this.setTime(this.time);
-    this.afterEdit(s);
-    this.inspector.show();
   }
 
-  undo() { if (this.hi > 0) { this.hi--; this.restore(this.history[this.hi]); } }
-  redo() { if (this.hi < this.history.length - 1) { this.hi++; this.restore(this.history[this.hi]); } }
+  // Undo / redo: the inverse of the last step (only what still has the value that step gave it)
+  undo() { this.step(this.undoStack, this.redoStack, 'Undo'); }
+  redo() { this.step(this.redoStack, this.undoStack, 'Redo'); }
+  step(from, to, verb) {
+    const s = from.pop();
+    if (!s) return;
+    this.tl.changed();
+    const { keep } = stillValid(invert(s.changes), entities(this.base));
+    if (!keep.length) { this.toast(`${verb}: “${s.label}” — nothing left to change`, true, 5000); return; }
+    apply(this.tl.data, keep);
+    const prev = this.sels;
+    this.commit(`${verb}: ${s.label}`, { stack: to, stackLabel: s.label });
+    // select what it brought back / changed; if that's all gone (an undone copy), keep what's still there
+    this.selectEntities(keep.filter((c) => !c.del).map((c) => c.e).filter((e) => e.includes(':')));
+    if (!this.sels.length) { this.sels = prev; this.validateSelection(); this.select(this.sels.at(-1) ?? null, this.sels.length ? 'add' : undefined); }
+    this.afterData();
+    this.inspector.show();
+    this.toast(`${verb}: ${s.label}`);
+  }
 
-  // replace the whole story (open / restore / import) — one undo step
+  // replace the whole story (open / restore / import) — one undo step. Unchanged items keep their ids.
   loadText(text, label) {
     const data = migrate(JSON.parse(text));
     if (!Array.isArray(data.tracks)) throw new Error('not a story file (no tracks)');
+    ensureIds(data, this.tl.data);
     this.tl.set(data);
     this.sel = null;
-    const n = data.settings?.tunaCount;
-    if (n && n !== this.app.tuna.count) this.app.setTunaCount(n);
-    this.commit();
-    this.setTime(this.time);
+    this.commit(`Loaded ${label}`);
+    this.afterData();
     this.timeline.fit();
     this.select(null);
     this.toast(`Loaded ${label} — ${mod}Z to undo, Save to keep it`);
-  }
-
-  // selection as indices (survives undo / redo, which rebuild the data objects)
-  selPath() {
-    const s = this.sel, d = this.tl.data;
-    if (!s) return null;
-    if (s.kind === 'object') return s;
-    const ti = s.track ? d.tracks.indexOf(s.track) : -1;
-    const ii = s.kind === 'key' ? s.track.keys.indexOf(s.item) : s.kind === 'clip' ? s.track.clips.indexOf(s.item)
-      : s.kind === 'chapter' ? d.chapters.indexOf(s.item) : s.kind === 'note' ? d.notes.indexOf(s.item) : -1;
-    return { kind: s.kind, ti, ii };
-  }
-
-  resolve(path) {
-    if (!path) return null;
-    if (path.kind === 'object') return path;
-    const d = this.tl.data, track = d.tracks[path.ti];
-    if (path.kind === 'chapter') return d.chapters[path.ii] ? { kind: 'chapter', item: d.chapters[path.ii] } : null;
-    if (path.kind === 'note') return d.notes[path.ii] ? { kind: 'note', item: d.notes[path.ii] } : null;
-    if (!track) return null;
-    if (path.kind === 'track') return { kind: 'track', track };
-    const item = path.kind === 'key' ? track.keys?.[path.ii] : track.clips?.[path.ii];
-    return item ? { kind: path.kind, track, item } : { kind: 'track', track };
   }
 
   // the track K / "+ Key" adds to: the selected camera / curve track, else the camera
@@ -948,19 +1108,10 @@ export class Editor {
     this.select({ kind: 'clip', track: t, item: c });
   }
 
-  splitCaption(track, c) {
-    const x = r4(this.time), right = { ...structuredClone(c), a: x };
-    delete right.locked;
-    c.b = x;
-    track.clips.push(right);
-    this.commit();
-    this.select({ kind: 'clip', track, item: right });
-  }
-
   addNote() {
     const n = { t: r4(this.time), text: '' };
     this.tl.data.notes.push(n);
-    this.commit();
+    this.commit('Added a note');
     this.select({ kind: 'note', item: n });
     setTimeout(() => this.inspector.focus('Text'), 0);
   }
@@ -1054,84 +1205,6 @@ export class Editor {
     this.commit();
   }
 
-  deleteSelection() {
-    const s = this.sel, d = this.tl.data;
-    if (!s || s.kind === 'object' || !this.guard()) return;
-    if (s.kind === 'track' && (s.track.type === 'group' || s.track.type === 'lane')) return this.removeContainer(s.track, s.track.type === 'lane');
-    if (s.kind === 'track' && (s.track.keys?.some((k) => k.locked) || s.track.clips?.some((c) => c.locked))) return this.toast('This track has locked items — unlock them first', true);
-    const drop = (arr, it) => { const i = arr.indexOf(it); if (i >= 0) arr.splice(i, 1); };
-    if (s.kind === 'key') drop(s.track.keys, s.item);
-    else if (s.kind === 'clip') drop(s.track.clips, s.item);
-    else if (s.kind === 'track') drop(d.tracks, s.track);
-    else if (s.kind === 'chapter') drop(d.chapters, s.item);
-    else if (s.kind === 'note') drop(d.notes, s.item);
-    const back = s.kind === 'key' || s.kind === 'clip' ? { kind: 'track', track: s.track } : null;
-    this.commit();
-    this.select(back);
-    this.toast(`Deleted — ${mod}Z to undo`);
-  }
-
-  // ------------------------------------------------------------------ clipboard
-  copyable(s) { return !!s && ['key', 'clip', 'chapter', 'note'].includes(s.kind); }
-
-  copy() {
-    const s = this.sel;
-    if (!this.copyable(s)) return;
-    const item = structuredClone(s.item);
-    delete item.locked;
-    this.clipboard = { kind: s.kind, type: s.track?.type, bind: s.track?.bind, space: s.track?.space, layer: s.track?.type === 'layer' ? s.track.id : undefined, item };
-    try { localStorage.setItem(CLIP_KEY, JSON.stringify(this.clipboard)); } catch { /* storage unavailable */ }
-    navigator.clipboard?.writeText(JSON.stringify(this.clipboard, null, 1)).catch(() => {});
-    this.toast('Copied');
-  }
-
-  cut() {
-    if (!this.copyable(this.sel) || !this.guard()) return;
-    this.copy();
-    this.deleteSelection();
-  }
-
-  // paste at the playhead; keys go to a matching track (the given / selected one if it fits)
-  paste(into) {
-    const c = this.clipboard;
-    if (!c) return;
-    const x = r4(this.time), it = structuredClone(c.item);
-    const fits = (t) => t && t.type === c.type && (c.type !== 'curve' || t.bind === c.bind) && (c.type !== 'path' || t.bind === c.bind) && (c.type !== 'layer' || (t.space ?? 'screen') === (c.space ?? 'screen'));
-    if (c.kind === 'key') {
-      const t = [into, this.sel?.track].find(fits) ?? this.tl.tracks.find(fits);
-      if (!t) return this.toast(`No ${c.type === 'curve' ? `“${c.bind}”` : c.type === 'layer' ? 'matching layer (select one)' : c.type} track to paste into`, true);
-      if (t.locked) return this.toast(`“${t.label}” is locked`, true);
-      it.t = x;
-      t.keys = t.keys.filter((k) => Math.abs(k.t - x) > 1e-3 || k.locked);
-      t.keys.push(it);
-      this.commit();
-      return this.select({ kind: 'key', track: t, item: it });
-    }
-    if (c.kind === 'clip') {
-      const t = this.captionsTrack();
-      if (t.locked) return this.toast('The Captions track is locked', true);
-      const w = it.b - it.a;
-      it.a = r4(Math.max(0, Math.min(x, this.duration - w)));
-      it.b = r4(it.a + w);
-      t.clips.push(it);
-      this.commit();
-      return this.select({ kind: 'clip', track: t, item: it });
-    }
-    it.t = x;
-    this.tl.data[c.kind === 'chapter' ? 'chapters' : 'notes'].push(it);
-    this.commit();
-    this.select({ kind: c.kind, item: it });
-  }
-
-  duplicate() {
-    if (this.sel?.kind === 'track' && this.sel.track.type === 'layer') return this.lt.duplicate(this.sel.track);
-    if (!this.copyable(this.sel)) return;
-    const keep = this.clipboard;
-    this.copy();
-    this.paste(this.sel.track);
-    this.clipboard = keep;
-  }
-
   stepKey(dir) {
     const keys = [];
     const tracks = this.sel?.track ? [this.sel.track] : this.tl.tracks;
@@ -1152,6 +1225,7 @@ export class Editor {
     this.playMode = mode;
     if (mode === 'auto' && this.time >= this.duration - 1e-3) this.setTime(0);
     this.playing = true;
+    if (this.loop && this.range && (this.time < this.range.a || this.time >= this.range.b - 1e-3)) this.setTime(this.range.a);
     this.playFrom = this.time;
     this.scrollT = this.time;
     const { camera, controls } = this.app;
@@ -1184,9 +1258,11 @@ export class Editor {
     if (this.playing) {
       if (this.playMode === 'auto') {
         this.setTime(this.time + rdt * this.speed);
-        if (this.time >= this.duration) this.pause();
+        if (this.loop && this.range && this.time >= this.range.b) this.setTime(this.range.a);
+        else if (this.time >= this.duration) this.pause();
       } else {
         // the website's scroll smoothing (story.js): p += (target − p)·(1 − e^(−2.4·dt))
+        if (this.loop && this.range && this.scrollT >= this.range.b) { this.scrollT = this.range.a; this.setTime(this.range.a); }
         const d = this.scrollT - this.time;
         this.setTime(Math.abs(d) < 1e-4 ? this.scrollT : this.time + d * (1 - Math.exp(-rdt * 2.4)));
       }
@@ -1241,7 +1317,9 @@ export class Editor {
       if (cmd && e.code === 'KeyO') { e.preventDefault(); this.project.pickAndOpen(); return; }
       if (typing) return;
       if (cmd) {
-        const k = { KeyZ: () => (e.shiftKey ? this.redo() : this.undo()), KeyY: () => this.redo(), KeyD: () => this.duplicate(), KeyC: () => this.copy(), KeyX: () => this.cut(), KeyV: () => this.paste() }[e.code];
+        // copy / cut / paste go through the browser's clipboard events (below): other tabs and computers too
+        if (e.code === 'KeyV' && e.shiftKey) { e.preventDefault(); const r = this.$tlwrap.getBoundingClientRect(); openMenu(r.left + 240, r.top + 20, this.pasteSpecialItems()); return; }
+        const k = { KeyZ: () => (e.shiftKey ? this.redo() : this.undo()), KeyY: () => this.redo(), KeyD: () => this.duplicate(), KeyA: () => this.selectAll() }[e.code];
         if (k) { e.preventDefault(); k(); }
         return;
       }
@@ -1254,16 +1332,20 @@ export class Editor {
       const frame = e.shiftKey ? 1 : 1 / 30;
       switch (e.code) {
         case 'Space': e.preventDefault(); this.playing ? this.pause() : this.play('site'); break;
-        case 'Escape': if (this.playing) this.stop(); else this.select(null); break;
+        case 'Escape': if (this.recorder.rec) this.recorder.stop(); else if (this.playing) this.stop(); else this.select(null); break;
         case 'Home': this.pause(); this.setTime(0); break;
         case 'End': this.pause(); this.setTime(this.duration); break;
-        case 'ArrowLeft': e.preventDefault(); this.pause(); this.setTime(this.time - frame); break;
-        case 'ArrowRight': e.preventDefault(); this.pause(); this.setTime(this.time + frame); break;
+        case 'ArrowLeft': e.preventDefault(); if (e.altKey) { this.nudge(-frame); break; } this.pause(); this.setTime(this.time - frame); break;
+        case 'ArrowRight': e.preventDefault(); if (e.altKey) { this.nudge(frame); break; } this.pause(); this.setTime(this.time + frame); break;
+        case 'KeyI': this.setIn(); break;
+        case 'KeyO': this.setOut(); break;
+        case 'KeyX': if (e.altKey) this.clearRange(); break;
+        case 'KeyS': this.splitAtPlayhead(); break;
         case 'Comma': this.pause(); this.stepKey(-1); break;
         case 'Period': this.pause(); this.stepKey(1); break;
         case 'KeyK': this.addKey(); break;
         case 'KeyL': this.toggleLock(); break;
-        case 'Delete': case 'Backspace': e.preventDefault(); this.deleteSelection(); break;
+        case 'Delete': case 'Backspace': e.preventDefault(); if (e.shiftKey) this.rippleDelete(); else this.deleteSelection(); break;
         case 'Digit1': this.setView('scene'); break;
         case 'Digit2': this.setView('game'); break;
         case 'KeyF': this.timeline.fit(); break;
@@ -1272,11 +1354,32 @@ export class Editor {
     });
   }
 
+  // the system clipboard: Ctrl+C / X put the selection there as JSON, Ctrl+V takes a copied selection (from any
+  // studio tab or computer) — or pasted image / video files, which become layers at the playhead
+  bindClipboard() {
+    const ours = (e) => !document.querySelector('.ed-modal') && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !e.target.isContentEditable;
+    addEventListener('copy', (e) => { if (ours(e) && this.copyable(this.sel)) { e.preventDefault(); this.copy(e); } });
+    addEventListener('cut', (e) => { if (ours(e) && this.copyable(this.sel)) { e.preventDefault(); this.cut(e); } });
+    addEventListener('paste', (e) => {
+      if (!ours(e)) return;
+      e.preventDefault();
+      const files = [...(e.clipboardData?.files ?? [])];
+      if (files.length) { (async () => { let t = this.time; for (const f of files) { const m = await this.lt.addFile(f, { at: t }); if (m) t = m.b; } })(); return; }
+      let c = null;
+      try { const j = JSON.parse(e.clipboardData?.getData('text/plain') || 'null'); if (j?.app === 'open-tuna' || (j?.kind && j?.item)) c = j; } catch { /* not ours */ }
+      if (c) this.setClipboard(c);
+      this.paste();
+    });
+  }
+
   shortcutsDialog() {
     const rows = [
       ['Space', 'Play (scroll like the website) / Pause'], ['▶▶', 'Auto-play at the chosen speed'], ['Wheel / ↑↓ / PgUp PgDn', 'Scroll while playing'], ['Esc', 'Stop (back to start of play) / deselect'], ['← →', 'Step 1 frame (Shift: 1 s)'], ['Home / End', 'Start / end of story'],
       [', .', 'Previous / next key'], ['K', 'Add key here (Scene view: from your view)'], ['L', 'Lock / unlock selection'], ['Del', 'Delete'],
-      [`${mod}C / X / V`, 'Copy / cut / paste at playhead'], [`${mod}D`, 'Duplicate at playhead'], [`${mod}Z / Y`, 'Undo / redo'],
+      [`${mod}C / X / V`, 'Copy / cut / paste at playhead (keeps relative timing)'], [`${mod}⇧V`, 'Paste special'], [`${mod}D`, 'Duplicate at playhead'], [`${mod}Z / Y`, 'Undo / redo your own last edit'],
+      ['Shift-click · Ctrl/Cmd-click', 'Add to / toggle in the selection'], ['Drag on empty space', 'Box select'], [`${mod}A`, 'Select all'],
+      ['Drag a selected item', 'Move the whole selection'], ['Alt + drag', 'Drag a copy'], ['Bracket on the ruler', 'Stretch the selection’s timing'],
+      ['Alt + ← →', 'Nudge the selection 1 frame (Shift: 1 s)'], ['S', 'Split at playhead'], ['I / O', 'Set In / Out (Alt+X clears)'], ['⇧Del', 'Delete the In–Out time (ripple)'],
       [`${mod}S`, 'Save'], [`${mod}⇧S`, 'Save checkpoint'], [`${mod}O`, 'Open / restore'], ['1 / 2', 'Scene / Game view'], ['F', 'Fit timeline'],
       ['WASD QE', 'Fly (Scene view, Shift = fast)'], ['Right-click', 'Options for anything'], ['Ctrl + wheel', 'Zoom timeline'], ['Shift + wheel', 'Pan timeline'], ['Shift + drag', 'Move without snapping'],
     ];
@@ -1338,6 +1441,12 @@ export class Editor {
     }
   }
 
+  // a link that opens this project in the editor at this moment (for a teammate)
+  async copyLink() {
+    const link = new URL(`${editorURL(PROJECT)}&t=${this.time.toFixed(2)}`, location.href).href;
+    try { await navigator.clipboard.writeText(link); this.toast(`Link to ${fmtTime(this.time)} copied`); } catch { this.toast(link, false, 15000); }
+  }
+
   // the site's time for this moment (stretch regions: the previewed item's cycle)
   openSite() { window.open(playURL(PROJECT, this.tl.warp(this.time, this.story.previewItem).toFixed(2)), '_blank'); }
 
@@ -1363,6 +1472,9 @@ export class Editor {
   }
 }
 
+Object.assign(Editor.prototype, editOps);
+
+const sameSel = (a, b) => a.kind === b.kind && (a.item ?? null) === (b.item ?? null) && (a.track ?? null) === (b.track ?? null);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 // "1:05", "1:05.5", "65", "1:02:03" -> seconds (null if unreadable)

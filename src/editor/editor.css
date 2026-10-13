@@ -204,8 +204,8 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 .ed-gbox .ed-handle { pointer-events: auto; }
 
 /* ---- left panel tabs + assets grid */
-.ed-h.ltabs { display: flex; gap: 4px; padding: 6px 8px; }
-.ltab { flex: 1; height: 26px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--dim); font: 600 11px/1 Inter, system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.ed-h.ltabs { display: flex; gap: 2px; padding: 6px 6px; }
+.ltab { flex: 1 1 auto; min-width: 0; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 26px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--dim); font: 600 10px/1 Inter, system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
 .ltab.on { background: var(--panel2); border-color: var(--line2); color: var(--text); }
 .ed-abar { display: flex; gap: 4px; padding: 8px; position: sticky; top: 42px; background: var(--panel); z-index: 1; }
 .ed-abar .ed-btn { height: 26px; padding: 0 7px; font-size: 11px; }
@@ -294,3 +294,33 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 .ins .hint.ok { color: var(--good); }
 .ins .pv { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .ins .pv .ed-btn { height: 22px; padding: 0 8px; }
+
+/* ---- timeline filter, inspector extras ---- */
+.ed-filter { flex: none; height: 24px; width: 130px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 6px; color: var(--text); padding: 0 8px; font-size: 11px; }
+/* the mode switch never squeezes; the rest of the top bar gives way */
+#ed-mode { flex: none; }
+#ed-mode .m small { white-space: nowrap; }
+#ed-readout { min-width: 110px; flex: 0 1 auto; }
+#ed-status { flex: none; }
+.ltab { padding: 0 2px; letter-spacing: 0; }
+@media (max-width: 1500px) { #ed-tlbar .hint { display: none; } }
+.imp-list { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px; margin: 8px 0; display: flex; flex-direction: column; }
+.imp-r { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+.imp-r:hover { background: var(--panel2); }
+.imp-r .tp { font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); width: 52px; flex: none; }
+.imp-r b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.imp-r small { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.ed-check .rows { display: flex; flex-direction: column; gap: 2px; max-height: 58vh; overflow: auto; }
+.ed-check .ck { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; }
+.ed-check .ck:hover { background: var(--panel2); }
+.ed-check .ck .ic { flex: none; width: 18px; }
+.ed-check .ck .tx { flex: 1; min-width: 0; }
+.ed-check .ck.info .tx { color: var(--dim); }
+.ed-check .ck .ac { display: flex; gap: 4px; flex: none; }
+.ed-check .ck .ed-btn { height: 22px; font-size: 11px; padding: 0 7px; }
+.ed-rec { position: absolute; top: 10px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border-radius: 8px; background: rgba(20, 8, 8, .85); color: #ffd6d6; font: 600 11px Inter, system-ui, sans-serif; letter-spacing: .08em; }
+.ed-rec i { width: 9px; height: 9px; border-radius: 50%; background: #ff4d4d; animation: ed-blink 1s infinite; }
+.ed-rec b { font-variant-numeric: tabular-nums; letter-spacing: 0; color: #fff; }
+.ed-rec .ed-btn { height: 22px; font-size: 11px; }
+@keyframes ed-blink { 50% { opacity: .25; } }
+.ed-recv { width: 100%; max-height: 52vh; background: #000; border-radius: 8px; }

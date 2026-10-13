@@ -235,12 +235,17 @@ function Editor($ctx, [string]$path) {
     if ($stem.Length -gt 60) { $stem = $stem.Substring(0, 60) }
     if (-not $stem) { $stem = 'file' }
     $bytes = ReadBytes $req
-    New-Item -ItemType Directory -Force $P.assets | Out-Null
-    $file = Join-Path $P.assets "$stem.$ext"; $n = 1
+    $folder = $P.assets
+    if ($q['dir']) { # keep a sub-folder of assets/ (importing another project's media)
+      $folder = [IO.Path]::GetFullPath((Join-Path $P.root ($q['dir'] -replace '/', '\')))
+      if ($folder -ne $P.assets -and -not $folder.StartsWith($P.assets + $sep)) { throw 'dir must be inside assets/' }
+    }
+    New-Item -ItemType Directory -Force $folder | Out-Null
+    $file = Join-Path $folder "$stem.$ext"; $n = 1
     while (Test-Path $file) {
       $old = [IO.File]::ReadAllBytes($file)
       if ($old.Length -eq $bytes.Length -and [Linq.Enumerable]::SequenceEqual([byte[]]$old, [byte[]]$bytes)) { break }
-      $n++; $file = Join-Path $P.assets "$stem-$n.$ext"
+      $n++; $file = Join-Path $folder "$stem-$n.$ext"
     }
     if (-not (Test-Path $file)) { [IO.File]::WriteAllBytes($file, $bytes) }
     SendJson $ctx 200 @{ ok = $true; file = (Rel $P $file) }; return
@@ -291,6 +296,24 @@ function Editor($ctx, [string]$path) {
       $list += (Files $P $P.assets)
       $list += (Files $P $P.check)
       SendJson $ctx 200 @{ files = $list }; return
+    }
+    '/__editor/asset-import' {
+      # a file of another project (pasting / importing between projects) -> the same path here; same bytes = reused
+      $src = Proj $q['from']
+      $rel = ($q['file'] -replace '\\', '/')
+      $sp = [IO.Path]::GetFullPath((Join-Path $src.root ($rel -replace '/', '\')))
+      if (-not $sp.StartsWith($src.assets + $sep) -or -not (Test-Path -LiteralPath $sp -PathType Leaf)) { throw "$rel is not a file of $($q['from'])" }
+      $bytes = [IO.File]::ReadAllBytes($sp)
+      $dst = [IO.Path]::GetFullPath((Join-Path $P.root ($rel -replace '/', '\')))
+      if (-not $dst.StartsWith($P.assets + $sep)) { throw 'not an asset path' }
+      $stem = Join-Path ([IO.Path]::GetDirectoryName($dst)) ([IO.Path]::GetFileNameWithoutExtension($dst)); $ext = [IO.Path]::GetExtension($dst); $n = 1
+      while (Test-Path -LiteralPath $dst) {
+        $old = [IO.File]::ReadAllBytes($dst)
+        if ($old.Length -eq $bytes.Length -and [Linq.Enumerable]::SequenceEqual([byte[]]$old, [byte[]]$bytes)) { break }
+        $n++; $dst = "$stem-$n$ext"
+      }
+      if (-not (Test-Path -LiteralPath $dst)) { New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($dst)) | Out-Null; [IO.File]::WriteAllBytes($dst, $bytes) }
+      SendJson $ctx 200 @{ ok = $true; file = (Rel $P $dst) }; return
     }
     '/__editor/asset-delete' {
       $full = [IO.Path]::GetFullPath((Join-Path $P.root $q['file']))

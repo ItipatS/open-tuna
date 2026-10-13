@@ -27,8 +27,11 @@ assets/, saves/. Paths in requests / replies are relative to that folder; the to
     GET  /__editor/load?file=<path>      story.json or a file in saves/  |  ?git=<commit>  (story.json at that commit)
     POST /__editor/delete?file=<path>    delete a checkpoint
     POST /__editor/upload?name=file.png  body = file bytes -> assets/<name> (never overwrites) -> {file}
+                                         &dir=assets/sub: into that sub-folder of assets/
     GET  /__editor/assets                every file under assets/ {file, size, mtime} + models/*.glb (builtin)
     POST /__editor/asset-delete?file=    delete one file under assets/
+    POST /__editor/asset-import?from=<project>&file=assets/…   copy a file of another project into this one (pasting /
+                                         importing between projects); same name + same bytes = reused -> {file}
     GET  /__editor/files                 what a .tuna holds: story.json, assets/**, saves/checkpoints/*.json
     GET  /__editor/projects              {projects: working copies in projects/, demos: demos/} each {project, name, mtime, thumb}
     POST /__editor/project/new?name=     make projects/<slug>/ -> {project}; &from=demo/<id> fills it with a copy of that
@@ -438,17 +441,46 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if ext not in UPLOAD_EXT:
                         raise ValueError(f'.{ext} files are not allowed')
                     stem = re.sub(r'[^A-Za-z0-9_-]+', '-', stem).strip('-')[:60] or 'file'
-                    p, n = os.path.join(P.assets, f'{stem}.{ext}'), 1
+                    folder = P.assets
+                    if q.get('dir'):  # keep a sub-folder of assets/ (importing another project's media)
+                        folder = P.inside(q['dir'].replace('\\', '/'))
+                        if folder != P.assets and not folder.startswith(P.assets + os.sep):
+                            raise ValueError('dir must be inside assets/')
+                    p, n = os.path.join(folder, f'{stem}.{ext}'), 1
                     body = self.body()
                     while os.path.exists(p):
                         with open(p, 'rb') as f:
                             if f.read() == body:  # same file uploaded again: reuse it
                                 break
                         n += 1
-                        p = os.path.join(P.assets, f'{stem}-{n}.{ext}')
+                        p = os.path.join(folder, f'{stem}-{n}.{ext}')
                     else:
                         write(p, body)
                     return self.reply(200, {'ok': True, 'file': P.rel(p)})
+                if path == '/__editor/asset-import':
+                    fr = q.get('from', '')
+                    src = Proj(fr)
+                    sroot, sassets = src.root, src.assets
+                    rel = (q.get('file') or '').replace('\\', '/')
+                    sp = os.path.normpath(os.path.join(sroot, rel))
+                    if not sp.startswith(sassets + os.sep) or not os.path.isfile(sp):
+                        raise ValueError(f'{rel} is not a file of {fr}')
+                    with open(sp, 'rb') as f:
+                        body = f.read()
+                    dst = P.inside(rel)
+                    if not dst.startswith(P.assets + os.sep):
+                        raise ValueError('not an asset path')
+                    stem, ext = os.path.splitext(dst)
+                    n = 1
+                    while os.path.exists(dst):
+                        with open(dst, 'rb') as f:
+                            if f.read() == body:
+                                break
+                        n += 1
+                        dst = f'{stem}-{n}{ext}'
+                    else:
+                        write(dst, body)
+                    return self.reply(200, {'ok': True, 'file': P.rel(dst)})
                 if path == '/__editor/asset-delete':
                     p = os.path.normpath(os.path.join(P.root, q.get('file', '')))
                     if not p.startswith(P.assets + os.sep) or not os.path.isfile(p):

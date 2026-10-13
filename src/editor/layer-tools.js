@@ -169,7 +169,7 @@ export class LayerTools {
   async dropOnTimeline(dt, at, target) {
     const ed = this.ed;
     const tuna = [...dt.files].find((f) => /\.tuna$/i.test(f.name));
-    if (tuna) return ed.project.openTuna(tuna); // a project file: open it (no lane)
+    if (tuna) return ed.importer.offer(tuna); // a project file: open it, or import it into this story
     let lane = target?.type === 'lane' ? target : null;
     if (!lane) lane = ed.addLane({ parent: target?.type === 'group' ? target.id : target?.parent, select: false });
     if (ed.tl.lockedTrack(lane)) return ed.toast(`“${lane.label}” is locked`, true);

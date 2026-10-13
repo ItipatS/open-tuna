@@ -155,7 +155,10 @@ export class SiteBuilder {
       ed.toast(`Built ${n} files into “${dir.name}”`);
       return true;
     };
+    const chk = await ed.checker.summary().catch(() => null);
     body.replaceChildren(
+      chk && (chk.errors || chk.warns) ? h('p', { class: chk.errors ? 'warn' : 'muted' }, `Project check: ${chk.errors} problem${chk.errors === 1 ? '' : 's'}, ${chk.warns} warning${chk.warns === 1 ? '' : 's'} `,
+        h('button', { class: 'ed-btn', onclick: () => { d.close(); ed.checker.dialog(); } }, 'Show them')) : null,
       h('p', {}, `${files.size} files · ${mb(total)} — the story as it is now (unsaved changes included). Upload the folder (or the unzipped zip) to any static host over HTTPS.`),
       notes.length ? h('ul', { class: 'notes' }, notes.map((n) => h('li', {}, n))) : null,
       h('div', { class: 'groups' }, Object.entries(groups).filter(([, l]) => l.length).map(([g, l]) => h('details', {},

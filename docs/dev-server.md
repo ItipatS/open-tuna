@@ -33,6 +33,8 @@ Story endpoints need **`project=<id>`**: `demo/<id>` → `demos/<id>/` (demos, c
 | GET | `git/status` | `{branch, upstream, ahead, changes}` for the demo's folder (demos only) |
 | POST | `git/commit` | body `{message}`: commits **only** the demo's folder (demos only) |
 | POST | `git/push` | pushes the current branch (`-u origin HEAD` if no upstream); `GIT_TERMINAL_PROMPT=0` |
+| POST | `upload?name=&dir=assets/…` | as `upload`, into that sub-folder of `assets/` (imports keep their folders) |
+| POST | `asset-import?from=<project>&file=assets/…` | copies a file of another project into this one; same name + same bytes = reused, else `-2`… → `{file}` (pasting / importing between projects) |
 
 **Options** (shared servers, see [deploy.md](deploy.md)): `--host`, `--password` (env `OPEN_TUNA_PASSWORD`; HTTP
 Basic on every request), `--no-git` (git endpoints refuse; ping reports `git: false`). PowerShell: `-BindHost`,

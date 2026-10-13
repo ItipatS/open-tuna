@@ -1,6 +1,9 @@
-// Timeline panel: ruler (chapters, notes, playhead, story end), one lane per story.json track, and a
+// Timeline panel: ruler (chapters, notes, playhead, story end, In / Out range), one lane per story.json track, and a
 // performance lane that records the fps measured at each moment. All in story time (seconds); the visible
 // range zooms from a fraction of a second to hours. Drawn on one canvas; hit-tested by hand.
+// Selection: click; Shift-click adds, Ctrl / Cmd-click toggles; drag on empty space draws a box. Dragging anything
+// selected moves the whole selection; Alt-drag drags a copy; the bracket on the ruler (2+ selected) stretches the
+// selection's timing.
 import { h } from './dom.js';
 import { evalCurve, evalClip, fmtTime } from '../timeline.js';
 import { PARAMS } from '../story.js';
@@ -13,13 +16,15 @@ const SUB = 24; // height of one clip row inside a lane
 const THIN = 14; // a collapsed row
 const INDENT = 12;
 const PERF_H = 34;
-const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', stretch: '#ffb86b', layer: '#f78fb3', path: '#7be3d0', lane: '#b49cff', group: '#9aa4b2', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f' };
+export const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', stretch: '#ffb86b', layer: '#f78fb3', path: '#7be3d0', lane: '#b49cff', group: '#9aa4b2', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f', range: '#5fb3ff' };
 const TYPE = { camera: 'CAM', captions: 'TXT', curve: 'CRV', clip: 'CLIP', stretch: 'REP', layer: 'LYR', path: 'PATH', lane: 'LANE', group: '' };
-const BAR = new Set(['layer', 'path']); // tracks drawn as one bar with keys inside (the keys move with the bar)
-const KIND = { image: 'IMG', video: 'VID', html: 'HTML', iframe: 'WEB' };
+export const BAR = new Set(['layer', 'path']); // tracks drawn as one bar with keys inside (the keys move with the bar)
+const KIND = { image: 'IMG', video: 'VID', html: 'HTML', iframe: 'WEB', text: 'TXT', glass: 'GLASS', model: '3D' };
 const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+const SPAN_Y = CH + 2; // the selection's stretch bracket on the ruler
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const r4 = (x) => Math.round(x * 1e4) / 1e4;
 
 export class TimelineView {
   constructor(ed, wrap) {
@@ -31,6 +36,8 @@ export class TimelineView {
     this.scrollY = 0;
     this.drag = null;
     this.hover = null;
+    this.filter = '';
+    this.boxSet = null;
     this.fit(false);
     new ResizeObserver(() => this.resize()).observe(wrap);
     this.resize();
@@ -50,7 +57,7 @@ export class TimelineView {
       if (!accepts(e)) return;
       e.preventDefault();
       const [x, y] = this.xy(e);
-      this.dropAt = { t: this.T(x), row: this.rows.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h) };
+      this.dropAt = { t: this.T(x), row: this.rowAt(y) };
       this.draw();
     });
     cv.addEventListener('dragleave', () => { this.dropAt = null; this.draw(); });
@@ -58,7 +65,7 @@ export class TimelineView {
       if (!accepts(e)) return;
       e.preventDefault();
       const [x, y] = this.xy(e);
-      const row = this.rows.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h);
+      const row = this.rowAt(y);
       this.dropAt = null;
       this.ed.lt.dropOnTimeline(e.dataTransfer, Math.max(0, this.snap(this.T(x), e)), row?.t ?? null);
     });
@@ -96,6 +103,15 @@ export class TimelineView {
     }
   }
 
+  color(t) { return t.color || COL[t.type] || '#8b93a0'; }
+
+  // does a track match the filter box? (label, type, bound parameter / actor, layer kind or file)
+  matches(t) {
+    const f = this.filter;
+    if (!f) return true;
+    return [t.label, t.id, t.type, t.bind, t.kind, t.src, t.title].some((v) => v && String(v).toLowerCase().includes(f));
+  }
+
   // rows: groups (folders) with their tracks indented under them, lanes holding several layer / path clips
   // (packed into sub-rows where they overlap), every row collapsible to a thin strip
   layout() {
@@ -103,22 +119,30 @@ export class TimelineView {
     const lanes = new Set(tracks.filter((t) => t.type === 'lane').map((t) => t.id));
     const groups = new Set(tracks.filter((t) => t.type === 'group').map((t) => t.id));
     const inLane = (t) => t.lane && lanes.has(t.lane) && BAR.has(t.type);
+    const f = this.filter;
+    const laneMembers = (l) => tracks.filter((m) => m.lane === l.id && BAR.has(m.type) && (!f || this.matches(l) || this.matches(m)));
+    const shows = (t) => {
+      if (!f) return true;
+      if (t.type === 'lane') return this.matches(t) || laneMembers(t).length > 0;
+      if (t.type === 'group') return this.matches(t) || tracks.some((c) => c.parent === t.id && c.type !== 'group' && !inLane(c) && shows(c));
+      return this.matches(t);
+    };
     const rows = [];
     let y = RULER;
     const add = (t, depth) => {
-      let h, pack = null;
-      if (t.type === 'group') h = ROW.group;
+      let hh, pack = null;
+      if (t.type === 'group') hh = ROW.group;
       else if (t.type === 'lane') {
-        pack = this.pack(tracks.filter((m) => m.lane === t.id && BAR.has(m.type)));
-        h = t.collapsed ? THIN : Math.max(1, pack.n) * SUB + 6;
-      } else h = t.collapsed ? THIN : ROW[t.type] || 26;
-      rows.push({ t, y, h, depth, pack });
-      y += h;
+        pack = this.pack(laneMembers(t));
+        hh = t.collapsed && !f ? THIN : Math.max(1, pack.n) * SUB + 6;
+      } else hh = t.collapsed && !f ? THIN : ROW[t.type] || 26;
+      rows.push({ t, y, h: hh, depth, pack });
+      y += hh;
     };
     for (const t of tracks) {
-      if (inLane(t) || (t.parent && groups.has(t.parent) && t.type !== 'group')) continue;
+      if (inLane(t) || (t.parent && groups.has(t.parent) && t.type !== 'group') || !shows(t)) continue;
       add(t, 0);
-      if (t.type === 'group' && !t.collapsed) for (const c of tracks) if (c.parent === t.id && c.type !== 'group' && !inLane(c)) add(c, 1);
+      if (t.type === 'group' && (!t.collapsed || f)) for (const c of tracks) if (c.parent === t.id && c.type !== 'group' && !inLane(c) && (shows(c) || (f && this.matches(t)))) add(c, 1);
     }
     rows.push({ perf: true, y, h: PERF_H });
     y += PERF_H;
@@ -126,6 +150,8 @@ export class TimelineView {
     this.scrollY = clamp(this.scrollY, 0, Math.max(0, y - this.H + 6));
     return rows;
   }
+
+  rowAt(y) { return this.rows?.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h) ?? null; }
 
   locked(track, item) { return !!((track && this.ed.tl.lockedTrack(track)) || item?.locked); }
 
@@ -152,6 +178,8 @@ export class TimelineView {
     return [t];
   }
 
+  sel(x) { return this.ed.isSel(x) || !!this.boxSet?.has(x); }
+
   // ------------------------------------------------------------------ drawing
   draw() {
     const { ctx, W, H, ed } = this;
@@ -171,6 +199,8 @@ export class TimelineView {
       const x0 = Math.max(HEAD, this.X(c.t)), x1 = this.X(tl.data.chapters[i + 1]?.t ?? D);
       if (i % 2) { ctx.fillStyle = 'rgba(255,255,255,0.018)'; ctx.fillRect(x0, RULER, x1 - x0, H); }
     });
+    const rg = ed.range;
+    if (rg) { ctx.fillStyle = 'rgba(95,179,255,0.06)'; ctx.fillRect(Math.max(HEAD, this.X(rg.a)), RULER, this.X(rg.b) - Math.max(HEAD, this.X(rg.a)), H); }
     for (const r of rows) {
       const y = r.y - this.scrollY;
       if (y > H || y + r.h < RULER) continue;
@@ -183,7 +213,7 @@ export class TimelineView {
       ctx.beginPath(); ctx.rect(HEAD, y, W - HEAD, r.h); ctx.clip();
       ctx.globalAlpha = r.t && tl.muted(r.t) ? 0.35 : 1;
       if (r.perf) this.drawPerf(y, r.h);
-      else if (r.t.type === 'group' || r.t.collapsed) this.drawSummary(r.t, y, r.h);
+      else if (r.t.type === 'group' || (r.t.collapsed && !this.filter)) this.drawSummary(r.t, y, r.h);
       else if (r.t.type === 'lane') {
         for (const m of r.pack.members) {
           ctx.globalAlpha = tl.muted(m) ? 0.35 : 1;
@@ -210,6 +240,14 @@ export class TimelineView {
       const dx = this.X(this.dropAt.t), r = this.dropAt.row;
       ctx.fillStyle = 'rgba(247,143,179,0.9)'; ctx.fillRect(dx - 1, RULER, 2, H);
       if (r && !r.perf) { ctx.strokeStyle = '#f78fb3'; ctx.lineWidth = 2; ctx.strokeRect(HEAD + 1, r.y - this.scrollY + 1, W - HEAD - 2, r.h - 2); }
+    }
+    // box selection
+    const b = this.drag?.type === 'box' && this.drag.moved ? this.drag : null;
+    if (b) {
+      const x0 = Math.min(b.x0, b.x1), y0 = Math.min(b.y0, b.y1) - this.scrollY;
+      ctx.fillStyle = 'rgba(79,184,255,0.10)'; ctx.strokeStyle = 'rgba(79,184,255,0.8)'; ctx.lineWidth = 1;
+      ctx.fillRect(x0, y0, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
     ctx.restore();
 
@@ -240,7 +278,7 @@ export class TimelineView {
   drawSummary(t, y, hgt) {
     const { ctx } = this, top = y + 3, bh = Math.max(4, hgt - 6);
     for (const m of this.contents(t)) {
-      const c = COL[m.type] || '#8b93a0';
+      const c = this.color(m);
       ctx.fillStyle = `${c}55`;
       if (m.a !== undefined && m.b !== undefined) ctx.fillRect(this.X(m.a), top + bh * 0.25, Math.max(2, this.X(m.b) - this.X(m.a)), bh * 0.5);
       if (m.clips) for (const cl of m.clips) ctx.fillRect(this.X(cl.a), top + bh * 0.25, Math.max(2, this.X(cl.b) - this.X(cl.a)), bh * 0.5);
@@ -251,7 +289,8 @@ export class TimelineView {
 
   drawHeader(r, y, selTrack) {
     const { ctx } = this, tl = this.ed.tl;
-    ctx.fillStyle = selTrack ? '#23384d' : r.t?.type === 'group' ? '#1a1d22' : '#20232a';
+    const picked = r.t && this.ed.isSel(r.t) && this.ed.multi;
+    ctx.fillStyle = selTrack || picked ? '#23384d' : r.t?.type === 'group' ? '#1a1d22' : '#20232a';
     ctx.fillRect(0, y, HEAD, r.h - 1);
     ctx.fillStyle = '#2a2e35'; ctx.fillRect(HEAD - 1, y, 1, r.h);
     if (r.perf) {
@@ -259,8 +298,8 @@ export class TimelineView {
       ctx.fillText('Performance (fps)', 12, y + r.h / 2);
       return;
     }
-    const t = r.t, c = COL[t.type] || '#aaa', my = y + r.h / 2, ind = r.depth * INDENT;
-    ctx.fillStyle = c; ctx.fillRect(ind, y, 3, r.h - 1);
+    const t = r.t, c = this.color(t), my = y + r.h / 2, ind = r.depth * INDENT;
+    ctx.fillStyle = c; ctx.fillRect(ind, y, t.color ? 5 : 3, r.h - 1);
     // collapse triangle
     const open = !t.collapsed, tx = ind + 11;
     ctx.fillStyle = '#8b93a0';
@@ -300,21 +339,21 @@ export class TimelineView {
   }
 
   drawKeys(t, y, hgt) {
-    const { ctx, ed } = this, cy = y + hgt / 2;
-    if (t.keys.length > 1) { ctx.fillStyle = 'rgba(79,184,255,0.25)'; ctx.fillRect(this.X(t.keys[0].t), cy - 1, this.X(t.keys.at(-1).t) - this.X(t.keys[0].t), 2); }
+    const { ctx } = this, cy = y + hgt / 2, c = this.color(t);
+    if (t.keys.length > 1) { ctx.fillStyle = `${c}40`; ctx.fillRect(this.X(t.keys[0].t), cy - 1, this.X(t.keys.at(-1).t) - this.X(t.keys[0].t), 2); }
     const labels = t.keys.length < 2 || (this.X(t.keys[1].t) - this.X(t.keys[0].t)) > 22 || this.k * 2 > 22;
     t.keys.forEach((k, i) => {
       const x = this.X(k.t);
       if (x < HEAD - 10 || x > this.W + 10) return;
-      const s = ed.sel?.item === k;
-      this.diamond(x, cy, s ? 7 : 6, s ? '#ffffff' : k.locked ? '#7d8a99' : COL.camera, s ? COL.play : '#0d1a26');
+      const s = this.sel(k);
+      this.diamond(x, cy, s ? 7 : 6, s ? '#ffffff' : k.locked ? '#7d8a99' : c, s ? COL.play : '#0d1a26');
       if (k.locked) this.lockIcon(x, cy - 12, '#ffb35c');
       if (labels) { ctx.fillStyle = '#8b93a0'; ctx.fillText(String(i + 1), x + 9, cy); }
     });
   }
 
   drawCurve(t, y, hgt) {
-    const { ctx, ed } = this;
+    const { ctx, ed } = this, c = this.color(t);
     if (!t.keys.length) return;
     let lo = Infinity, hi = -Infinity;
     for (const k of t.keys) { lo = Math.min(lo, k.v); hi = Math.max(hi, k.v); }
@@ -325,10 +364,10 @@ export class TimelineView {
       const v = evalCurve(t.keys, clamp(this.T(x), 0, this.D));
       x === HEAD ? ctx.moveTo(x, Y(v)) : ctx.lineTo(x, Y(v));
     }
-    ctx.strokeStyle = 'rgba(255,203,107,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.strokeStyle = `${c}b3`; ctx.lineWidth = 1.5; ctx.stroke();
     for (const k of t.keys) {
-      const s = ed.sel?.item === k, x = this.X(k.t);
-      this.diamond(x, Y(k.v), s ? 6.5 : 5, s ? '#ffffff' : k.locked ? '#9a8d6b' : COL.curve, s ? COL.play : '#2a2000');
+      const s = this.sel(k), x = this.X(k.t);
+      this.diamond(x, Y(k.v), s ? 6.5 : 5, s ? '#ffffff' : k.locked ? '#9a8d6b' : c, s ? COL.play : '#2a2000');
       if (k.locked) this.lockIcon(x + 9, Y(k.v) - 6, '#ffb35c');
     }
     if (PARAMS[t.bind]) { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillText(`${+evalCurve(t.keys, ed.time).toFixed(2)}`, Math.max(HEAD + 4, this.X(ed.time) + 6), y + 9); }
@@ -347,10 +386,9 @@ export class TimelineView {
   }
 
   drawClip(t, y, hgt) {
-    const { ctx, ed } = this, c = COL.clip;
+    const { ctx } = this, c = this.color(t);
     const x0 = this.X(t.a), x1 = this.X(t.b), top = y + 4, bh = hgt - 8;
-    const selected = ed.sel?.kind === 'track' && ed.sel.track === t;
-    this.bar(x0, x1, top, bh, c, selected, t.locked);
+    this.bar(x0, x1, top, bh, c, this.sel(t), t.locked);
     ctx.beginPath();
     ctx.moveTo(x0, top + bh);
     const step = Math.max(2, (x1 - x0) / 400);
@@ -365,10 +403,9 @@ export class TimelineView {
 
   // a stretch region: one designed cycle, repeated once per CMS item on the site
   drawStretch(t, y, hgt) {
-    const { ctx, ed } = this, c = COL.stretch;
+    const { ctx, ed } = this, c = this.color(t);
     const x0 = this.X(t.a), x1 = this.X(t.b), cy = y + hgt / 2;
-    const selected = ed.sel?.kind === 'track' && ed.sel.track === t;
-    this.bar(x0, x1, y + 4, hgt - 8, c, selected, t.locked);
+    this.bar(x0, x1, y + 4, hgt - 8, c, this.sel(t), t.locked);
     const r = ed.tl.regions?.find((q) => q.t === t), n = r?.n ?? 1, per = t.b - t.a;
     ctx.fillStyle = '#ffe2c2';
     const label = `↻ ${t.label || 'Repeat per item'} · ${t.list || 'no list'} · ×${n} → ${n === 0 ? 'skipped on the site' : n === 1 ? 'once' : `+${fmtTime((n - 1) * per, 0)} on the site`} · item ${Math.min(n, ed.story.previewItem + 1)}/${n}`;
@@ -376,11 +413,11 @@ export class TimelineView {
   }
 
   drawCaptions(t, y, hgt) {
-    const { ctx, ed } = this, c = COL.captions;
+    const { ctx } = this, c = this.color(t);
     for (const cl of t.clips) {
       const x0 = this.X(cl.a), x1 = this.X(cl.b);
       if (x1 < HEAD || x0 > this.W) continue;
-      this.bar(x0, x1, y + 4, hgt - 8, c, ed.sel?.item === cl, cl.locked || t.locked);
+      this.bar(x0, x1, y + 4, hgt - 8, c, this.sel(cl), cl.locked || t.locked);
       let tx = Math.max(x0, HEAD) + 6;
       if (cl.locked) { this.lockIcon(tx + 3, y + hgt / 2 + 1, '#ffb35c'); tx += 12; }
       ctx.fillStyle = '#e8dcf5';
@@ -389,25 +426,27 @@ export class TimelineView {
   }
 
   drawLayer(t, y, hgt) {
-    const { ctx, ed } = this, isPath = t.type === 'path', c = COL[t.type], cy = y + hgt / 2;
+    const { ctx } = this, isPath = t.type === 'path', c = this.color(t), cy = y + hgt / 2;
     const x0 = this.X(t.a), x1 = this.X(t.b);
-    const selected = ed.sel?.kind === 'track' && ed.sel.track === t;
+    const selected = this.sel(t);
     this.bar(x0, x1, y + 4, hgt - 8, c, selected, t.locked);
     // fades (layers) / blends (paths)
-    const f = isPath ? t.blend ?? 2 : t.fade ?? 2.4, fw = Math.min((x1 - x0) / 2, f * this.k);
+    const f = isPath ? t.blend ?? 2 : t.fade ?? 2.4;
+    const fi = Math.min((x1 - x0) / 2, (isPath ? f : t.fadeIn ?? f) * this.k), fo = Math.min((x1 - x0) / 2, (isPath ? f : t.fadeOut ?? f) * this.k);
     ctx.fillStyle = `${c}30`;
-    ctx.beginPath(); ctx.moveTo(x0, y + hgt - 4); ctx.lineTo(x0 + fw, y + 4); ctx.lineTo(x0, y + 4); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x1, y + hgt - 4); ctx.lineTo(x1 - fw, y + 4); ctx.lineTo(x1, y + 4); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x0, y + hgt - 4); ctx.lineTo(x0 + fi, y + 4); ctx.lineTo(x0, y + 4); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x1, y + hgt - 4); ctx.lineTo(x1 - fo, y + 4); ctx.lineTo(x1, y + 4); ctx.fill();
     let tx = Math.max(x0, HEAD) + 6;
     ctx.fillStyle = isPath ? '#c9f5ec' : '#fbd3e3';
     ctx.font = '600 9px Inter, system-ui, sans-serif';
-    const tag = isPath ? (t.bind || '').toUpperCase() : `${KIND[t.kind] || ''}${t.space === 'world' ? ' 3D' : ''}`;
+    const tag = isPath ? (t.bind || '').toUpperCase() : `${KIND[t.kind] || ''}${t.space === 'world' && t.kind !== 'model' ? ' 3D' : ''}`;
+    if (t.locked) { this.lockIcon(tx + 3, cy + 1, '#ffb35c'); tx += 12; }
     if (x1 - x0 > 60) { ctx.fillText(tag, tx, cy); tx += ctx.measureText(tag).width + 6; }
     ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
     if (x1 - x0 > 70) ctx.fillText(this.ellipsis(t.label || '', Math.min(x1, this.W) - tx - 6), tx, cy);
     if (t.keys.length > 1 || isPath) {
       for (const k of t.keys) {
-        const s = ed.sel?.item === k, kx = this.X(k.t);
+        const s = this.sel(k), kx = this.X(k.t);
         this.diamond(kx, cy, s ? 6.5 : 5, s ? '#ffffff' : k.locked ? '#7d8a99' : c, s ? COL.play : '#0d1a18');
       }
     }
@@ -428,6 +467,17 @@ export class TimelineView {
     ctx.fillRect(HEAD, y + hgt - 4 - ((45 / 60) * (hgt - 8)), this.W, 1); // 45 fps line
   }
 
+  // the time span of the selection (for the stretch bracket), or null
+  span() {
+    const items = this.ed.multi ? this.ed.timedSelection() : [];
+    if (items.length < 2) return null;
+    let a = Infinity, b = -Infinity;
+    for (const it of items) {
+      if (it.pt) { a = Math.min(a, it.obj.t); b = Math.max(b, it.obj.t); } else { a = Math.min(a, it.obj.a); b = Math.max(b, it.obj.b); }
+    }
+    return b - a > 1e-3 ? { a, b } : null;
+  }
+
   drawRuler() {
     const { ctx, W, ed } = this, tl = ed.tl, D = this.D;
     ctx.fillStyle = '#20232a'; ctx.fillRect(0, 0, W, RULER);
@@ -438,7 +488,7 @@ export class TimelineView {
     tl.data.chapters.forEach((c, i) => {
       const x0 = this.X(c.t), x1 = this.X(tl.data.chapters[i + 1]?.t ?? D);
       if (x1 < HEAD || x0 > W) return;
-      const s = ed.sel?.item === c;
+      const s = this.sel(c);
       ctx.fillStyle = s ? '#2d6fa3' : i % 2 ? '#2a3a4a' : '#24323f';
       ctx.fillRect(x0, 2, Math.max(1, x1 - x0 - 1), CH - 3);
       ctx.fillStyle = s ? '#4fb8ff' : '#3d5973'; ctx.fillRect(x0, 2, 2, CH - 3);
@@ -447,6 +497,17 @@ export class TimelineView {
       ctx.fillStyle = '#cfe3f5';
       if (x1 - x0 > 30) ctx.fillText(this.ellipsis(c.name, Math.min(x1, W) - tx - 6), tx, 2 + (CH - 3) / 2);
     });
+    // In / Out range
+    const rg = ed.range;
+    if (rg) {
+      const x0 = this.X(rg.a), x1 = this.X(rg.b);
+      ctx.fillStyle = 'rgba(95,179,255,0.22)'; ctx.fillRect(x0, CH, x1 - x0, RULER - CH - 1);
+      ctx.fillStyle = COL.range; ctx.fillRect(x0 - 1, CH, 2, RULER - CH); ctx.fillRect(x1 - 1, CH, 2, RULER - CH);
+      ctx.font = '600 9px Inter, system-ui, sans-serif';
+      ctx.fillText(ed.loop ? '⟲ IN' : 'IN', x0 + 4, RULER - 7);
+      ctx.fillText('OUT', x1 - 26, RULER - 7);
+      ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
+    }
     // ticks: major step gives labels >= 72 px apart
     const major = STEPS.find((s) => s * this.k >= 72) ?? 3600;
     const minor = [...STEPS].reverse().find((s) => s < major && s * this.k >= 9 && Math.abs(major / s - Math.round(major / s)) < 1e-6) ?? major;
@@ -467,13 +528,21 @@ export class TimelineView {
       ctx.fillStyle = 'rgba(255,184,107,0.35)';
       ctx.fillRect(x0, RULER - 4, x1 - x0, 3);
     }
+    // the selection's span: drag its ends to stretch / squeeze the timing
+    const sp = this.span();
+    if (sp) {
+      const x0 = this.X(sp.a), x1 = this.X(sp.b);
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.fillRect(x0, SPAN_Y + 2, x1 - x0, 1.5);
+      ctx.fillRect(x0 - 3, SPAN_Y - 1, 6, 8); ctx.fillRect(x1 - 3, SPAN_Y - 1, 6, 8);
+    }
     // outside the story
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     if (this.v0 < 0) ctx.fillRect(HEAD, 0, this.X(0) - HEAD, RULER);
     if (this.v1 > D) ctx.fillRect(this.X(D), 0, W, RULER);
     // notes
     for (const n of tl.data.notes) {
-      const x = this.X(n.t), s = ed.sel?.item === n;
+      const x = this.X(n.t), s = this.sel(n);
       ctx.beginPath(); ctx.moveTo(x, RULER - 1); ctx.lineTo(x, RULER - 15); ctx.lineTo(x + 9, RULER - 11); ctx.lineTo(x, RULER - 7);
       ctx.fillStyle = s ? '#ffffff' : n.locked ? '#c9a24d' : COL.note; ctx.fill();
       if (s || this.hover?.item === n) {
@@ -494,13 +563,14 @@ export class TimelineView {
     ctx.beginPath(); ctx.moveTo(x - 6, CH + 2); ctx.lineTo(x + 6, CH + 2); ctx.lineTo(x + 6, RULER - 10); ctx.lineTo(x, RULER - 3); ctx.lineTo(x - 6, RULER - 10); ctx.closePath(); ctx.fill();
     ctx.fillRect(x - 0.5, 0, 1.5, RULER);
     ctx.restore();
-    // corner: current time
+    // corner: current time (+ selection count)
     ctx.fillStyle = '#20232a'; ctx.fillRect(0, 0, HEAD - 1, RULER - 1);
     ctx.fillStyle = COL.play; ctx.font = '600 14px Inter, system-ui, sans-serif';
     ctx.fillText(fmtTime(ed.time, 2), 12, 15);
     ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#8b93a0';
-    ctx.fillText(this.ellipsis(`of ${fmtTime(D, 0)} · ${tl.chapter(ed.time)?.name ?? ''}`, HEAD - 20), 12, 34);
+    const info = ed.multi ? `${ed.sels.length} selected${sp ? ` · ${fmtTime(sp.b - sp.a, 1)}` : ''}` : `of ${fmtTime(D, 0)} · ${tl.chapter(ed.time)?.name ?? ''}`;
+    ctx.fillText(this.ellipsis(info, HEAD - 20), 12, 34);
   }
 
   ellipsis(s, w) {
@@ -516,7 +586,17 @@ export class TimelineView {
     const tl = this.ed.tl, D = this.D;
     if (y < RULER) {
       if (x < HEAD) return { type: 'ruler' };
+      const sp = this.span();
+      if (sp && y >= SPAN_Y - 3 && y <= SPAN_Y + 10) {
+        if (Math.abs(x - this.X(sp.a)) < 6) return { type: 'spanA', span: sp };
+        if (Math.abs(x - this.X(sp.b)) < 6) return { type: 'spanB', span: sp };
+      }
       if (Math.abs(x - this.X(D)) < 7 && y > CH) return { type: 'end' };
+      const rg = this.ed.range;
+      if (rg && y > CH && y < RULER - 17) {
+        if (Math.abs(x - this.X(rg.a)) < 5) return { type: 'rangeA' };
+        if (Math.abs(x - this.X(rg.b)) < 5) return { type: 'rangeB' };
+      }
       if (y > RULER - 17) {
         const n = tl.data.notes.find((m) => x >= this.X(m.t) - 3 && x <= this.X(m.t) + 10);
         if (n) return { type: 'note', item: n };
@@ -536,13 +616,13 @@ export class TimelineView {
     const t = r.t;
     const ind = r.depth * INDENT;
     if (x < HEAD) return { type: 'header', track: t, row: r, mute: x > HEAD - 27, lock: x > HEAD - 48 && x <= HEAD - 27, fold: x >= ind && x < ind + 20 };
-    if (t.type === 'group' || t.collapsed) return { type: 'lane', track: t, row: r };
+    if (t.type === 'group' || (t.collapsed && !this.filter)) return { type: 'lane', track: t, row: r };
     if (t.type === 'lane') {
       const lv = Math.floor((cy - r.y - 3) / SUB);
       const m = r.pack.members.find((q) => r.pack.level.get(q) === lv && x > this.X(q.a) - 6 && x < this.X(q.b) + 6);
       return m ? this.hitBar(m, x) : { type: 'lane', track: t, row: r };
     }
-    return this.hitTrack(t, x);
+    return { ...this.hitTrack(t, x), row: r };
   }
 
   hitBar(t, x) {
@@ -580,18 +660,54 @@ export class TimelineView {
     return { type: 'lane', track: t };
   }
 
-  // snap to the playhead, chapters, notes, other keys / clip edges, else to a zoom-dependent grid
+  // the selection a hit stands for
+  selOf(hit) {
+    if (!hit) return null;
+    if (hit.type === 'key') return { kind: 'key', track: hit.track, item: hit.item };
+    if (/^(edgeA|edgeB|body)$/.test(hit.type)) return hit.track.type === 'captions' ? { kind: 'clip', track: hit.track, item: hit.item } : { kind: 'track', track: hit.track };
+    if (hit.type === 'chapter' || hit.type === 'note') return { kind: hit.type, item: hit.item };
+    if (hit.type === 'header' || hit.type === 'lane') return { kind: 'track', track: hit.track };
+    return null;
+  }
+
+  // what a box (content coordinates) covers: keys, captions, clip bars, layer / path clips
+  boxItems(b) {
+    const x0 = Math.min(b.x0, b.x1), x1 = Math.max(b.x0, b.x1), y0 = Math.min(b.y0, b.y1), y1 = Math.max(b.y0, b.y1);
+    const t0 = this.T(x0), t1 = this.T(x1), out = [];
+    const over = (a, bb) => bb >= t0 && a <= t1;
+    for (const r of this.rows) {
+      if (r.perf || r.y + r.h < y0 || r.y > y1) continue;
+      const t = r.t;
+      if (t.type === 'group' || (t.collapsed && !this.filter)) continue;
+      if (t.type === 'lane') {
+        for (const m of r.pack.members) {
+          const top = r.y + 3 + r.pack.level.get(m) * SUB;
+          if (top + SUB >= y0 && top <= y1 && over(m.a, m.b)) out.push({ kind: 'track', track: m });
+        }
+      } else if (t.type === 'camera' || t.type === 'curve') {
+        for (const k of t.keys) if (k.t >= t0 && k.t <= t1) out.push({ kind: 'key', track: t, item: k });
+      } else if (t.type === 'captions') {
+        for (const c of t.clips) if (over(c.a, c.b)) out.push({ kind: 'clip', track: t, item: c });
+      } else if (t.a !== undefined && over(t.a, t.b)) out.push({ kind: 'track', track: t });
+    }
+    return out;
+  }
+
+  // snap to the playhead, chapters, notes, other keys / clip edges, else to a zoom-dependent grid. `self`: an item
+  // or a Set of items that are moving (they don't snap to themselves)
   snap(t, e, self) {
     const D = this.D;
     if (!this.ed.snap || e.shiftKey) return clamp(t, 0, D);
+    const skip = self instanceof Set ? self : new Set([self]);
     const tl = this.ed.tl, cand = [0, D];
     if (this.drag?.type !== 'scrub') cand.push(this.ed.time);
-    for (const c of tl.data.chapters) if (c !== self) cand.push(c.t);
-    for (const n of tl.data.notes) if (n !== self) cand.push(n.t);
+    if (this.ed.range) cand.push(this.ed.range.a, this.ed.range.b);
+    for (const c of tl.data.chapters) if (!skip.has(c)) cand.push(c.t);
+    for (const n of tl.data.notes) if (!skip.has(n)) cand.push(n.t);
     for (const tr of tl.tracks) {
-      if (tr.keys) for (const k of tr.keys) if (k !== self) cand.push(k.t);
-      if ((tr.type === 'clip' || tr.type === 'stretch' || BAR.has(tr.type)) && tr !== self) cand.push(tr.a, tr.b);
-      if (tr.clips) for (const c of tr.clips) if (c !== self) cand.push(c.a, c.b);
+      if (tr.keys && !skip.has(tr)) for (const k of tr.keys) if (!skip.has(k)) cand.push(k.t);
+      if ((tr.type === 'clip' || tr.type === 'stretch' || BAR.has(tr.type)) && !skip.has(tr)) cand.push(tr.a, tr.b);
+      if (tr.clips) for (const c of tr.clips) if (!skip.has(c)) cand.push(c.a, c.b);
     }
     let best = null, bd = 7 / this.k;
     for (const c of cand) { const d = Math.abs(c - t); if (d < bd) { bd = d; best = c; } }
@@ -603,15 +719,35 @@ export class TimelineView {
   // ------------------------------------------------------------------ pointer
   xy(e) { const r = this.cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
 
+  // start moving the whole selection (`grab` = the item under the pointer, `t` = pointer time)
+  groupDrag(grab, t) {
+    const ed = this.ed, items = ed.timedSelection();
+    if (items.some((it) => ed.isLocked(it.s))) { ed.guard(); return { type: 'locked', x: 0, warned: true }; }
+    const orig = items.map((it) => ({ it, t: it.obj.t, a: it.obj.a, b: it.obj.b, keys: it.keys?.map((k) => k.t) }));
+    let lo = Infinity, hi = -Infinity;
+    for (const o of orig) { lo = Math.min(lo, o.t ?? o.a); hi = Math.max(hi, o.t ?? o.b); }
+    const g = grab.t ?? grab.a;
+    const moving = new Set(items.flatMap((it) => [it.obj, ...(it.keys ?? [])]));
+    return { type: 'group', orig, lo, hi, g, off: g - t, grab, moving };
+  }
+
   down(e) {
     const [x, y] = this.xy(e), ed = this.ed;
     if (e.button === 2) return; // context menu
     this.cv.setPointerCapture(e.pointerId);
-    if (e.button === 1 || (e.button === 0 && e.altKey)) { this.drag = { type: 'pan', x, v0: this.v0, v1: this.v1 }; return; }
+    const hit0 = e.button === 0 ? this.hit(x, y) : null;
+    const onItem = (hit0 && /^(key|edgeA|edgeB|body|note)$/.test(hit0.type)) || (hit0?.type === 'chapter' && hit0.edge);
+    if (e.button === 1 || (e.button === 0 && e.altKey && !onItem)) { this.drag = { type: 'pan', x, v0: this.v0, v1: this.v1 }; return; }
     if (e.button !== 0) return;
-    const hit = this.hit(x, y);
+    const hit = hit0;
     if (!hit) return;
     const t = this.T(x);
+    const mode = e.metaKey || e.ctrlKey ? 'toggle' : e.shiftKey ? 'add' : undefined;
+    const s = this.selOf(hit);
+    // a click on something already in a multi-selection keeps the selection (so it can be dragged together)
+    const inMulti = s && ed.multi && ed.isSel(s.item ?? s.track) && !mode;
+    const pick = () => { if (inMulti) ed.select(s, 'add'); else ed.select(s, mode); };
+    const groupable = () => ed.multi && ed.isSel(s.item ?? s.track);
     switch (hit.type) {
       case 'ruler': case 'perfHead':
         ed.pause();
@@ -621,44 +757,78 @@ export class TimelineView {
       case 'end':
         this.drag = { type: 'end', old: this.D };
         break;
+      case 'spanA': case 'spanB':
+        this.drag = this.scaleDrag(hit);
+        break;
+      case 'rangeA': case 'rangeB':
+        this.drag = { type: hit.type };
+        break;
       case 'chapter':
-        ed.select({ kind: 'chapter', item: hit.item });
-        if (hit.edge && !hit.item.locked) this.drag = { type: 'marker', item: hit.item, off: hit.item.t - t };
-        else if (!hit.edge) ed.setTime(hit.item.t);
+        pick();
+        if (hit.edge && !this.locked(null, hit.item)) this.drag = groupable() ? this.groupDrag(hit.item, t) : { type: 'marker', item: hit.item, off: hit.item.t - t };
+        else if (!hit.edge && !mode) ed.setTime(hit.item.t);
         break;
       case 'note':
-        ed.select({ kind: 'note', item: hit.item });
-        if (!hit.item.locked) this.drag = { type: 'marker', item: hit.item, off: hit.item.t - t };
+        pick();
+        if (!this.locked(null, hit.item)) this.drag = groupable() ? this.groupDrag(hit.item, t) : { type: 'marker', item: hit.item, off: hit.item.t - t };
         break;
       case 'header':
         if (hit.fold) {
           if (hit.track.collapsed) delete hit.track.collapsed; else hit.track.collapsed = true;
-          ed.commit();
+          ed.commit(hit.track.collapsed ? 'Collapsed a row' : 'Expanded a row');
           break;
         }
         if (hit.mute) {
           if (hit.track.mute) delete hit.track.mute; else hit.track.mute = true;
           ed.commit();
         }
-        ed.select({ kind: 'track', track: hit.track });
+        ed.select({ kind: 'track', track: hit.track }, hit.mute || hit.lock ? undefined : mode);
         if (hit.lock) ed.toggleLock();
         break;
       case 'key':
-        ed.select({ kind: 'key', track: hit.track, item: hit.item });
-        this.drag = this.locked(hit.track, hit.item) ? { type: 'locked', x } : { type: 'key', item: hit.item, off: hit.item.t - t };
+        pick();
+        if (!ed.isSel(hit.item)) break; // ctrl-click took it out of the selection
+        if (this.locked(hit.track, hit.item)) this.drag = { type: 'locked', x };
+        else this.drag = groupable() ? this.groupDrag(hit.item, t) : { type: 'key', item: hit.item, off: hit.item.t - t };
         break;
       case 'edgeA': case 'edgeB': case 'body': {
         const it = hit.item;
-        ed.select(hit.track.type === 'captions' ? { kind: 'clip', track: hit.track, item: it } : { kind: 'track', track: hit.track });
-        this.drag = this.locked(hit.track, hit.track.type === 'captions' ? it : null) ? { type: 'locked', x } : { type: hit.type, item: it, off: t, a: it.a, b: it.b };
-        if (hit.type === 'body' && BAR.has(it.type) && this.drag.type === 'body') this.drag.keys0 = it.keys.map((k) => k.t); // a layer's / path's keys move with it
+        pick();
+        if (!ed.isSel(it)) break;
+        if (this.locked(hit.track, hit.track.type === 'captions' ? it : null)) { this.drag = { type: 'locked', x }; break; }
+        if (hit.type === 'body' && groupable()) { this.drag = this.groupDrag(it, t); break; }
+        this.drag = { type: hit.type, item: it, off: t, a: it.a, b: it.b };
+        if (BAR.has(it.type)) this.drag.keys0 = it.keys.map((k) => k.t); // a layer's / path's keys move with it
         break;
       }
       case 'lane':
-        ed.select({ kind: 'track', track: hit.track });
+        // empty space: drag = box select, click = select the row
+        this.drag = { type: 'box', x0: x, y0: y + this.scrollY, x1: x, y1: y + this.scrollY, mode, hit };
         break;
     }
+    // Alt-drag: drag a copy (the originals stay)
+    if (e.altKey && this.drag && /^(group|key|marker|body)$/.test(this.drag.type)) {
+      const pairs = ed.cloneSelection();
+      if (pairs.length) {
+        const copyOf = new Map(pairs.map(([a, b]) => [a.item ?? a.track, b]));
+        const grab = this.drag.type === 'group' ? this.drag.grab : this.drag.item;
+        ed.selectMany(pairs.map((p) => p[1]));
+        const g = copyOf.get(grab);
+        if (g) ed.select(g, 'add');
+        if (ed.multi) this.drag = this.groupDrag(g?.item ?? g?.track ?? grab, t);
+        else if (g?.kind === 'track') this.drag = { type: 'body', item: g.track, off: t, a: g.track.a, b: g.track.b, keys0: g.track.keys?.map((k) => k.t) };
+        else if (g) this.drag = { type: this.drag.type, item: g.item, off: (g.item.t ?? 0) - t };
+        this.drag.copies = pairs;
+      }
+    }
     if (this.drag) this.drag.moved = false;
+  }
+
+  // stretch the selection's timing by dragging an end of its span bracket (the other end stays)
+  scaleDrag(hit) {
+    const ed = this.ed, items = ed.timedSelection();
+    if (items.some((it) => ed.isLocked(it.s))) { ed.guard(); return { type: 'locked', x: 0, warned: true }; }
+    return { type: 'scale', end: hit.type, span: hit.span, orig: items.map((it) => ({ it, t: it.obj.t, a: it.obj.a, b: it.obj.b, keys: it.keys?.map((k) => k.t) })), moving: new Set(items.flatMap((it) => [it.obj, ...(it.keys ?? [])])) };
   }
 
   move(e) {
@@ -669,36 +839,65 @@ export class TimelineView {
       this.hover = hit;
       const lk = hit && this.locked(hit.track, hit.track?.type === 'captions' || hit.type === 'key' ? hit.item : null);
       this.cv.style.cursor = !hit ? 'default'
-        : hit.type === 'end' ? 'ew-resize'
+        : /^(end|spanA|spanB|rangeA|rangeB)$/.test(hit.type) ? 'ew-resize'
           : lk && /edge|key|body/.test(hit.type) ? 'not-allowed'
             : /edge|key/.test(hit.type) || (hit.type === 'chapter' && hit.edge) || hit.type === 'note' ? 'ew-resize'
-              : hit.type === 'body' ? 'grab' : hit.type === 'ruler' ? 'col-resize' : 'pointer';
+              : hit.type === 'body' ? 'grab' : hit.type === 'ruler' ? 'col-resize' : hit.type === 'lane' ? 'crosshair' : 'pointer';
+      const tip = this.tip(hit);
+      if (this.cv.title !== tip) this.cv.title = tip;
       if (prev !== hit?.item) this.draw();
       return;
     }
     const t = this.T(x), D = this.D;
     d.moved = true;
     if (d.type === 'locked') {
-      if (!d.warned && Math.abs(x - d.x) > 4) { d.warned = true; ed.toast('Locked — right-click ▸ Unlock (or press L) to move it', true); }
+      if (!d.warned && Math.abs(x - d.x) > 4) { d.warned = true; ed.guard(ed.sel); }
       d.moved = false;
     } else if (d.type === 'pan') {
       const dt = (x - d.x) / this.k;
       this.v0 = d.v0 - dt; this.v1 = d.v1 - dt;
     } else if (d.type === 'scrub') ed.setTime(t);
-    else if (d.type === 'end') {
+    else if (d.type === 'box') {
+      d.x1 = x; d.y1 = y + this.scrollY;
+      this.boxSet = Math.abs(d.x1 - d.x0) + Math.abs(d.y1 - d.y0) > 4 ? new Set(this.boxItems(d).map((s) => s.item ?? s.track)) : null;
+      if (!this.boxSet) d.moved = false;
+    } else if (d.type === 'rangeA' || d.type === 'rangeB') {
+      const v = this.snap(t, e);
+      if (d.type === 'rangeA') ed.range.a = Math.min(v, ed.range.b - 0.1); else ed.range.b = Math.max(v, ed.range.a + 0.1);
+    } else if (d.type === 'end') {
       // drag past the right edge to keep extending
       const v = Math.max(t, ed.tl.contentEnd(), 1);
       ed.tl.meta.duration = Math.round(v * 10) / 10;
       if (x > this.W - 20) { this.v1 = Math.max(this.v1, ed.tl.meta.duration * 1.05); }
       ed.changed();
+    } else if (d.type === 'group') {
+      const target = this.snap(t + d.off, e, d.moving);
+      const delta = clamp(target - d.g, -d.lo, D - d.hi);
+      for (const o of d.orig) {
+        if (o.t !== undefined) o.it.obj.t = r4(o.t + delta);
+        else { o.it.obj.a = r4(o.a + delta); o.it.obj.b = r4(o.b + delta); }
+        if (o.keys) o.it.keys.forEach((k, i) => { k.t = r4(o.keys[i] + delta); });
+      }
+      ed.changed();
+    } else if (d.type === 'scale') {
+      const { a, b } = d.span;
+      const anchor = d.end === 'spanB' ? a : b;
+      const v = this.snap(t, e, d.moving);
+      const f = d.end === 'spanB' ? Math.max(0.02, (v - a) / (b - a)) : Math.max(0.02, (b - v) / (b - a));
+      const S = (q) => r4(clamp(anchor + (q - anchor) * f, 0, D));
+      for (const o of d.orig) {
+        if (o.t !== undefined) o.it.obj.t = S(o.t);
+        else { o.it.obj.a = S(o.a); o.it.obj.b = Math.max(S(o.b), o.it.obj.a + 0.05); }
+        if (o.keys) o.it.keys.forEach((k, i) => { k.t = S(o.keys[i]); });
+      }
+      d.f = f;
+      ed.changed();
     } else if (d.type === 'marker' || d.type === 'key') {
       d.item.t = this.snap(t + d.off, e, d.item);
       ed.changed();
-    } else if (d.type === 'edgeA') {
-      d.item.a = Math.min(this.snap(t, e, d.item), d.item.b - 0.05);
-      ed.changed();
-    } else if (d.type === 'edgeB') {
-      d.item.b = Math.max(this.snap(t, e, d.item), d.item.a + 0.05);
+    } else if (d.type === 'edgeA' || d.type === 'edgeB') {
+      if (d.type === 'edgeA') d.item.a = Math.min(this.snap(t, e, d.item), d.item.b - 0.05);
+      else d.item.b = Math.max(this.snap(t, e, d.item), d.item.a + 0.05);
       ed.changed();
     } else if (d.type === 'body') {
       const w = d.b - d.a;
@@ -706,25 +905,49 @@ export class TimelineView {
       const sa = this.snap(a, e, d.item), sb = this.snap(a + w, e, d.item);
       a = Math.abs(sa - a) <= Math.abs(sb - (a + w)) ? sa : sb - w;
       d.item.a = clamp(a, 0, D - w); d.item.b = d.item.a + w;
-      if (d.keys0) d.item.keys.forEach((k, i) => { k.t = Math.round((d.keys0[i] + d.item.a - d.a) * 1e4) / 1e4; });
+      if (d.keys0) d.item.keys.forEach((k, i) => { k.t = r4(d.keys0[i] + d.item.a - d.a); });
       // vertical: into the lane under the pointer (like moving a clip between tracks in a video editor)
       if (BAR.has(d.item.type) && d.item.lane) {
-        const row = this.rows.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h);
+        const row = this.rowAt(y);
         if (row?.t?.type === 'lane' && row.t.id !== d.item.lane && !ed.tl.lockedTrack(row.t)) d.item.lane = row.t.id;
       }
       ed.changed();
     }
+    if (d.type === 'box' || d.type === 'rangeA' || d.type === 'rangeB' || d.type === 'pan') this.draw();
+  }
+
+  // hover text
+  tip(hit) {
+    if (!hit) return '';
+    const ed = this.ed, s = this.selOf(hit);
+    const parts = [];
+    if (s && ed.isLocked(s)) parts.push('Locked');
+    if (hit.type === 'spanA' || hit.type === 'spanB') parts.push('Drag to stretch / squeeze the timing of everything selected (Shift: no snapping)');
+    if (hit.type === 'lane') parts.push('Drag to select everything in a box · Shift adds · Ctrl/Cmd toggles');
+    return parts.join(' · ');
   }
 
   up(e) {
-    const d = this.drag;
+    const d = this.drag, ed = this.ed;
     this.drag = null;
     if (this.cv.hasPointerCapture(e.pointerId)) this.cv.releasePointerCapture(e.pointerId);
-    if (d?.type === 'end') {
-      if (d.moved) { const nd = this.ed.tl.meta.duration; this.ed.tl.meta.duration = d.old; this.ed.setDuration(nd); }
+    if (!d) return;
+    if (d.type === 'end') {
+      if (d.moved) { const nd = ed.tl.meta.duration; ed.tl.meta.duration = d.old; ed.setDuration(nd); }
       return;
     }
-    if (d && d.moved && !['scrub', 'pan', 'locked'].includes(d.type)) this.ed.commit();
+    if (d.type === 'box') {
+      const items = this.boxSet ? this.boxItems(d) : null;
+      this.boxSet = null;
+      if (items) ed.selectMany(items, d.mode);
+      else if (d.hit) ed.select({ kind: 'track', track: d.hit.track }, d.mode);
+      this.draw();
+      return;
+    }
+    if (d.copies && !d.moved) { ed.uncloneSelection(d.copies); return; } // Alt-click without a drag: no copy
+    if (d.copies) { ed.commit(`Duplicated ${d.copies.length > 1 ? `${d.copies.length} items` : ed.describe(d.copies[0][1])}`); return; }
+    if (d.type === 'scale' && d.moved) { ed.commit(`Stretched the timing of ${d.orig.length} items to ${Math.round((d.f ?? 1) * 100)}%`); return; }
+    if (d.moved && !['scrub', 'pan', 'locked', 'rangeA', 'rangeB'].includes(d.type)) ed.commit();
   }
 
   context(e) {
@@ -733,6 +956,9 @@ export class TimelineView {
     if (!hit) return;
     const t = this.snap(this.T(x), e);
     const at = { x: e.clientX, y: e.clientY };
+    // right-click on something in a multi-selection: options for all of it
+    const s = this.selOf(hit);
+    if (s && ed.multi && ed.isSel(s.item ?? s.track) && hit.type !== 'lane') return ed.contextMenuItems(at.x, at.y, ed.multiItems(t));
     if (BAR.has(hit.track?.type) && /edge|body/.test(hit.type)) return ed.contextMenu(at.x, at.y, { kind: hit.track.type, track: hit.track, t });
     if (hit.type === 'lane' && (hit.track.type === 'lane' || hit.track.type === 'group')) return ed.contextMenu(at.x, at.y, { kind: 'track', track: hit.track, t });
     const map = {
@@ -744,11 +970,8 @@ export class TimelineView {
       lane: { kind: 'lane', track: hit.track, t },
       chapter: { kind: 'chapter', item: hit.item },
       note: { kind: 'note', item: hit.item },
-      ruler: { kind: 'ruler', t },
-      end: { kind: 'ruler', t },
-      perfHead: { kind: 'ruler', t },
     };
-    if (map[hit.type]) ed.contextMenu(at.x, at.y, map[hit.type]);
+    ed.contextMenu(at.x, at.y, map[hit.type] ?? { kind: 'ruler', t });
   }
 
   dbl(e) {

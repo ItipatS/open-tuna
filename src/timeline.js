@@ -117,12 +117,13 @@ export function evalClip(t, x, duration = Infinity) {
   return (EASES[t.ease] || EASES.linear)(clamp01((x - t.a) / Math.max(t.b - t.a, 1e-6)));
 }
 
-// caption opacity: fades over `fade` seconds at each end (none at the very start / end of the story)
+// caption / layer opacity: fades over `fade` seconds at each end (none at the very start / end of the story);
+// `fadeIn` / `fadeOut` override one end (0 = a hard cut: the two halves of a split clip join seamlessly)
 export function captionOpacity(c, x, duration) {
-  const f = c.fade ?? 2.4;
-  const sm = (a, b, v) => { const k = clamp01((v - a) / (b - a)); return k * k * (3 - 2 * k); };
-  const fin = c.a <= 0 ? (x >= c.a ? 1 : 0) : sm(c.a, c.a + f, x);
-  const fout = c.b >= duration ? (x <= c.b ? 1 : 0) : 1 - sm(c.b - f, c.b, x);
+  const f = c.fade ?? 2.4, fi = c.fadeIn ?? f, fo = c.fadeOut ?? f;
+  const sm = (a, b, v) => { if (b <= a) return v >= a ? 1 : 0; const k = clamp01((v - a) / (b - a)); return k * k * (3 - 2 * k); };
+  const fin = c.a <= 0 || fi <= 0 ? (x >= c.a ? 1 : 0) : sm(c.a, c.a + fi, x);
+  const fout = c.b >= duration || fo <= 0 ? (x <= c.b ? 1 : 0) : 1 - sm(c.b - fo, c.b, x);
   return Math.min(fin, fout);
 }
 
@@ -271,8 +272,11 @@ export class Timeline {
 
   // a path track at x: weight (0 outside the clip, easing in / out over `blend` s) + position + heading
   path(t, x, out) {
-    const bl = Math.max(0.01, t.blend ?? 2), sm = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
-    out.w = Math.min(sm((x - t.a) / bl), 1 - sm((x - (t.b - bl)) / bl)) * (x >= t.a && x <= t.b ? 1 : 0);
+    // `blendIn` / `blendOut` override `blend` at one end (0: the halves of a split path join without letting go)
+    const bl = t.blend ?? 2, bi = Math.max(0.01, t.blendIn ?? bl), bo = Math.max(0.01, t.blendOut ?? bl);
+    const sm = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
+    const win = (t.blendIn ?? bl) <= 0 ? 1 : sm((x - t.a) / bi), wout = (t.blendOut ?? bl) <= 0 ? 1 : 1 - sm((x - (t.b - bo)) / bo);
+    out.w = Math.min(win, wout) * (x >= t.a && x <= t.b ? 1 : 0);
     hermite(t.keys, x, 'pos', out.pos);
     hermite(t.keys, x + 0.25, 'pos', out.ahead);
     return out;
@@ -285,8 +289,10 @@ export class Timeline {
   }
 
   // readable, diff-friendly JSON: one line per key / clip, numbers rounded to 4 decimals
-  serialize() { return fmt(this.data, '') + '\n'; }
+  serialize() { return serializeStory(this.data); }
 }
+
+export const serializeStory = (d) => `${fmt(d, '')}\n`;
 
 const flatVal = (x) => typeof x !== 'object' || x === null || (Array.isArray(x) && x.every((y) => typeof y !== 'object' || y === null));
 function fmt(v, ind) {

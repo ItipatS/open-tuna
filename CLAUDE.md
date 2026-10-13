@@ -89,7 +89,8 @@ src/ocean.js          ocean, sky, seabed                     src/shared.js      
 src/creatures.js      animated GLB wrapper, SwimPath, Hunter src/particles.js   splashes, marine snow, bubbles
 src/jellies.js        procedural jellyfish                   src/vegetation.js  seagrass
 src/models.js         GLTF loading / baking / material conversion        src/director.js  lab-mode camera
-src/editor/           the editor (editor.html only) — docs/editor.md; project.js (.tuna), build.js (export)
+src/editor/           the editor (editor.html only) — docs/editor.md; project.js (.tuna), build.js (export),
+                      doc.js (story entities / changes, undo), edit-ops.js (bulk editing)
 tools/serve.py|.ps1   studio servers (projects, saves, uploads, ranges, git for demos) — docs/dev-server.md
 models/               the tool's built-in GLB models (creatures, coral)
 demos/<id>/           demo projects: story.json, manifest.json, thumb.jpg, assets/, saves/checkpoints/ (committed)
@@ -114,3 +115,5 @@ EDITOR.md  HANDOFF.md  docs/
 5. **Keep the docs true.** When you change behaviour, update the doc that describes it, EDITOR.md for user-facing
    features, and HANDOFF.md's state.
 6. **Two servers, one API.** `tools/serve.py` and `tools/serve.ps1` must stay in sync.
+7. **Ids in story.json.** Keys, clips, chapters and notes carry an `id`: keep it when editing, omit it on new items
+   (docs/story-format.md).

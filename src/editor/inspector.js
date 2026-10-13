@@ -34,12 +34,13 @@ export class Inspector {
     this.fields = new Map();
     this.ro = ed.isLocked(s);
     const el = h('div', { class: 'ins' });
-    if (this.ro) {
+    if (this.ro && !ed.multi) {
       const own = s.kind === 'track' ? s.track : s.item;
       el.append(h('div', { class: 'locked' }, h('span', {}, own?.locked ? '🔒 Locked' : '🔒 Its track is locked'),
         btn('Unlock', () => (own?.locked ? ed.toggleLock() : ed.select({ kind: 'track', track: s.track })), { title: own?.locked ? 'L' : 'Select the track to unlock it' })));
     }
-    if (!s) this.project(el);
+    if (ed.multi) this.multi(el);
+    else if (!s) this.project(el);
     else if (s.kind === 'track') {
       if (s.track.type === 'group' || s.track.type === 'lane') this.container(el, s.track);
       else if (s.track.type === 'layer') this.layer(el, s.track);
@@ -158,6 +159,87 @@ export class Inspector {
       h('span', {}, label(it, i)[0]), h('span', {}, label(it, i)[1])))));
   }
 
+  setLock(o, v) { if (v) o.locked = true; else delete o.locked; }
+
+  // a number shared by several items: blank ("—") while they differ; a new value goes to all of them
+  mnum(label, objs, field, def, { step = 0.1, min = -Infinity, max = Infinity, dec = 2 } = {}) {
+    const vals = objs.map((o) => o[field] ?? def), same = vals.every((v) => v === vals[0]);
+    const input = h('input', { type: 'number', step: String(step), placeholder: same ? '' : '— mixed —' });
+    if (same) input.value = +(+vals[0]).toFixed(dec);
+    input.addEventListener('change', () => {
+      const v = parseFloat(input.value);
+      if (!Number.isFinite(v)) return;
+      for (const o of objs) o[field] = Math.min(max, Math.max(min, v));
+      this.ed.commit(`Set ${label.toLowerCase()} on ${objs.length} items`);
+    });
+    return this.row(`${label}${same ? '' : ' ·'}`, input);
+  }
+
+  msel(label, options, objs, field, def) {
+    const vals = objs.map((o) => o[field] ?? def), same = vals.every((v) => v === vals[0]);
+    const sel = h('select', {}, [...(same ? [] : [h('option', { value: '' }, '— mixed —')]), ...Object.entries(options).map(([v, t]) => h('option', { value: v }, t))]);
+    sel.value = same ? vals[0] : '';
+    sel.addEventListener('change', () => { if (!sel.value) return; for (const o of objs) o[field] = sel.value; this.ed.commit(`Set ${label.toLowerCase()} on ${objs.length} items`); });
+    return this.row(label, sel);
+  }
+
+  // ------------------------------------------------------------------ several things selected
+  multi(el) {
+    const { ed } = this, S = ed.sels;
+    const count = {};
+    for (const q of S) {
+      const k = q.kind === 'key' ? (q.track.type === 'camera' ? 'camera key' : q.track.type === 'path' ? 'waypoint' : 'key') : q.kind === 'clip' ? 'caption' : q.kind === 'track' ? (q.track.type === 'layer' ? 'layer' : q.track.type === 'path' ? 'path' : q.track.type === 'lane' ? 'lane' : q.track.type === 'group' ? 'group' : 'track') : q.kind;
+      count[k] = (count[k] ?? 0) + 1;
+    }
+    this.header(el, `${S.length} selected`, Object.entries(count).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(' · '));
+    const sp = ed.selSpan();
+    if (sp) el.append(this.row('Span', h('span', { class: 'tm' }, `${fmtTime(sp.a)} → ${fmtTime(sp.b)} (${fmtTime(sp.b - sp.a)})`)));
+    const L = S.some((q) => ed.isLocked(q));
+    const keysOf = (pred) => S.filter((q) => q.kind === 'key' && pred(q.track)).map((q) => q.item);
+    const easeKeys = keysOf((t) => t.type === 'curve' || t.type === 'layer');
+    const camKeys = keysOf((t) => t.type === 'camera');
+    const caps = S.filter((q) => q.kind === 'clip').map((q) => q.item);
+    const tracks = S.filter((q) => q.kind === 'track').map((q) => q.track);
+    const layers = tracks.filter((t) => t.type === 'layer'), paths = tracks.filter((t) => t.type === 'path');
+    if (easeKeys.length) { this.sec(el, `Keys (${easeKeys.length})`); el.append(this.msel('Ease', Object.fromEntries(Object.keys(EASES).map((k) => [k, k])), easeKeys, 'ease', 'smooth')); }
+    if (camKeys.length) {
+      this.sec(el, `Camera keys (${camKeys.length})`);
+      el.append(this.mnum('FOV', camKeys, 'fov', 50, { step: 0.5, min: 10, max: 120, dec: 1 }));
+      el.append(this.mnum('Follow school', camKeys, 'follow', 0, { step: 0.05, min: 0, max: 1, dec: 2 }));
+    }
+    if (caps.length) {
+      this.sec(el, `Captions (${caps.length})`);
+      el.append(this.msel('Size', { large: 'Large (hero)', medium: 'Medium' }, caps, 'size', 'medium'));
+      el.append(this.mnum('Height (%)', caps, 'y', 42, { step: 0.5, min: 0, max: 95, dec: 1 }));
+      el.append(this.mnum('Fade (s)', caps, 'fade', 2.4, { step: 0.1, min: 0, max: 20 }));
+    }
+    if (layers.length) { this.sec(el, `Layers (${layers.length})`); el.append(this.mnum('Fade (s)', layers, 'fade', 2.4, { step: 0.1, min: 0, max: 30 })); }
+    if (paths.length) { this.sec(el, `Paths (${paths.length})`); el.append(this.mnum('Blend (s)', paths, 'blend', 2, { step: 0.1, min: 0, max: 30 })); }
+    if (tracks.length) {
+      const muted = tracks.filter((t) => t.mute).length;
+      const mute = h('input', { type: 'checkbox' });
+      mute.checked = muted === tracks.length;
+      mute.indeterminate = muted > 0 && muted < tracks.length;
+      mute.addEventListener('change', () => { for (const t of tracks) { if (mute.checked) t.mute = true; else delete t.mute; } ed.commit(`${mute.checked ? 'Muted' : 'Unmuted'} ${tracks.length} tracks`); });
+      el.append(this.row('Mute', h('div', {}, mute)));
+    }
+    this.sec(el, 'Timing');
+    this.buttons(el,
+      btn('Align to playhead', () => ed.alignToPlayhead(), { title: 'Every selected item starts at the playhead' }),
+      btn('Spread evenly', () => ed.distribute(false)),
+      btn('Close gaps', () => ed.distribute(true), { title: 'One right after another' }),
+      btn('Stretch…', () => ed.scaleDialog(), { title: 'Make the timing of the selection longer / shorter (or drag the bracket on the ruler)' }),
+      btn('Split', () => ed.splitAtPlayhead(), { title: 'Split captions / layers / paths at the playhead (S)' }));
+    this.sec(el, 'Selection');
+    this.buttons(el,
+      this.free(btn('Copy', () => ed.copy(), { ico: 'copy' })),
+      btn('Duplicate', () => ed.duplicate()),
+      this.free(btn(L ? 'Unlock all' : 'Lock all', () => ed.toggleLock())),
+      btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
+    el.append(h('div', { class: 'hint' }, 'Drag any selected item to move them all · Alt-drag for a copy · drag the bracket ends on the ruler to stretch · Alt+← → nudges · right-click for more.'));
+    if (L) el.querySelectorAll('input, select').forEach((i) => { i.disabled = true; });
+  }
+
   // ------------------------------------------------------------------ panels
   project(el) {
     const { ed } = this, d = ed.tl.data;
@@ -187,7 +269,7 @@ export class Inspector {
     this.header(el, t.label || t.id, `${t.type} track${t.bind ? ` · ${t.bind}` : ''}`);
     el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
     el.append(this.check('Mute', () => t.mute, (v) => { if (v) t.mute = true; else delete t.mute; }));
-    el.append(this.check('Lock', () => t.locked, (v) => { if (v) t.locked = true; else delete t.locked; }, { free: true }));
+    el.append(this.check('Lock', () => t.locked, (v) => this.setLock(t, v), { free: true }));
 
     if (t.type === 'clip') {
       el.append(this.select('Drives', DRIVERS, () => t.bind, (v) => { t.bind = v; }));
@@ -277,13 +359,15 @@ export class Inspector {
         t.keys = t.keys.map(({ x, y, pos, ...k }) => (v === 'world' ? { ...k, pos: pos ?? lt.worldSpot() } : { ...k, x: x ?? 50, y: y ?? 50 }));
       }));
     }
-    el.append(this.check('Lock', () => t.locked, (v) => { if (v) t.locked = true; else delete t.locked; }, { free: true }));
+    el.append(this.check('Lock', () => t.locked, (v) => this.setLock(t, v), { free: true }));
     el.append(this.check('Hide (mute)', () => t.mute, (v) => { if (v) t.mute = true; else delete t.mute; }));
 
     this.sec(el, 'Timing');
     el.append(this.time('Start', () => t.a, (v) => { t.a = Math.min(v, t.b - 0.1); }));
     el.append(this.time('End', () => t.b, (v) => { t.b = Math.max(v, t.a + 0.1); }));
     el.append(this.num('Fade (s)', () => t.fade ?? 2.4, (v) => { t.fade = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
+    if (t.fadeIn !== undefined) el.append(this.num('Fade in (s)', () => t.fadeIn, (v) => { t.fadeIn = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
+    if (t.fadeOut !== undefined) el.append(this.num('Fade out (s)', () => t.fadeOut, (v) => { t.fadeOut = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
 
     if (gpu) {
       this.sec(el, 'Look (shader effects)');
@@ -352,7 +436,7 @@ export class Inspector {
     el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
     el.append(this.check('Collapsed', () => t.collapsed, (v) => { if (v) t.collapsed = true; else delete t.collapsed; }));
     el.append(this.check('Mute all', () => t.mute, (v) => { if (v) t.mute = true; else delete t.mute; }));
-    el.append(this.check('Lock all', () => t.locked, (v) => { if (v) t.locked = true; else delete t.locked; }, { free: true }));
+    el.append(this.check('Lock all', () => t.locked, (v) => this.setLock(t, v), { free: true }));
     if (!isG) el.append(this.placement(t, false));
     this.sec(el, isG ? 'In this group' : 'Clips in this lane');
     this.list(el, kids, (m) => [m.label || m.id, m.a !== undefined ? `${fmtTime(m.a, 0)}–${fmtTime(m.b, 0)}` : m.type], (m) => { ed.select({ kind: 'track', track: m }); if (m.a !== undefined) ed.setTime(m.a); });
@@ -382,12 +466,14 @@ export class Inspector {
     this.header(el, t.label || 'Path', `path · ${ACTORS[t.bind] || t.bind} · ${fmtTime(t.a)} → ${fmtTime(t.b)}`);
     el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
     el.append(this.select('Moves', ACTORS, () => t.bind, (v) => { t.bind = v; }));
-    el.append(this.check('Lock', () => t.locked, (v) => { if (v) t.locked = true; else delete t.locked; }, { free: true }));
+    el.append(this.check('Lock', () => t.locked, (v) => this.setLock(t, v), { free: true }));
     el.append(this.check('Mute', () => t.mute, (v) => { if (v) t.mute = true; else delete t.mute; }));
     this.sec(el, 'Timing');
     el.append(this.time('Start', () => t.a, (v) => { t.a = Math.min(v, t.b - 0.1); }));
     el.append(this.time('End', () => t.b, (v) => { t.b = Math.max(v, t.a + 0.1); }));
     el.append(this.num('Blend (s)', () => t.blend ?? 2, (v) => { t.blend = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
+    if (t.blendIn !== undefined) el.append(this.num('Blend in (s)', () => t.blendIn, (v) => { t.blendIn = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
+    if (t.blendOut !== undefined) el.append(this.num('Blend out (s)', () => t.blendOut, (v) => { t.blendOut = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
     el.append(h('div', { class: 'hint' }, `Between start and end the ${(ACTORS[t.bind] || 'creature').toLowerCase()} follows the waypoints (easing in / out over Blend); outside it does its own thing. ${t.bind === 'school' ? 'The school follows a moving goal, so it trails the waypoints a little — like a real school.' : 'It faces along the path.'}`));
     this.sec(el, `Waypoints (${t.keys.length})`);
     this.list(el, t.keys, (k, i) => [`${k.locked ? '🔒 ' : ''}#${i + 1}  ${fmtTime(k.t)}`, `[${k.pos.map((v) => +v.toFixed(1)).join(', ')}]`], (k) => { ed.select({ kind: 'key', track: t, item: k }); ed.setTime(k.t); });
@@ -532,6 +618,8 @@ export class Inspector {
     el.append(this.time('Start', () => c.a, (v) => { c.a = Math.min(v, c.b - 0.1); }));
     el.append(this.time('End', () => c.b, (v) => { c.b = Math.max(v, c.a + 0.1); }));
     el.append(this.num('Fade (s)', () => c.fade ?? 2.4, (v) => { c.fade = v; }, { step: 0.1, min: 0, max: 20, dec: 2 }));
+    if (c.fadeIn !== undefined) el.append(this.num('Fade in (s)', () => c.fadeIn, (v) => { c.fadeIn = v; }, { step: 0.1, min: 0, max: 20, dec: 2 }));
+    if (c.fadeOut !== undefined) el.append(this.num('Fade out (s)', () => c.fadeOut, (v) => { c.fadeOut = v; }, { step: 0.1, min: 0, max: 20, dec: 2 }));
     el.append(h('div', { class: 'hint' }, 'A caption starting at 0:00 is already visible when the page opens. Right-click the caption for split / trim to playhead.'));
     this.buttons(el, this.free(btn('Go to', () => ed.setTime((c.a + c.b) / 2))), btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
   }

@@ -6,7 +6,7 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 
 | File | Role |
 |---|---|
-| `editor.js` | `Editor`: DOM shell (top bar + project button, left Scene / Assets / Data tabs (`showTab`), viewport, inspector, timeline, resizable panels), menus (`menuFile/Edit/View/Help`), right-click menus (`contextItems(target)`), selection, locks, clipboard, undo, play modes, keyboard, Copy ref (`reference()`), groups / lanes (`addGroup`, `addLane`, `defaultLane`, `removeContainer`, `groupMenu`, `laneMenu`), path waypoints (`addPathKey`) |
+| `editor.js` | `Editor`: DOM shell (top bar + project button, left Scene / Assets / Data tabs (`showTab`), viewport, inspector, timeline, resizable panels), menus (`menuFile/Edit/View/Help`), right-click menus (`contextItems(target)`), selection (`sels` / `sel`, `select(sel, mode)`), locks, `commit` / undo / redo (diffs, see below), play modes (+ In–Out loop), keyboard + clipboard events, Copy ref / links (`copyLink`), groups / lanes, path waypoints. Bulk editing comes from `edit-ops.js` |
 | `timeline-view.js` | `TimelineView`: one canvas covering the ruler (chapters, notes, playhead, END flag), rows (`layout()`: groups → indented members, lanes with clips packed into sub-rows by `pack()`, collapsed rows → `drawSummary`), the performance lane, hit testing (`hit` → `hitBar` / `hitTrack`), dragging (scrub, keys, clip edges / body incl. moving between lanes, END, markers), snapping, zoom / pan, drops of files / assets |
 | `inspector.js` | `Inspector`: property panels per selection (project, track, group / lane `container`, key, caption, chapter, note, layer + layer key, path + waypoint, object). Field widgets bind getters / setters; `input` = live (`ed.changed()`), `change` / drag end = undo step (`ed.commit()`); read-only when locked |
 | `layer-tools.js` | `LayerTools`: add layers (file / URL / HTML / text / glass / model / asset), `LOOKS` presets, parallax, auto-key (`keyAt`), Game-view picking / dragging / scaling (DOM layers by element, GPU layers by `Layers.rect`), drops on the viewport / timeline (`dropOnTimeline`) |
@@ -17,6 +17,11 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 | `build.js` | `SiteBuilder`: File ▸ Build site — collects the runtime (import crawl from `src/main.js`, no `src/editor/`), models, used assets → zip / folder |
 | `data-panel.js` | `DataPanel`: the left **Data** tab — sources, status, JSON tree, binding menu, sample / headers dialogs |
 | `thumbs.js` | `ModelThumbs`: turntable previews of GLBs rendered on the editor's renderer (24 frames into a webp strip, Cache API), `spin(asset)` element |
+| `doc.js` | The story as **entities** (`doc`, `meta`, `settings`, `params`, `order`, `t:<track>`, `k:<track>:<id>`, `c:<track>:<id>`, `ch:<id>`, `n:<id>`) and **changes** `{e, set: {field: [before, after]}} \| {e, add} \| {e, del}`: `ensureIds`, `roundAll`, `entities`, `diff` / `diffDocs`, `apply` (in place, returns what really changed), `invert`, `stillValid`, `summarize` (undo labels) |
+| `edit-ops.js` | Bulk editing, **mixed into `Editor.prototype`**: `timedSelection`, clipboard v3 (`clipboardOf` / `copy` / `cut` / `paste` / `pasteValues`, system clipboard events, cross-project media via `asset-import`), `cloneSelection` (Alt-drag), `deleteSelection`, `duplicate`, `nudge`, `scaleTiming` / `scaleDialog`, `alignToPlayhead`, `distribute`, `splitAtPlayhead` / `splitBar`, select all / after / in range, In / Out (`range`, `loop`), `insertTime` / `deleteTime` (ripple), `replaceAsset`, `colorItems`, `multiItems` (right-click on a multi-selection) |
+| `import.js` | `Importer`: File ▸ Import into this story — reads a .tuna / story.json, picks tracks / marks, uploads its media (`upload?dir=`), merges via `paste()` (optionally after `insertTime`) |
+| `check.js` | `Checker`: File ▸ Check project — missing media (relink), unknown `{{source}}` bindings, timing problems, duplicate binds, ignored stretches, invisible layers, empty captions, slow moments (`editor.perf`), open notes, locks. `summary()` feeds the Build dialog |
+| `recorder.js` | `Recorder`: File ▸ Record a review video — plays at 1×, composites the canvas (`app.onFrame`) + the visible captions into a 2D canvas, `MediaRecorder` → MP4 (avc3/avc1) or WebM, saved from a click in the "ready" dialog |
 | `menu.js` | context menus / drop-downs (`openMenu`), modal dialogs (`dialog`) |
 | `dom.js` | `h()` element helper, icons, `btn`, `download` |
 | `editor.css` | the dark shell; mode colours via `#ed[data-mode]` (scene / game / playing) |
@@ -26,13 +31,21 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 - The editor mutates `timeline.data` (the parsed story.json) **directly**.
 - `editor.changed()` is for live edits: it re-sorts, bumps `timeline.version`, and redraws. Views and the runtime
   rebuild from `version`.
-- `editor.commit()` ends an edit: it pushes an undo snapshot (the serialized JSON, max 300), writes the browser
-  draft, and refreshes the inspector.
-- **Undo / redo** restore a snapshot with `tl.set()`. The selection is held by object reference, so it is mapped
-  to indices first (`selPath` / `resolve`).
-- **Locks:** every mutating action must check `isLocked(sel)` / `guard()`. Locks are inherited from the lane /
-  group (`tl.lockedTrack`).
-- **Selections:**
+- `editor.commit(label?)` ends an edit. It gives new items ids (`ensureIds`), rounds numbers like the file
+  (`roundAll`), and **diffs `editor.base`** (the story as last committed) against the data: those changes are ONE
+  step — pushed on the undo stack, applied to `base`, labelled (`summarize` unless a label is given), and the
+  browser draft / autosave bookkeeping runs. No change, no step.
+- **Undo / redo** (`step`): invert the last step, keep only the parts that still hold the values it set
+  (`stillValid` against `base`), apply, commit (onto the other stack). Objects are changed in place, so selections
+  keep working; the result is selected.
+- **Ids:** every key / clip / chapter / note has a short random `id`, tracks have theirs. Anything that creates
+  items must not reuse an id (copies go through `fresh()` / `copyTrack()`); `ensureIds` fixes duplicates at commit,
+  and on load matches id-less items to identical ones of the current story (so a restored version keeps ids).
+- **Locks:** every mutating action must check `isLocked(sel)` / `guard()` (both cover the whole multi-selection).
+  Locks are inherited from the lane / group (`tl.lockedTrack`).
+- **Selection:** `editor.sels` (everything selected), `editor.sel` (the primary one, shown by the inspector),
+  `isSel(x)` (by object). `select(sel, mode)` with `mode` `'add'` / `'toggle'`, `selectMany`, `selectEntities(keys)`,
+  `keyOf(sel)` (entity key). Shapes:
 
   | Selection | Shape |
   |---|---|
@@ -58,12 +71,13 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 ## Hooks from main.js (the `app` object)
 
 `renderer, scene, camera, controls, story, timeline, layers, data (DataHub), tuna, opts, buildPost, onResize, hidden (Set),
-fpsInfo, setTunaCount, objects (outliner), setTimeScale, capture()`. The editor calls `onResize()` when its viewport
+fpsInfo, setTunaCount, objects (outliner), setTimeScale, capture(), onFrame(fn)` (called after every rendered frame — the recorder). The editor calls `onResize()` when its viewport
 changes, and `viewSize()` gives the render size.
 
 ## Saving
 
 See [dev-server.md](dev-server.md).
+
 - **Save** posts to `/__editor/save` with `X-Base-Hash` (FNV-1a of the story.json bytes this tab loaded or last
   saved). A 409 means the file changed outside the editor: autosave pauses and a dialog offers *Load theirs*
   (undoable) or *Keep mine* (`X-Force: 1`).

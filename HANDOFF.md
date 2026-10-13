@@ -1,6 +1,6 @@
 # Handoff — Open Tuna / Thai Union 50th anniversary pitch
 
-Last updated: 2026-10-13. Technical reference lives in `CLAUDE.md`; this file is the *why*, the
+Last updated: 2026-10-14. Technical reference lives in `CLAUDE.md`; this file is the *why*, the
 current state, decisions made, and what to do next.
 
 ## The goal
@@ -144,8 +144,14 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
     "repeat per item" layers for data lists (product grids from the CMS), a server-side proxy for secret API keys,
     publishing a build straight to a host.
 11. Editor next steps (if the designer asks): keyframe more things (tuna counts / school position, tentacle look
-    params, colour grade), easing curve editor for keys, audio track for music sync, multi-select, placing GLB
-    props as world layers, layer masks / blend modes, text layers with brand fonts once brand assets arrive.
+    params, colour grade), easing curve editor for keys, audio track for music sync, layer masks / blend modes,
+    text layers with brand fonts once brand assets arrive, nested sequences (a timeline inside a clip).
+12. Editor (2026-10-14): multi-select and bulk editing (box select, group move, Alt-drag copies, stretch timing,
+    split, nudge, align / distribute, In–Out + loop, ripple insert / delete time, paste special, clipboard across
+    projects / computers), Import into this story (.tuna merge), Check project, Replace asset everywhere, Copy link
+    to a moment, review video recording; ids on every item and diff-based undo. **Team platform work lives on the
+    `team-platform` branch** (live shared editing, presence, *Locked by …*, History / rewind, review notes, snippets) —
+    owner's rule: editor work goes to `main`, platform work to that branch.
 
 ## Tuning knobs (where to change things)
 

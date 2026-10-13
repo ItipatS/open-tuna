@@ -26,12 +26,18 @@ In a `.tuna` project the file is `projects/<slug>/story.json`, and `assets/…` 
 ([projects-build-data.md](projects-build-data.md)).
 Version 1 files (positions as progress 0..1) are migrated on load (`migrate()` in timeline.js).
 
+**Ids.** Every track has an `id`; every key, caption clip, chapter and note has a short random `id` too
+(`"id": "k3f9a2"`, written at the end of the object). They're how undo finds an item again — **keep them when you
+edit**. A new item may leave `id` out: the editor gives it one (an item identical to one in the previous version
+gets that one's id back). Never copy an item together with its id.
+
 Common track fields:
 - `id` — unique.
 - `type`
 - `label` — the name shown in the editor.
 - `mute: true` — ignored by the story.
 - `locked: true` — the editor won't change it. Respect it.
+- `color: "#4fb8ff"` — the editor's colour for the row (no effect on the site).
 - `collapsed: true` — a thin row in the editor.
 - `parent: <group id>` — the group it belongs to.
 - `lane: <lane id>` — the lane it's drawn in (layers and paths only).
@@ -82,7 +88,9 @@ use `tl.muted(t)` / `tl.lockedTrack(t)`, not the raw flags.
 | `tuna.free` / `tuna.hoop` | tuna leap across / over the camera, and through the 0 (gates) |
 
 ### captions
-`{ type: "captions", clips: [ { a, b, title, sub, size: "large"|"medium", y: <% from top>, fade } ] }`.
+`{ type: "captions", clips: [ { a, b, title, sub, size: "large"|"medium", y: <% from top>, fade, fadeIn?, fadeOut? } ] }`.
+`fadeIn` / `fadeOut` override `fade` at one end (0 = a hard cut: the halves of a split caption join seamlessly). Layers
+take `fadeIn` / `fadeOut` the same way, paths `blendIn` / `blendOut` for `blend`.
 - `title` keeps `\n` line breaks.
 - `a ≤ 0` means visible at load.
 - Captions are DOM text over the canvas (z-index 10).

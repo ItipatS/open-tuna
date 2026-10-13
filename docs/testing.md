@@ -61,7 +61,7 @@ await page.screenshot({ path: 'shot.png' });
 ## Hygiene (important)
 
 - **The editor autosaves into the project's story.json.** A test that edits a demo in the editor must undo everything
-  (`while (ed.hi > 0) ed.undo()`) and **navigate to `about:blank` before finishing**. Don't pipe test output
+  (`while (ed.undoStack.length) ed.undo()`) and **navigate to `about:blank` before finishing**. Don't pipe test output
   through `head` / anything that can kill the script while a tab is open. Back up story.json in your scratch space
   before such tests, and `cmp` it afterwards.
 - Delete only files your test created (`assets/<test>.svg`, checkpoints named "test …"). **Never delete

@@ -493,7 +493,7 @@ async function main() {
 
   // editor hooks: hidden objects (outliner), simulation speed, one-shot frame capture
   const hidden = new Set();
-  let timeScale = 1, captureCb = null;
+  let timeScale = 1, captureCb = null, frameHook = null;
   const fpsInfo = { fps: 60, res: 1 };
 
   window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles, timeline, layers, data };
@@ -513,6 +513,7 @@ async function main() {
       ],
       setTimeScale: (v) => { timeScale = v; },
       capture: () => new Promise((res) => { captureCb = res; }),
+      onFrame: (fn) => { frameHook = fn; }, // called right after each frame is rendered (the review-video recorder)
     });
     window.__ocean.editor = editor;
     onResize();
@@ -686,6 +687,7 @@ async function main() {
 
     post.render();
     if (captureCb) { const cb = captureCb; captureCb = null; renderer.domElement.toBlob(cb, 'image/png'); }
+    frameHook?.(renderer.domElement);
 
     fpsFrames++; fpsTime += rdt;
     if (fpsTime > 0.5) {
