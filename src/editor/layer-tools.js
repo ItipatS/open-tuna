@@ -4,12 +4,20 @@
 import { h } from './dom.js';
 import { dialog } from './menu.js';
 import { evalKeys, fmtTime } from '../timeline.js';
-import { kindOf, MEDIA_EXT, SCREEN_KEY } from '../layers.js';
+import { kindOf, MEDIA_EXT, SCREEN_KEY, isGPU } from '../layers.js';
 
 const r4 = (x) => Math.round(x * 1e4) / 1e4;
 const r2 = (x) => Math.round(x * 100) / 100;
 const ACCEPT = Object.values(MEDIA_EXT).flat().map((e) => `.${e}`).join(',');
 const DEPTHS = [['Far background', 0.15], ['Background', 0.35], ['Middle', 0.7], ['Near', 1.2], ['Foreground', 2]];
+// one-click looks for GPU layers (the designer can fine-tune each slider afterwards)
+export const LOOKS = {
+  clean: { label: 'Clean (no effects)', reveal: 'fade', distort: 0, caustic: 0, chroma: 0, glow: 0, glass: 0 },
+  underwater: { label: 'Underwater card', reveal: 'dissolve', distort: 0.22, caustic: 0.45, chroma: 0.25, glow: 0, glass: 0.9 },
+  liquid: { label: 'Liquid reveal', reveal: 'ripple', distort: 0.45, caustic: 0.2, chroma: 0.45, glow: 0.12, glass: 0 },
+  glow: { label: 'Glowing', reveal: 'dissolve', distort: 0.12, caustic: 0.3, chroma: 0.2, glow: 0.6, glass: 0 },
+  wipe: { label: 'Current wipe', reveal: 'wipe', distort: 0.3, caustic: 0.25, chroma: 0.35, glow: 0.05, glass: 0 },
+};
 const HTML_SAMPLE = `<div style="text-align:center">
   <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:4cqw;margin:0">Your title</h2>
   <p style="letter-spacing:.3em;text-transform:uppercase;font-size:.8em;opacity:.8">Your text</p>
@@ -22,6 +30,8 @@ export class LayerTools {
     this.layers.editing = true;
     this.root = document.getElementById('captions');
     this.handle = h('div', { class: 'ed-handle', title: 'Drag to scale' });
+    this.box = h('div', { class: 'ed-gbox' }); // selection box for GPU layers (they have no element of their own)
+    this.root.append(this.box);
     this.bindPicking();
     this.bindDrop();
   }
@@ -29,6 +39,8 @@ export class LayerTools {
   // ------------------------------------------------------------------ adding
   addItems() {
     return [
+      { label: 'Text with shader effects', onClick: () => this.add({ kind: 'text', label: 'Headline' }) },
+      { label: 'Glass panel (refracts the scene)', onClick: () => this.add({ kind: 'glass', label: 'Glass panel' }) },
       { label: 'Image or video from file…', onClick: () => this.fromFile('screen') },
       { label: 'Image / video / page from a URL…', onClick: () => this.fromUrl() },
       { label: 'Web page (iframe)…', onClick: () => this.fromUrl('iframe') },
@@ -85,6 +97,16 @@ export class LayerTools {
     const id = `layer-${Date.now().toString(36)}`;
     const t = { id, type: 'layer', label: label || kind, kind, src, space, a, b, fade: 0.6, z: 5, w: world ? 8 : kind === 'html' ? 40 : 30, keys: [key] };
     if (kind === 'html') t.html = html ?? HTML_SAMPLE;
+    // images, videos, text and glass render in the scene with shader effects by default
+    if (kind === 'image' || kind === 'video' || kind === 'text' || kind === 'glass') {
+      if (!world) { t.render = 'gpu'; t.depth = 8; }
+      const { label: _l, ...look } = LOOKS[kind === 'text' ? 'liquid' : 'underwater'];
+      Object.assign(t, look);
+      t.fade = 1.2;
+    }
+    if (kind === 'image' || kind === 'video') t.glass = 0;
+    if (kind === 'text') Object.assign(t, { kicker: 'Chapter', title: 'Your headline', body: '', w: 60, size: 180, glass: 0 });
+    if (kind === 'glass') Object.assign(t, { w: 30, h: 40, glass: 1, caustic: 0.35 });
     if (kind === 'iframe') { t.h = 50; t.w = 50; t.interactive = true; }
     if (kind === 'video') t.loop = true;
     const tracks = ed.tl.tracks, ci = tracks.findIndex((q) => q.type === 'captions');
@@ -184,10 +206,23 @@ export class LayerTools {
     });
   }
 
+  applyLook(t, key) {
+    if (t.locked) return this.ed.toast(`“${t.label}” is locked`, true);
+    const { label, ...look } = LOOKS[key];
+    Object.assign(t, look);
+    if (t.kind === 'glass') t.glass = 1;
+    else if (t.kind !== 'image' && t.kind !== 'video') t.glass = 0;
+    if ((t.kind === 'image' || t.kind === 'video') && t.space !== 'world') t.render = 'gpu';
+    this.ed.commit();
+    this.ed.toast(`Look: ${label}`);
+  }
+
   // ------------------------------------------------------------------ menus
   contextItems(t) {
     const ed = this.ed, L = !!t.locked, world = t.space === 'world';
+    const canFx = t.kind !== 'html' && t.kind !== 'iframe';
     return [
+      canFx ? { label: 'Look', disabled: L, items: Object.entries(LOOKS).map(([k, v]) => ({ label: v.label, onClick: () => this.applyLook(t, k) })) } : null,
       { label: `Go to start (${fmtTime(t.a)})`, onClick: () => ed.setTime(t.a) },
       { label: `Add key at playhead (${fmtTime(ed.time)})`, shortcut: 'K', disabled: L, onClick: () => this.addKey(t) },
       { label: 'Make parallax…', disabled: L || world, onClick: () => this.parallaxDialog(t) },
@@ -212,32 +247,81 @@ export class LayerTools {
     return s?.track?.type === 'layer' ? s.track : null;
   }
 
+  // GPU screen layers under a point (% of the view), topmost first
+  gpuAt(px, py) {
+    const ed = this.ed, cam = ed.story.cam, out = [];
+    for (const t of ed.tl.layers()) {
+      if (!isGPU(t) || t.space === 'world') continue;
+      const k = this.layers.state(t, ed.time);
+      if (k.f <= 0.002) continue;
+      const r = this.layers.rect(t, k, cam.aspect);
+      if (Math.abs(px - r.x) <= r.w / 2 && Math.abs(py - r.y) <= r.h / 2) out.push(t);
+    }
+    return out.sort((a, b) => (a.depth ?? 8) - (b.depth ?? 8)); // nearest first
+  }
+
   bindPicking() {
     const ed = this.ed;
+    const pct = (e) => { const s = this.root.getBoundingClientRect(); return [((e.clientX - s.left) / s.width) * 100, ((e.clientY - s.top) / s.height) * 100]; };
+    // GPU layers: hit-test by rectangle (capture phase on the stage, before the canvas sees the click)
+    ed.$stage.addEventListener('pointerdown', (e) => {
+      if (!this.layers.pickable || e.button !== 0 || e.target.closest?.('.layer') || e.target.closest?.('#ed-scrollbar')) return;
+      const handle = e.target === this.handle && this.box.contains(this.handle);
+      const t = handle ? this.selected() : this.gpuAt(...pct(e))[0];
+      if (!t) return;
+      this.startDrag(e, t, handle);
+    }, true);
+    ed.$stage.addEventListener('contextmenu', (e) => {
+      if (!this.layers.pickable || e.target.closest?.('.layer')) return;
+      const t = this.gpuAt(...pct(e))[0];
+      if (!t) return;
+      e.preventDefault();
+      e.stopPropagation();
+      ed.contextMenu(e.clientX, e.clientY, { kind: 'layer', track: t });
+    }, true);
     this.root.addEventListener('pointerdown', (e) => {
       const el = e.target.closest?.('.layer');
       if (!el || !this.layers.pickable || e.button !== 0) return;
       const t = ed.tl.layers().find((q) => q.id === el.dataset.id);
+      if (t) this.startDrag(e, t, e.target === this.handle);
+    }, true);
+    this.root.addEventListener('contextmenu', (e) => {
+      const el = e.target.closest?.('.layer');
+      if (!el || !this.layers.pickable) return;
+      const t = ed.tl.layers().find((q) => q.id === el.dataset.id);
       if (!t) return;
       e.preventDefault();
-      e.stopPropagation();
-      if (this.selected() !== t) ed.select({ kind: 'track', track: t });
-      if (ed.isLocked({ kind: 'track', track: t })) return ed.toast('Locked — right-click ▸ Unlock to move it', true);
+      ed.contextMenu(e.clientX, e.clientY, { kind: 'layer', track: t });
+    });
+  }
+
+  // move (or, from the corner handle, scale) a screen layer; auto-keys an animated layer at the playhead
+  startDrag(e, t, scaling) {
+    const ed = this.ed;
+    e.preventDefault();
+    e.stopPropagation();
+    if (this.selected() !== t) ed.select({ kind: 'track', track: t });
+    if (ed.isLocked({ kind: 'track', track: t })) return ed.toast('Locked — right-click ▸ Unlock to move it', true);
+    {
       const stage = this.root.getBoundingClientRect();
-      const scaling = e.target === this.handle;
-      const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const k0 = this.layers.state(t, ed.time);
+      const r = isGPU(t) ? this.layers.rect(t, k0, ed.story.cam.aspect) : null;
+      const cx = r ? stage.left + (r.x / 100) * stage.width : 0, cy = r ? stage.top + (r.y / 100) * stage.height : 0;
+      const el = r ? null : this.layers.item(t.id)?.el;
+      const er = el?.getBoundingClientRect();
+      const ccx = el ? er.left + er.width / 2 : cx, ccy = el ? er.top + er.height / 2 : cy;
       let k = null, x0, y0, s0, d0;
       const start = () => {
         k = this.keyAt(t);
         if (!k) return false;
-        x0 = k.x; y0 = k.y; s0 = k.s ?? 1; d0 = Math.max(8, Math.hypot(e.clientX - cx, e.clientY - cy));
+        x0 = k.x; y0 = k.y; s0 = k.s ?? 1; d0 = Math.max(8, Math.hypot(e.clientX - ccx, e.clientY - ccy));
         return true;
       };
       let moved = false;
       const move = (ev) => {
         if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return;
         if (!moved) { moved = true; if (!start()) { up(); return ed.toast('That key is locked', true); } }
-        if (scaling) k.s = r4(Math.max(0.05, s0 * (Math.hypot(ev.clientX - cx, ev.clientY - cy) / d0)));
+        if (scaling) k.s = r4(Math.max(0.05, s0 * (Math.hypot(ev.clientX - ccx, ev.clientY - ccy) / d0)));
         else {
           k.x = r2(x0 + ((ev.clientX - e.clientX) / stage.width) * 100);
           k.y = r2(y0 + ((ev.clientY - e.clientY) / stage.height) * 100);
@@ -251,15 +335,7 @@ export class LayerTools {
       };
       addEventListener('pointermove', move);
       addEventListener('pointerup', up);
-    }, true);
-    this.root.addEventListener('contextmenu', (e) => {
-      const el = e.target.closest?.('.layer');
-      if (!el || !this.layers.pickable) return;
-      const t = ed.tl.layers().find((q) => q.id === el.dataset.id);
-      if (!t) return;
-      e.preventDefault();
-      ed.contextMenu(e.clientX, e.clientY, { kind: 'layer', track: t });
-    });
+    }
   }
 
   bindDrop() {
@@ -281,9 +357,17 @@ export class LayerTools {
     this.layers.pickable = pick;
     this.layers.editing = !ed.playing; // while playing, clickable layers work like on the website
     this.root.classList.toggle('ed-pick', pick);
-    const t = this.selected(), it = t && !t.space?.startsWith('w') ? this.layers.item(t.id) : null;
+    const t = this.selected(), it = t && t.space !== 'world' ? this.layers.item(t.id) : null;
     for (const x of this.layers.items.values()) x.el?.classList.toggle('ed-sel', x === it && pick);
-    if (it?.el && pick && !t.locked) { if (this.handle.parentNode !== it.el) it.el.append(this.handle); } else this.handle.remove();
+    const k = t && this.layers.state(t, ed.time);
+    const gpuSel = it?.gpu && pick && k.f > 0.002;
+    this.box.style.display = gpuSel ? 'block' : 'none';
+    if (gpuSel) {
+      const r = this.layers.rect(t, k, ed.story.cam.aspect);
+      Object.assign(this.box.style, { left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%`, transform: `translate(-50%, -50%) rotate(${k.r}deg)` });
+    }
+    const host = gpuSel ? this.box : it?.el && pick ? it.el : null;
+    if (host && !t.locked) { if (this.handle.parentNode !== host) host.append(this.handle); } else this.handle.remove();
   }
 
   reference(x) {

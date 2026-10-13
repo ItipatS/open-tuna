@@ -130,13 +130,36 @@ export function createAnimated(gltf, { length = 3, flip = false, yaw = 0, timeSc
 export class SwimPath {
   constructor({ center = new THREE.Vector3(), rx = 30, rz = 20, y = -15, yAmp = 3, speed = 3, phase = 0, dir = 1 }) {
     Object.assign(this, { center, rx, rz, y, yAmp, speed, dir });
+    this.home = { center: center.clone(), y };
     this.theta = phase;
     this.perimeter = Math.PI * (3 * (rx + rz) - Math.sqrt((3 * rx + rz) * (rx + 3 * rz)));
   }
   at(theta, out) {
     return out.set(this.center.x + Math.cos(theta) * this.rx, this.y + Math.sin(theta * 2 + 0.7) * this.yAmp, this.center.z + Math.sin(theta) * this.rz);
   }
+  // continue the loop from where the creature is now (after a story path let go of it); the loop then
+  // drifts back to its home over ~30 s
+  anchor(pos, forward) {
+    if (forward) { // pick the point of the loop whose direction best matches the creature's heading
+      let best = this.theta, bd = -2;
+      const a = new THREE.Vector3(), b = new THREE.Vector3();
+      for (let k = 0; k < 64; k++) {
+        const th = (k / 64) * Math.PI * 2;
+        const d = b.copy(this.at(th + this.dir * 0.02, b)).sub(this.at(th, a)).setY(0).normalize().dot(forward);
+        if (d > bd) { bd = d; best = th; }
+      }
+      this.theta = best;
+    }
+    const p = this.at(this.theta, new THREE.Vector3());
+    this.center.x += pos.x - p.x;
+    this.center.z += pos.z - p.z;
+    this.y += pos.y - p.y;
+  }
+
   step(obj, dt) {
+    const back = 1 - Math.exp(-dt / 30);
+    this.center.lerp(this.home.center, back);
+    this.y += (this.home.y - this.y) * back;
     this.theta += this.dir * (this.speed / this.perimeter) * Math.PI * 2 * dt;
     this.at(this.theta, obj.position);
     const ahead = this.at(this.theta + this.dir * 0.02, new THREE.Vector3());
@@ -194,6 +217,14 @@ export class Hunter {
     obj.position.set(prey.x + 22 * Math.cos(this.orbit), prey.y - 3, prey.z + 22 * Math.sin(this.orbit));
   }
   get lunging() { return this.state === 'lunge'; }
+  // a story path let go: carry on cruising from here, in the direction it was swimming
+  release(forward) {
+    this.dir.copy(forward).setY(0).normalize();
+    this.state = 'cruise';
+    this.timer = 6 + Math.random() * 4;
+    const prey = this.getPrey(), p = this.obj.position;
+    this.orbit = Math.atan2(p.z - prey.z, p.x - prey.x);
+  }
   update(dt) {
     const prey = this.getPrey(), p = this.obj.position;
     let target = this.cruise, turn = this.turn;

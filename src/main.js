@@ -386,6 +386,8 @@ async function main() {
     onChange: (on) => { $('cine').classList.toggle('on', on); $('cine').textContent = on ? 'Cinematic ● ON' : 'Cinematic'; },
   });
 
+  // how much the tuna react to the cursor / predators (story parameters; lab mode: full)
+  const fishReact = { cursor: 1, predators: 1 };
   // story parameters a timeline curve can animate (see PARAMS in story.js)
   const applyParam = {
     sun: (deg, az) => setSun(deg, az),
@@ -395,8 +397,15 @@ async function main() {
     'post.underRays': (v) => { uGodK.value = v; },
     'sea.state': (v) => { oceanU.amp.value = v; oceanU.chopAmp.value = Math.min(v, 1.1); },
     'water.clarity': (v) => { U.fogDensity.value = THREE.MathUtils.lerp(0.03, 0.006, v); },
+    'school.cursor': (v) => { fishReact.cursor = v; },
+    'school.predators': (v) => { fishReact.predators = v; },
   };
-  const actors = { bluewhale: blue, humpback: hump, shark1: sharks[0].obj, shark2: sharks[1].obj, turtle1: turtles[0].obj, turtle2: turtles[1].obj };
+  // what story path tracks can steer, with their own behaviour to hand back to and a natural top speed (m/s)
+  const actors = {
+    bluewhale: { obj: blue, swim: bluePath, speed: 5 }, humpback: { obj: hump, swim: humpPath, speed: 4.5 },
+    shark1: { obj: sharks[0].obj, hunter: sharks[0], speed: 9 }, shark2: { obj: sharks[1].obj, hunter: sharks[1], speed: 9 },
+    turtle1: { obj: turtles[0].obj, swim: turtles[0].path, speed: 2.2 }, turtle2: { obj: turtles[1].obj, swim: turtles[1].path, speed: 2.2 },
+  };
   const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions'), actors });
   const layers = story ? new Layers({ timeline, root: $('captions'), scene }) : null; // images / video / HTML / iframes
   // page length grows with the story (meta.scrollPerSecond vh per second of story)
@@ -523,8 +532,11 @@ async function main() {
   statusEl.textContent = 'Compiling shaders…';
   // compile the (still invisible) story water too, or it hitches the moment it appears
   tentacles.visible = true;
+  // ... and the GPU layers (their shaders differ per effect set), once their images are in
+  if (layers) { layers.sync(); await layers.ready(3000); layers.group.children.forEach((m) => { m.visible = true; }); }
   await renderer.compileAsync(scene, camera);
   tentacles.visible = false;
+  if (layers) layers.group.children.forEach((m) => { m.visible = false; });
   loaderEl.classList.add('hidden');
   if (LAB && !params.has('free')) director.start();
   // ?t=42 (seconds) or ?p=0.7 (progress) opens the story at that point (the editor's "Open site" links here)
@@ -565,8 +577,10 @@ async function main() {
     const nearSurface = tuna.u.goal.value.y > -4.5;
     tuna.u.jumpChance.value = school.jumpBoost > 0 ? 0.55 : nearSurface ? 0.14 : 0.03;
 
-    sharks.forEach((s, i) => { s.update(dt); tuna.setPredator(i, s.obj.position, s.lunging ? 16 : 9); reef.setPredator(i, s.obj.position, 6); });
-    tuna.setPredator(2, blue.position, 14); // tuna part around the blue whale
+    // a school on a story path obeys it: it ignores predators and the cursor
+    const obey = 1 - (story?.schoolControl ?? 0), predK = fishReact.predators * obey;
+    sharks.forEach((s, i) => { s.update(dt); tuna.setPredator(i, s.obj.position, Math.max(0.01, (s.lunging ? 16 : 9) * predK)); reef.setPredator(i, s.obj.position, 6); });
+    tuna.setPredator(2, blue.position, Math.max(0.01, 14 * predK)); // tuna part around the blue whale
     humpPath.step(hump, dt);
     bluePath.step(blue, dt);
     turtles.forEach((tt) => tt.path.step(tt.obj, dt));
@@ -629,13 +643,13 @@ async function main() {
     // cursor ray
     if (pointerIn && $('scare').checked && !director.active) {
       raycaster.setFromCamera(pointer, camera);
-      tuna.u.rayO.value.copy(raycaster.ray.origin); tuna.u.rayD.value.copy(raycaster.ray.direction); tuna.u.rayR.value = 7;
+      tuna.u.rayO.value.copy(raycaster.ray.origin); tuna.u.rayD.value.copy(raycaster.ray.direction); tuna.u.rayR.value = 7 * fishReact.cursor * obey;
       reef.u.rayO.value.copy(raycaster.ray.origin); reef.u.rayD.value.copy(raycaster.ray.direction); reef.u.rayR.value = 3;
     } else { tuna.u.rayR.value = 0; reef.u.rayR.value = 0; }
 
     // above the sea the school is only glimpsed through the surface: draw the first 800 (all leapers are < 256)
     tuna.mesh.count = story && U.under.value < 0.5 ? Math.min(tuna.count, 800) : tuna.count;
-    if (layers) layers.update(story.x, camera);
+    if (layers) layers.update(story.x, camera, story.cam);
     if (editor) editor.postUpdate(rdt);
     for (const o of hidden) o.visible = false; // editor outliner
     tuna.update(renderer, dt);

@@ -4,6 +4,8 @@
 import { h, btn } from './dom.js';
 import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime } from '../timeline.js';
+import { isGPU, REVEALS } from '../layers.js';
+import { LOOKS } from './layer-tools.js';
 
 export class Inspector {
   constructor(ed, root) {
@@ -217,17 +219,28 @@ export class Inspector {
 
   layer(el, t) {
     const { ed } = this, lt = ed.lt, world = t.space === 'world';
-    const KINDS = { image: 'Image', video: 'Video', html: 'HTML / text', iframe: 'Web page' };
-    this.header(el, t.label || 'Layer', `${KINDS[t.kind] || t.kind} layer · ${world ? 'in the 3D world' : 'on screen'} · ${fmtTime(t.a)} → ${fmtTime(t.b)}`);
+    const KINDS = { image: 'Image', video: 'Video', html: 'HTML / GUI', iframe: 'Web page', text: 'Text', glass: 'Glass panel' };
+    const gpu = isGPU(t);
+    this.header(el, t.label || 'Layer', `${KINDS[t.kind] || t.kind} layer · ${world ? 'in the 3D world' : gpu ? 'in the scene (shader)' : 'HTML overlay'} · ${fmtTime(t.a)} → ${fmtTime(t.b)}`);
     el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
     if (t.kind === 'html') el.append(this.text('HTML', () => t.html, (v) => { t.html = v; }, { area: true, placeholder: '<h2>Title</h2><p>Text</p> — any HTML; style with inline CSS' }));
-    else el.append(this.text(t.kind === 'iframe' ? 'Page URL' : 'File / URL', () => t.src, (v) => { t.src = v; }));
+    else if (t.kind === 'text') {
+      el.append(this.text('Small line', () => t.kicker, (v) => { t.kicker = v; }, { placeholder: 'e.g. CHAPTER II' }));
+      el.append(this.text('Headline', () => t.title, (v) => { t.title = v; }, { area: true, placeholder: 'Line breaks are kept' }));
+      el.append(this.text('Body', () => t.body, (v) => { t.body = v; }, { area: true, placeholder: 'optional paragraph' }));
+      el.append(this.num('Headline size', () => t.size ?? 180, (v) => { t.size = Math.round(v); }, { step: 5, min: 40, max: 600, dec: 0, live: false }));
+      el.append(this.select('Align', { center: 'Centre', left: 'Left', right: 'Right' }, () => t.align || 'center', (v) => { t.align = v; }));
+      el.append(this.text('Colour', () => t.color ?? '#f4fbff', (v) => { t.color = v; }, { placeholder: '#f4fbff' }));
+    } else if (t.kind !== 'glass') el.append(this.text(t.kind === 'iframe' ? 'Page URL' : 'File / URL', () => t.src, (v) => { t.src = v; }));
     this.buttons(el,
-      t.kind !== 'html' ? btn('Replace file…', () => lt.replace(t)) : null,
+      t.kind === 'image' || t.kind === 'video' || t.kind === 'iframe' ? btn('Replace file…', () => lt.replace(t)) : null,
       t.src ? this.free(btn('Open ↗', () => window.open(t.src, '_blank'))) : null,
     );
-    if (t.kind === 'image' || t.kind === 'video') {
-      el.append(this.select('Where', { screen: 'On screen (overlay)', world: 'In the 3D world' }, () => t.space || 'screen', (v) => {
+    if ((t.kind === 'image' || t.kind === 'video') && !world) {
+      el.append(this.select('Render', { gpu: 'In the scene (shader effects)', dom: 'HTML overlay (plain)' }, () => t.render || 'dom', (v) => { t.render = v; if (v === 'gpu') t.depth ??= 8; }));
+    }
+    if (t.kind !== 'html' && t.kind !== 'iframe') {
+      el.append(this.select('Where', { screen: 'On screen (follows the camera)', world: 'In the 3D world' }, () => t.space || 'screen', (v) => {
         t.space = v;
         t.w = v === 'world' ? 8 : 30;
         t.keys = t.keys.map(({ x, y, pos, ...k }) => (v === 'world' ? { ...k, pos: pos ?? lt.worldSpot() } : { ...k, x: x ?? 50, y: y ?? 50 }));
@@ -241,6 +254,22 @@ export class Inspector {
     el.append(this.time('End', () => t.b, (v) => { t.b = Math.max(v, t.a + 0.1); }));
     el.append(this.num('Fade (s)', () => t.fade ?? 2.4, (v) => { t.fade = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
 
+    if (gpu) {
+      this.sec(el, 'Look (shader effects)');
+      el.append(this.select('Preset', { '': 'Choose a look…', ...Object.fromEntries(Object.entries(LOOKS).map(([k, v]) => [k, v.label])) }, () => '', (v) => { if (v) setTimeout(() => lt.applyLook(t, v), 0); }));
+      el.append(this.select('Reveal', Object.fromEntries(Object.keys(REVEALS).map((k) => [k, { fade: 'Fade', dissolve: 'Water dissolve', wipe: 'Current wipe', ripple: 'Ripple from the centre' }[k]])), () => t.reveal || 'dissolve', (v) => { t.reveal = v; }));
+      const fx = [['distort', 'Water flow'], ['caustic', 'Caustic light'], ['chroma', 'Colour split'], ['glow', 'Glow'], ['glass', 'Frosted glass']];
+      for (const [f, label] of fx) {
+        if (f === 'glass' && t.kind !== 'image' && t.kind !== 'video' && t.kind !== 'glass') continue;
+        el.append(this.num(label, () => t[f] ?? 0, (v) => { t[f] = v; }, { step: 0.01, min: 0, max: f === 'glow' ? 3 : 1, dec: 2 }));
+      }
+      if ((t.glass ?? 0) > 0 || t.kind === 'glass') {
+        el.append(this.num('Corner radius', () => t.radius ?? 0.05, (v) => { t.radius = v; }, { step: 0.005, min: 0, max: 0.5, dec: 3 }));
+        el.append(this.text('Glass tint', () => t.tint ?? '#8cd9ff', (v) => { t.tint = v; }, { placeholder: '#8cd9ff' }));
+      }
+      el.append(h('div', { class: 'hint' }, 'The reveal plays over the Fade time at the start and end. Colour split grows when the visitor scrolls fast. Frosted glass shows the live scene behind it, blurred. Turning glass on / off rebuilds the shader (a short pause).'));
+    }
+
     this.sec(el, world ? 'Size (3D)' : 'Size & stacking');
     if (world) {
       el.append(this.num('Width (m)', () => t.w ?? 8, (v) => { t.w = v; }, { step: 0.1, min: 0.1, max: 500, dec: 2 }));
@@ -248,10 +277,15 @@ export class Inspector {
     } else {
       el.append(this.num('Width (% view)', () => t.w ?? 30, (v) => { t.w = v; }, { step: 0.5, min: 1, max: 400, dec: 1 }));
       el.append(this.num('Height (% view)', () => t.h ?? 0, (v) => { if (v > 0) t.h = v; else delete t.h; }, { step: 0.5, min: 0, max: 400, dec: 1 }));
-      el.append(this.num('Stack order', () => t.z ?? 5, (v) => { t.z = Math.round(v); }, { step: 1, min: -50, max: 99, dec: 0 }));
-      if (t.kind === 'image' || t.kind === 'video') el.append(this.select('Fit', { '': 'Natural', contain: 'Contain', cover: 'Cover (crop)', fill: 'Stretch' }, () => t.fit || '', (v) => { if (v) t.fit = v; else delete t.fit; }));
-      el.append(this.check('Clickable', () => t.interactive, (v) => { if (v) t.interactive = true; else delete t.interactive; }));
-      el.append(h('div', { class: 'hint' }, 'Height 0 = automatic. Captions are at stack order 10 — higher goes over them. Clickable lets visitors use links / buttons / web pages (scrolling stops while the mouse is over it).'));
+      if (gpu) {
+        el.append(this.num('Depth (m)', () => t.depth ?? 8, (v) => { t.depth = v; }, { step: 0.5, min: 0.5, max: 200, dec: 1 }));
+        el.append(h('div', { class: 'hint' }, 'Height 0 = automatic. Depth = how far in front of the camera it floats: fish closer than that swim in front of it. All in-scene layers sit behind the HTML overlays and captions.'));
+      } else {
+        el.append(this.num('Stack order', () => t.z ?? 5, (v) => { t.z = Math.round(v); }, { step: 1, min: -50, max: 99, dec: 0 }));
+        if (t.kind === 'image' || t.kind === 'video') el.append(this.select('Fit', { '': 'Natural', contain: 'Contain', cover: 'Cover (crop)', fill: 'Stretch' }, () => t.fit || '', (v) => { if (v) t.fit = v; else delete t.fit; }));
+        el.append(this.check('Clickable', () => t.interactive, (v) => { if (v) t.interactive = true; else delete t.interactive; }));
+        el.append(h('div', { class: 'hint' }, 'Height 0 = automatic. Captions are at stack order 10 — higher goes over them. Clickable lets visitors use links / buttons / web pages (scrolling stops while the mouse is over it).'));
+      }
     }
     if (t.kind === 'video') {
       this.sec(el, 'Video');

@@ -74,6 +74,13 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
   paths / layers / GUI can do; art in `assets/demo/`. (The owner's 12 stacked "New chapter" test markers at 1:00
   were replaced by this chapter's markers.)
 - Editor Play now behaves like the website (scroll to move, GUI clickable); Auto-play is separate.
+- **GPU shader layers** (the owner found plain DOM cards unimpressive; reference: shopify.com/editions/winter2026 —
+  art-directed layered compositions): text / images / video / glass rendered inside the scene with reveals
+  (dissolve / wipe / ripple), water flow, caustics, chroma-on-scroll, glow and frosted glass refracting the ocean,
+  at a depth so fish pass in front. The demo chapter uses them (shader title + huge background type, glass cards,
+  glass product panel); real buttons / iframes stay HTML on top.
+- **Creature paths have priority**: no sliding / snapping, the school ignores predators + cursor on a path, creatures
+  resume their own behaviour where the path left them. Cursor scaring is off in the story by default (param).
 - Fixed: tuna leaps teleporting into the sky (fish now swim to the launch point and only leap in cycles that
   started while leaps were on); jellyfish cut off by the sea surface / poking out of the water / sliced by the
   camera; story.json save conflicts between the editor and outside edits (Claude, git) are now detected.

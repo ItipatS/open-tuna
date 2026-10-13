@@ -2,19 +2,21 @@
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Product demo</title>
 <style>
-  html,body{margin:0;height:100%;font-family:Inter,Segoe UI,Arial,sans-serif;color:#eaf7fb;background:transparent}
-  .card{box-sizing:border-box;height:100%;padding:22px 24px;border-radius:22px;background:rgba(6,36,49,.82);border:1px solid rgba(159,231,255,.3);display:flex;flex-direction:column;gap:14px}
-  .k{font-size:11px;letter-spacing:.35em;color:#9fe7ff}
-  h1{font-family:Georgia,serif;font-weight:400;font-size:28px;margin:0}
-  .tabs{display:flex;gap:8px}
-  .tabs button{flex:1;padding:9px 0;border-radius:10px;border:1px solid rgba(159,231,255,.35);background:rgba(255,255,255,.04);color:#eaf7fb;font:inherit;font-size:13px;cursor:pointer}
+  /* everything is sized from the frame's width, so the page scales with the layer */
+  html{font-size:calc(100vw / 24)}
+  html,body{margin:0;height:100%;font-family:Inter,Segoe UI,Arial,sans-serif;color:#eaf7fb;background:transparent;overflow:hidden}
+  .card{box-sizing:border-box;height:100%;padding:1.1rem 1.2rem;border-radius:1.1rem;background:rgba(6,36,49,.28);border:1px solid rgba(159,231,255,.3);display:flex;flex-direction:column;gap:.7rem}
+  .k{font-size:.55rem;letter-spacing:.35em;color:#9fe7ff}
+  h1{font-family:Georgia,serif;font-weight:400;font-size:1.45rem;margin:0}
+  .tabs{display:flex;gap:.4rem}
+  .tabs button{flex:1;padding:.45rem 0;border-radius:.5rem;border:1px solid rgba(159,231,255,.35);background:rgba(255,255,255,.04);color:#eaf7fb;font:inherit;font-size:.65rem;cursor:pointer}
   .tabs button.on{background:#f6d58a;color:#2b1a02;border-color:#f6d58a}
-  .pane{flex:1;display:flex;gap:16px;align-items:center;min-height:0}
-  .pane img{width:46%}
-  .pane p{margin:0;font-size:14px;line-height:1.5;color:#cfe6ee}
-  .cta{align-self:flex-start;padding:10px 18px;border-radius:999px;border:0;background:#f6d58a;color:#2b1a02;font:600 13px Inter,Arial,sans-serif;cursor:pointer}
+  .pane{flex:1;display:flex;gap:.8rem;align-items:center;min-height:0}
+  .pane img{width:44%;flex:none}
+  .pane p{margin:0;font-size:.7rem;line-height:1.5;color:#cfe6ee}
+  .cta{align-self:flex-start;padding:.5rem .9rem;border-radius:999px;border:0;background:#f6d58a;color:#2b1a02;font:600 .65rem Inter,Arial,sans-serif;cursor:pointer}
   .cta:active{transform:scale(.97)}
-  .small{font-size:10px;letter-spacing:.3em;color:#f6d58a;opacity:.8}
+  .small{font-size:.5rem;letter-spacing:.3em;color:#f6d58a;opacity:.8}
 </style></head>
 <body><div class="card">
   <div class="k">INTERACTIVE · IFRAME DEMO</div>

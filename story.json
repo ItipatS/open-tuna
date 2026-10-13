@@ -3,7 +3,15 @@
   "meta": { "title": "Thai Union · 50 years", "duration": 150, "scrollPerSecond": 15 },
   "settings": {
     "tunaCount": 2000,
-    "params": { "post.exposure": 1.05, "post.bloom": 0.28, "post.skyRays": 0.6, "post.underRays": 0.34, "sea.state": 0.45, "water.clarity": 0.7 }
+    "params": {
+      "post.exposure": 1.05,
+      "post.bloom": 0.28,
+      "post.skyRays": 0.6,
+      "post.underRays": 0.34,
+      "sea.state": 0.45,
+      "water.clarity": 0.7,
+      "school.cursor": 0
+    }
   },
   "chapters": [
     { "t": 0, "name": "Underwater" },
@@ -77,6 +85,59 @@
       ]
     },
     {
+      "id": "demo-title",
+      "type": "layer",
+      "label": "Journey title (shader text)",
+      "kind": "text",
+      "space": "screen",
+      "render": "gpu",
+      "kicker": "Chapter II · Demo",
+      "title": "The journey",
+      "body": "",
+      "size": 230,
+      "align": "center",
+      "a": 73,
+      "b": 86,
+      "fade": 2.2,
+      "w": 58,
+      "depth": 14,
+      "reveal": "ripple",
+      "distort": 0.35,
+      "caustic": 0.3,
+      "chroma": 0.45,
+      "glow": 0.18,
+      "keys": [
+        { "t": 73, "x": 50, "y": 34, "s": 0.94, "r": 0, "o": 1, "ease": "linear" },
+        { "t": 86, "x": 50, "y": 22, "s": 1.06, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "id": "demo-bigtype",
+      "type": "layer",
+      "label": "Big type “Ocean to table” (shader text)",
+      "kind": "text",
+      "space": "screen",
+      "render": "gpu",
+      "title": "Ocean to table",
+      "size": 300,
+      "align": "center",
+      "color": "#dff6ff",
+      "a": 78,
+      "b": 120,
+      "fade": 3,
+      "w": 130,
+      "depth": 45,
+      "reveal": "wipe",
+      "distort": 0.3,
+      "caustic": 0.15,
+      "chroma": 0.25,
+      "glow": 0,
+      "keys": [
+        { "t": 78, "x": 66, "y": 56, "s": 1, "r": 0, "o": 0.32, "ease": "linear" },
+        { "t": 120, "x": 34, "y": 50, "s": 1, "r": 0, "o": 0.32 }
+      ]
+    },
+    {
       "id": "demo-bluewhale-path",
       "type": "path",
       "label": "Blue whale passes (demo)",
@@ -97,27 +158,11 @@
       "bind": "humpback",
       "a": 122,
       "b": 150,
-      "blend": 4,
+      "blend": 20,
       "keys": [
         { "t": 124, "pos": [-52, -2.6, 4] },
         { "t": 137, "pos": [-28, -2.2, 20] },
         { "t": 150, "pos": [2, -2.6, 30] }
-      ]
-    },
-    {
-      "type": "layer",
-      "fade": 1.2,
-      "z": 11,
-      "id": "demo-title",
-      "label": "Journey title (HTML)",
-      "kind": "html",
-      "space": "screen",
-      "a": 74,
-      "b": 84,
-      "w": 50,
-      "html": "<div style=\"text-align:center\"><div style=\"letter-spacing:.45em;font-size:.72em;opacity:.8\">CHAPTER II · DEMO</div><h2 style=\"font-family:'Cormorant Garamond',serif;font-weight:500;font-size:4.4cqw;margin:.15em 0 0;text-shadow:0 2px 24px rgba(0,20,30,.6)\">The journey</h2></div>",
-      "keys": [
-        { "t": 74, "x": 50, "y": 16, "s": 1, "r": 0, "o": 1 }
       ]
     },
     {
@@ -135,16 +180,24 @@
       "keys": [
         { "t": 72, "x": 50, "y": 67.5, "s": 1, "r": 0, "o": 0.6, "ease": "linear" },
         { "t": 122, "x": 50, "y": 32.5, "s": 1, "r": 0, "o": 0.6, "ease": "linear" }
-      ]
+      ],
+      "render": "gpu",
+      "depth": 40,
+      "reveal": "fade",
+      "distort": 0.5,
+      "caustic": 0.2,
+      "chroma": 0.15,
+      "glow": 0,
+      "glass": 0
     },
     {
       "type": "layer",
-      "fade": 1.5,
+      "fade": 1.6,
       "z": 5,
       "id": "demo-card-1",
-      "label": "Card 1 (parallax 70%)",
+      "label": "Card 1 (glass, shader)",
       "kind": "image",
-      "src": "assets/demo/card-1.svg",
+      "src": "assets/demo/card-1-clear.svg",
       "space": "screen",
       "a": 78,
       "b": 94,
@@ -152,16 +205,25 @@
       "keys": [
         { "t": 78, "x": 24, "y": 95, "s": 1, "r": 0, "o": 1, "ease": "linear" },
         { "t": 94, "x": 24, "y": 25, "s": 1, "r": 0, "o": 1, "ease": "linear" }
-      ]
+      ],
+      "render": "gpu",
+      "depth": 7,
+      "reveal": "dissolve",
+      "distort": 0.22,
+      "caustic": 0.5,
+      "chroma": 0.3,
+      "glow": 0,
+      "glass": 0.95,
+      "radius": 0.08
     },
     {
       "type": "layer",
-      "fade": 1.5,
+      "fade": 1.6,
       "z": 5,
       "id": "demo-card-2",
-      "label": "Card 2 (parallax 70%)",
+      "label": "Card 2 (glass, shader)",
       "kind": "image",
-      "src": "assets/demo/card-2.svg",
+      "src": "assets/demo/card-2-clear.svg",
       "space": "screen",
       "a": 92,
       "b": 108,
@@ -169,16 +231,25 @@
       "keys": [
         { "t": 92, "x": 76, "y": 95, "s": 1, "r": 0, "o": 1, "ease": "linear" },
         { "t": 108, "x": 76, "y": 25, "s": 1, "r": 0, "o": 1, "ease": "linear" }
-      ]
+      ],
+      "render": "gpu",
+      "depth": 7,
+      "reveal": "dissolve",
+      "distort": 0.22,
+      "caustic": 0.5,
+      "chroma": 0.3,
+      "glow": 0,
+      "glass": 0.95,
+      "radius": 0.08
     },
     {
       "type": "layer",
-      "fade": 1.5,
+      "fade": 1.6,
       "z": 5,
       "id": "demo-card-3",
-      "label": "Card 3 (parallax 70%)",
+      "label": "Card 3 (glass, shader)",
       "kind": "image",
-      "src": "assets/demo/card-3.svg",
+      "src": "assets/demo/card-3-clear.svg",
       "space": "screen",
       "a": 106,
       "b": 122,
@@ -186,7 +257,16 @@
       "keys": [
         { "t": 106, "x": 26, "y": 95, "s": 1, "r": 0, "o": 1, "ease": "linear" },
         { "t": 122, "x": 26, "y": 25, "s": 1, "r": 0, "o": 1, "ease": "linear" }
-      ]
+      ],
+      "render": "gpu",
+      "depth": 7,
+      "reveal": "dissolve",
+      "distort": 0.22,
+      "caustic": 0.5,
+      "chroma": 0.3,
+      "glow": 0,
+      "glass": 0.95,
+      "radius": 0.08
     },
     {
       "type": "layer",
@@ -203,7 +283,15 @@
       "keys": [
         { "t": 72, "x": 50, "y": 150, "s": 1, "r": 0, "o": 0.7, "ease": "linear" },
         { "t": 122, "x": 50, "y": -50, "s": 1, "r": 0, "o": 0.7, "ease": "linear" }
-      ]
+      ],
+      "render": "gpu",
+      "depth": 2.5,
+      "reveal": "fade",
+      "distort": 0.6,
+      "caustic": 0,
+      "chroma": 0.4,
+      "glow": 0.1,
+      "glass": 0
     },
     {
       "type": "layer",
@@ -219,7 +307,13 @@
       "w": 5,
       "keys": [
         { "t": 78, "pos": [27, -3, -12], "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "reveal": "ripple",
+      "distort": 0.15,
+      "caustic": 0.45,
+      "chroma": 0.2,
+      "glow": 0.45,
+      "glass": 0
     },
     {
       "type": "layer",
@@ -235,7 +329,13 @@
       "w": 4.5,
       "keys": [
         { "t": 92, "pos": [8, -4, -30], "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "reveal": "dissolve",
+      "distort": 0.12,
+      "caustic": 0.5,
+      "chroma": 0.3,
+      "glow": 0,
+      "glass": 0
     },
     {
       "type": "layer",
@@ -251,7 +351,13 @@
       "w": 4.5,
       "keys": [
         { "t": 104, "pos": [-27, -3.5, -4], "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "reveal": "dissolve",
+      "distort": 0.12,
+      "caustic": 0.5,
+      "chroma": 0.3,
+      "glow": 0,
+      "glass": 0
     },
     {
       "type": "layer",
@@ -268,24 +374,154 @@
       "keys": [
         { "t": 126, "pos": [-14, 5, 2], "s": 0.6, "r": 0, "o": 1 },
         { "t": 150, "pos": [-14, 8, 2], "s": 1, "r": 0, "o": 1 }
+      ],
+      "reveal": "ripple",
+      "distort": 0.1,
+      "caustic": 0,
+      "chroma": 0.15,
+      "glow": 0.7,
+      "glass": 0
+    },
+    {
+      "id": "demo-panel",
+      "type": "layer",
+      "label": "Product panel (glass)",
+      "kind": "glass",
+      "space": "screen",
+      "render": "gpu",
+      "a": 128,
+      "b": 150,
+      "fade": 1.6,
+      "w": 30,
+      "h": 56,
+      "depth": 6,
+      "reveal": "dissolve",
+      "distort": 0.15,
+      "caustic": 0.35,
+      "chroma": 0.2,
+      "glow": 0,
+      "glass": 1,
+      "radius": 0.06,
+      "keys": [
+        { "t": 128, "x": 76, "y": 53, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 131.5, "x": 76, "y": 50, "s": 1, "r": 0, "o": 1 }
       ]
     },
     {
+      "id": "demo-panel-text",
       "type": "layer",
-      "fade": 1.5,
-      "z": 11,
-      "id": "demo-products",
-      "label": "Product panel (HTML, clickable)",
+      "label": "Product panel text (shader)",
+      "kind": "text",
+      "space": "screen",
+      "render": "gpu",
+      "kicker": "GUI · Demo",
+      "title": "From our oceans",
+      "body": "Placeholder: a short line about the product range.",
+      "size": 150,
+      "align": "center",
+      "a": 128,
+      "b": 150,
+      "fade": 1.9,
+      "w": 27,
+      "depth": 5.8,
+      "reveal": "wipe",
+      "distort": 0.1,
+      "caustic": 0.15,
+      "chroma": 0.3,
+      "glow": 0.1,
+      "keys": [
+        { "t": 128, "x": 76, "y": 37, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 131.5, "x": 76, "y": 34, "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "id": "demo-panel-can-1",
+      "type": "layer",
+      "label": "Product 1 (shader)",
+      "kind": "image",
+      "src": "assets/demo/can.svg",
+      "space": "screen",
+      "render": "gpu",
+      "a": 128,
+      "b": 150,
+      "fade": 1.85,
+      "w": 8.5,
+      "depth": 5.6,
+      "reveal": "ripple",
+      "distort": 0.12,
+      "caustic": 0.4,
+      "chroma": 0.2,
+      "glow": 0.12,
+      "glass": 0,
+      "keys": [
+        { "t": 128, "x": 67.5, "y": 57, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 131.5, "x": 67.5, "y": 54, "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "id": "demo-panel-can-2",
+      "type": "layer",
+      "label": "Product 2 (shader)",
+      "kind": "image",
+      "src": "assets/demo/can-2.svg",
+      "space": "screen",
+      "render": "gpu",
+      "a": 128,
+      "b": 150,
+      "fade": 2.1,
+      "w": 8.5,
+      "depth": 5.6,
+      "reveal": "ripple",
+      "distort": 0.12,
+      "caustic": 0.4,
+      "chroma": 0.2,
+      "glow": 0.12,
+      "glass": 0,
+      "keys": [
+        { "t": 128, "x": 76, "y": 57, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 131.5, "x": 76, "y": 54, "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "id": "demo-panel-can-3",
+      "type": "layer",
+      "label": "Product 3 (shader)",
+      "kind": "image",
+      "src": "assets/demo/can-3.svg",
+      "space": "screen",
+      "render": "gpu",
+      "a": 128,
+      "b": 150,
+      "fade": 2.35,
+      "w": 8.5,
+      "depth": 5.6,
+      "reveal": "ripple",
+      "distort": 0.12,
+      "caustic": 0.4,
+      "chroma": 0.2,
+      "glow": 0.12,
+      "glass": 0,
+      "keys": [
+        { "t": 128, "x": 84.5, "y": 57, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 131.5, "x": 84.5, "y": 54, "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "id": "demo-panel-button",
+      "type": "layer",
+      "label": "Product button (HTML, clickable)",
       "kind": "html",
       "space": "screen",
       "a": 128,
       "b": 150,
-      "w": 30,
+      "fade": 2.2,
+      "w": 22,
+      "z": 11,
       "interactive": true,
-      "html": "<div style=\"padding:22px 24px;border-radius:22px;background:rgba(6,36,49,.78);border:1px solid rgba(159,231,255,.3)\"><div style=\"letter-spacing:.35em;font-size:.65em;color:#9fe7ff\">GUI · HTML DEMO</div><h3 style=\"font-family:'Cormorant Garamond',serif;font-weight:500;font-size:2.2cqw;margin:.3em 0 .5em\">From our oceans</h3><div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\"><img src=\"assets/demo/can.svg\" style=\"width:100%\"><img src=\"assets/demo/can.svg\" style=\"width:100%;filter:hue-rotate(140deg)\"><img src=\"assets/demo/can.svg\" style=\"width:100%;filter:hue-rotate(220deg)\"></div><a href=\"#\" onclick=\"this.textContent='Thanks! (demo link)';return false\" style=\"display:inline-block;margin-top:14px;padding:9px 16px;border-radius:999px;background:#f6d58a;color:#2b1a02;font-weight:600;font-size:.8em;text-decoration:none\">Discover the products &rarr;</a><div style=\"margin-top:10px;font-size:.6em;letter-spacing:.3em;color:#f6d58a;opacity:.8\">PLACEHOLDER</div></div>",
+      "html": "<div style=\"text-align:center\"><a href=\"#\" onclick=\"this.textContent='Thanks! (demo link)';return false\" style=\"display:inline-block;padding:11px 22px;border-radius:999px;background:#f6d58a;color:#2b1a02;font-weight:600;font-size:.85em;text-decoration:none;box-shadow:0 6px 30px rgba(246,213,138,.35)\">Discover the products &rarr;</a></div>",
       "keys": [
-        { "t": 128, "x": 78, "y": 52, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
-        { "t": 131, "x": 76, "y": 50, "s": 1, "r": 0, "o": 1 }
+        { "t": 128, "x": 76, "y": 73, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 131.5, "x": 76, "y": 70, "s": 1, "r": 0, "o": 1 }
       ]
     },
     {
@@ -302,6 +538,31 @@
       "w": 30,
       "h": 48,
       "interactive": true,
+      "keys": [
+        { "t": 132, "x": 22, "y": 54, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 135, "x": 23, "y": 52, "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "id": "demo-iframe-glass",
+      "type": "layer",
+      "label": "Product page glass",
+      "kind": "glass",
+      "space": "screen",
+      "render": "gpu",
+      "a": 132,
+      "b": 150,
+      "fade": 1.6,
+      "w": 30,
+      "h": 48,
+      "depth": 6,
+      "reveal": "dissolve",
+      "distort": 0.15,
+      "caustic": 0.3,
+      "chroma": 0.2,
+      "glow": 0,
+      "glass": 1,
+      "radius": 0.07,
       "keys": [
         { "t": 132, "x": 22, "y": 54, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 135, "x": 23, "y": 52, "s": 1, "r": 0, "o": 1 }

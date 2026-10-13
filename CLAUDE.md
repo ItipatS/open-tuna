@@ -144,16 +144,31 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
   **read `notes` when asked to act on designer feedback**). Any of them can carry `locked: true` (the editor
   won't change it — respect it when editing story.json by hand unless asked) and tracks `mute: true`.
   `Timeline.serialize()` writes one key/clip per line, numbers rounded to 4 dp; segment lookup is a binary search.
-- **Paths** (`path` tracks, `{bind: ACTORS key, a, b, blend, keys[{t, pos}]}`): `Story.evaluate` blends the actor
-  from its own behaviour toward the Hermite route (weight eases over `blend` at both ends): the school's goal
-  (`tuna.u.goal`), or `story.actors[bind]` (Object3D position + slerped orientation, +Z forward). Creature AI /
-  SwimPath run first in the main loop, story after, so the path wins while active. While a school path is active
-  the school is pulled harder (`wGoal` → 6) and tightened (`goalSpread` ≤ 9); the originals are restored after.
+- **Paths** (`path` tracks, `{bind: ACTORS key, a, b, blend, keys[{t, pos}]}`) have **priority** over the creatures'
+  own behaviour. Creatures (`story.actors[bind] = {obj, swim | hunter, speed}`) are *driven* while x ∈ [a, b]
+  (`Story.drive`): own position / velocity / heading state that steers toward the Hermite route at a capped speed
+  (no sliding), snapping only when story time jumps > 1.5 s (scrub / seek); on release (`Story.release`) the object
+  is put back at the driven pose and its own behaviour resumes from there (`SwimPath.anchor` re-centres the loop,
+  which drifts home over ~30 s; `Hunter.release` resets heading / state). Their AI / loop still runs each frame first
+  (main loop order) — the story overwrites it. The school's goal blends to the route over `blend`; while on a path
+  it's pulled harder (`wGoal` → 6), tightened (`goalSpread` ≤ 9) and ignores predators + cursor
+  (`story.schoolControl`, used in main.js). Params `school.cursor` (default 0 in story) / `school.predators` scale
+  those reactions the rest of the time.
 - `Story` owns a separate shot camera `story.cam` (+ `story.look`); `main.js` copies it into the render camera
   unless the editor's Scene view is active. Captions are DOM nodes (in `#captions > .caps`, z-index 10) rebuilt
   when `timeline.version` changes; story time is `story.x`.
-- **Layers** (`layer` tracks, `layers.js`): `{id, kind image|video|html|iframe, src | html, space screen|world, a, b,
-  fade, z, w (% view or m), h, fit, interactive, loop, scrub, rate, billboard, keys[{t, ease, x,y | pos[3], s, r, o}]}`.
+- **GPU layers** (`isGPU(t)`: kind `text` / `glass`, `space: world`, or image / video with `render: 'gpu'`): one
+  `MeshBasicNodeMaterial` per layer (`layerMaterial`): flow distortion, reveal mask (`reveal` fade / dissolve / wipe /
+  ripple driven by the fade value, bright water edge), chroma split (× scroll speed), caustic light, glow (HDR → bloom),
+  and — only when `glass > 0` at build time — a frosted-glass rounded rect sampling a `viewportTexture` copy (5 taps)
+  behind it. Screen GPU layers ride in front of `story.cam` at `depth` m (fish nearer than that occlude them); they draw
+  under all DOM overlays. Text (`kicker`, `title`, `body`, `size`, `align`, `color`) is drawn into a canvas with the page
+  fonts. Materials are built once the media has loaded (`Layers.ready()` + precompile in main.js); changing kind / src /
+  glass on/off / text rebuilds the material (short hitch); other fields are uniforms. Editor picks GPU layers by their
+  % rectangle (`Layers.rect`), the selection box is a DOM overlay (`.ed-gbox`). `LOOKS` presets in layer-tools.js.
+- **Layers** (`layer` tracks, `layers.js`): `{id, kind image|video|html|iframe|text|glass, src | html, space screen|world, a, b,
+  fade, z, w (% view or m), h, fit, interactive, loop, scrub, rate, billboard, render, depth, reveal, distort, caustic,
+  chroma, glow, glass, radius, tint, keys[{t, ease, x,y | pos[3], s, r, o}]}`.
   Screen layers are `.layer` divs in `#captions > .lays` positioned in % with container units (cqw/cqh) and
   `z-index = z` (captions are 10); `pointer-events` only when `interactive`. World layers are `MeshBasicNodeMaterial`
   planes (renderOrder 15, created after the image/video loads, `fog:false`) in `layers.group`. Items are keyed by

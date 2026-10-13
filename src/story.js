@@ -17,6 +17,8 @@ export const PARAMS = {
   'post.underRays': { label: 'Underwater god rays', def: 0.34, min: 0, max: 2, step: 0.01 },
   'sea.state': { label: 'Sea state', def: 0.45, min: 0, max: 2, step: 0.01 },
   'water.clarity': { label: 'Water clarity', def: 0.7, min: 0, max: 1, step: 0.01 },
+  'school.cursor': { label: 'Fish flee the cursor', def: 0, min: 0, max: 1, step: 0.05 },
+  'school.predators': { label: 'Fish flee predators', def: 1, min: 0, max: 1, step: 0.05 },
 };
 
 // Creatures a `path` track can steer (see Story.actors, set up in main.js).
@@ -69,13 +71,16 @@ function gate(w, on, t) {
 
 export class Story {
   // apply: { sun(elevationDeg, azimuthRad), [param id]: (value) => void } for the PARAMS above
-  // actors: { school, bluewhale: Object3D, … } — what path tracks can move (ACTORS)
+  // actors: { bluewhale: { obj, swim | hunter, speed }, … } — what path tracks can move (ACTORS; the school is built in)
   constructor({ tuna, tentacles, timeline, apply, captionLayer, actors = {} }) {
     Object.assign(this, { tuna, tentacles, timeline, apply, captionLayer, actors });
     this.pk = { pos: [0, 0, 0], ahead: [0, 0, 0], w: 0 };
     this.tmpV = new THREE.Vector3();
     this.tmpM = new THREE.Matrix4();
     this.tmpQ = new THREE.Quaternion();
+    this.drives = {}; // per actor: { active, pos, vel } while a path steers it
+    this.schoolControl = 0;
+    this.lastX = 0;
     this.cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.2, 9000); // the shot camera
     this.look = new THREE.Vector3(); // where the shot camera looks
     this.k = { pos: [0, 0, 0], look: [0, 0, 0], follow: 0, fov: 50, drift: 1 };
@@ -92,6 +97,7 @@ export class Story {
   }
 
   update(dt, t) {
+    this.dt = dt;
     const pt = this.target();
     this.p = this.forceP !== null ? pt : this.p + (pt - this.p) * (1 - Math.exp(-dt * 2.4));
     this.evaluate(this.p, t);
@@ -122,23 +128,22 @@ export class Story {
     );
     tuna.u.free.value = tl.clip('tuna.free', x);
     tuna.u.hoop.value = tl.clip('tuna.hoop', x);
-    // creature paths: blend each actor from what it does by itself toward its keyed route
+    // creature paths take priority over the creatures' own behaviour (see drive())
     let schoolW = 0;
+    const driven = new Set();
     for (const pt of tl.paths()) {
-      const k = tl.path(pt, x, this.pk);
-      if (k.w <= 0) continue;
-      const P = this.tmpV.fromArray(k.pos);
-      if (pt.bind === 'school') { tuna.u.goal.value.lerp(P, k.w); schoolW = Math.max(schoolW, k.w); continue; }
-      const obj = this.actors[pt.bind];
-      if (!obj) continue;
-      obj.position.lerp(P, k.w);
-      const A = new THREE.Vector3().fromArray(k.ahead);
-      if (A.distanceToSquared(P) > 1e-6) {
-        this.tmpM.lookAt(A, P, obj.up); // Object3D convention: +Z faces the target
-        this.tmpQ.setFromRotationMatrix(this.tmpM);
-        obj.quaternion.slerp(this.tmpQ, k.w);
+      if (pt.bind === 'school') {
+        const k = tl.path(pt, x, this.pk);
+        if (k.w > 0) { tuna.u.goal.value.lerp(this.tmpV.fromArray(k.pos), k.w); schoolW = Math.max(schoolW, k.w); }
+        continue;
       }
+      if (driven.has(pt.bind) || x < pt.a || x > pt.b) continue;
+      driven.add(pt.bind);
+      this.drive(pt, x);
     }
+    for (const [bind, d] of Object.entries(this.drives)) if (d.active && !driven.has(bind)) this.release(bind);
+    this.schoolControl = schoolW; // main.js: the school ignores predators and the cursor while on a path
+    this.lastX = x;
 
     // a school on a path keeps up with it: stronger pull to the goal, tighter school (restored afterwards)
     const su = tuna.u;
@@ -176,6 +181,56 @@ export class Story {
       el.style.visibility = o > 0.001 ? 'visible' : 'hidden';
       el.style.transform = `translateY(${((1 - o) * 14).toFixed(1)}px)`;
     });
+  }
+
+  // A path steers a creature like a swimmer: it heads for the route at its own speed (no sliding from wherever
+  // it was) and turns toward where it's going; a seek / scrub (story time jumps) snaps it onto the route.
+  drive(pt, x) {
+    const A = this.actors[pt.bind];
+    if (!A) return;
+    const obj = A.obj, dt = Math.min(this.dt || 0.016, 0.05);
+    const d = this.drives[pt.bind] ??= { active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), quat: new THREE.Quaternion() };
+    const k = this.timeline.path(pt, x, this.pk);
+    const target = this.tmpV.fromArray(k.pos);
+    const jump = Math.abs(x - this.lastX) > 1.5;
+    if (!d.active) {
+      d.active = true;
+      d.pos.copy(obj.position);
+      d.quat.copy(obj.quaternion);
+      obj.getWorldDirection(d.vel).multiplyScalar(A.speed * 0.6);
+    }
+    if (jump) {
+      d.pos.copy(target);
+      d.vel.fromArray(k.ahead).sub(target).multiplyScalar(4);
+    } else {
+      // where the route is heading + a pull toward the route, capped at the creature's top speed
+      const routeVel = new THREE.Vector3().fromArray(k.ahead).sub(target).multiplyScalar(4);
+      const want = target.clone().sub(d.pos).multiplyScalar(0.8).add(routeVel);
+      const max = Math.max(A.speed, routeVel.length() * 1.3);
+      if (want.length() > max) want.setLength(max);
+      d.vel.lerp(want, 1 - Math.exp(-dt * 1.5));
+      d.pos.addScaledVector(d.vel, dt);
+    }
+    obj.position.copy(d.pos);
+    if (d.vel.lengthSq() > 0.04) {
+      this.tmpM.lookAt(this.tmpV.copy(d.pos).add(d.vel), d.pos, obj.up); // +Z faces where it swims
+      this.tmpQ.setFromRotationMatrix(this.tmpM);
+      d.quat.slerp(this.tmpQ, jump ? 1 : 1 - Math.exp(-dt * 3));
+    }
+    obj.quaternion.copy(d.quat); // our own heading: the creature's loop / AI re-aims it every frame
+  }
+
+  // the path let go: the creature carries on with its own behaviour from exactly where it is
+  release(bind) {
+    const A = this.actors[bind], d = this.drives[bind];
+    d.active = false;
+    if (!A) return;
+    const fwd = d.vel.lengthSq() > 1e-4 ? d.vel.clone().normalize() : A.obj.getWorldDirection(new THREE.Vector3());
+    // the creature's own loop / AI already ran this frame (and moved it): put it back where the path left it
+    A.obj.position.copy(d.pos);
+    A.obj.quaternion.copy(d.quat);
+    A.swim?.anchor(d.pos, fwd);
+    A.hunter?.release(fwd);
   }
 
   buildCaptions() {

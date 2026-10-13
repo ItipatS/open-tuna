@@ -98,6 +98,14 @@ caption on screen, fps), so Claude knows which part of the code or which keys to
 
 ## Creature paths: steer the school, whales, sharks, turtles
 
+While a path is active it has **priority** over the creature's own behaviour:
+- The creature swims to the route at its own speed. It doesn't slide or teleport.
+- A tuna school on a path ignores sharks, whales and the mouse.
+- When the path ends, the creature carries on with its own swimming from exactly where it is.
+
+Two scene parameters (Project inspector, or animate them with **+ Track…**) control the school the rest of the
+time: **Fish flee the cursor** (off by default) and **Fish flee predators** (on).
+
 Normally the creatures swim by themselves. A **path** track makes one of them follow your route for a while:
 **+ Track… ▸ Move a creature along a path** (tuna school, blue whale, humpback, shark 1 / 2, turtle 1 / 2).
 
@@ -114,17 +122,35 @@ The demo chapter **The Journey (1:00–2:30)** uses all of this: a school route,
 at the surface, parallax cards, 3D medallions and products along the route, and clickable panels at the end.
 Everything in it is placeholder art (`assets/demo/`). Change it or delete it freely.
 
-## Layers: images, video, HTML, web pages, parallax
+## Layers: images, video, text, glass, HTML, web pages, parallax
 
-Add pictures, videos, text / buttons (HTML) or whole web pages on top of the scene, or put pictures and
-videos *into* the 3D world.
+There are two kinds of layer, and the difference matters for how impressive it looks:
+
+- **In the scene (shader) layers:** images, videos, **Text** and **Glass panels** are drawn *inside* the 3D
+  scene. They get the same light, bloom and colour grade as the ocean, plus shader effects:
+  - **Reveal:** water dissolve, current wipe, ripple from the centre, or a plain fade.
+  - **Water flow:** the image ripples like it's under water.
+  - **Caustic light:** dancing light patterns over it.
+  - **Colour split:** grows when the visitor scrolls fast.
+  - **Glow:** makes it shine.
+  - **Frosted glass:** shows the live ocean behind it, blurred.
+
+  They float at a **Depth** in front of the camera, so fish closer than that swim *in front of* them. Pick a
+  **Look** preset (Underwater card, Liquid reveal, Glowing, Current wipe, Clean), then fine-tune the sliders.
+- **HTML overlays:** HTML blocks and web pages (iframes) sit on top of everything, like a normal website. Use
+  them for real buttons, links and forms, and turn on **Clickable**. A good pattern is a **Glass panel**
+  (shader) behind an HTML button or page.
+
+New images, videos, text and glass start as shader layers. The Inspector's **Render** setting switches an
+image or video to a plain HTML overlay.
 
 - **Add:** drag files from your computer onto the viewport (Game view: placed where you drop them; Scene
   view: placed in 3D). Or use **Layer ▾** in the timeline bar: *from file*, *from a URL*, *web page (iframe)*,
   *HTML / text / button block*, or *in the 3D world*. Files are copied into the project's `assets/` folder.
 - **Each layer is a pink bar on the timeline.** Drag it to change *when* it shows, and drag its ends to change
   start / end. *Fade* in the Inspector sets how long it fades in and out.
-- **Move it:** in the **Game** view, drag the layer itself; drag the pink corner handle to scale it.
+- **Move it:** in the **Game** view, drag the layer itself (shader layers show a pink box when selected); drag the
+  pink corner handle to scale it.
   3D layers: in the **Scene** view, click the picture and drag the arrows.
 - **Animate it:** a layer with one key just sits there. Press **K** (or *Key at playhead*) to add keys, then drag
   the layer at different moments. Once it has 2+ keys, dragging at a new moment adds a key automatically.

@@ -854,11 +854,11 @@ export class Editor {
   // where a path actor is now (after any path blending), and which way it faces
   actorPos(bind) {
     if (bind === 'school') return this.app.tuna.u.goal.value.toArray();
-    return this.story.actors[bind]?.position.toArray() ?? [0, -6, 0];
+    return this.story.actors[bind]?.obj.position.toArray() ?? [0, -6, 0];
   }
 
   actorFwd(bind) {
-    const o = this.story.actors[bind];
+    const o = this.story.actors[bind]?.obj;
     if (!o) return [1, 0, 0];
     const d = o.getWorldDirection(new THREE.Vector3()); // +Z = forward for the creatures
     d.y = 0;
