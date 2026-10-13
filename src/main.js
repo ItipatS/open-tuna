@@ -393,7 +393,9 @@ async function main() {
     'water.clarity': (v) => { U.fogDensity.value = THREE.MathUtils.lerp(0.03, 0.006, v); },
   };
   const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions') });
-  if (story) $('scrollspace').style.height = `${timeline.meta.scrollLength ?? 900}vh`;
+  // page length grows with the story (meta.scrollPerSecond vh per second of story)
+  const fitScroll = () => { if (story) $('scrollspace').style.height = `${Math.round(timeline.duration * timeline.meta.scrollPerSecond)}vh`; };
+  fitScroll();
 
   let camTween = null;
   const presets = {
@@ -519,9 +521,9 @@ async function main() {
   tentacles.visible = false;
   loaderEl.classList.add('hidden');
   if (LAB && !params.has('free')) director.start();
-  // ?p=0.62 opens the story at that point (the editor's "Open site" button links here)
-  if (story && !EDIT && params.has('p')) {
-    const p0 = THREE.MathUtils.clamp(+params.get('p') || 0, 0, 1);
+  // ?t=42 (seconds) or ?p=0.7 (progress) opens the story at that point (the editor's "Open site" links here)
+  if (story && !EDIT && (params.has('t') || params.has('p'))) {
+    const p0 = THREE.MathUtils.clamp(params.has('t') ? (+params.get('t') || 0) / timeline.duration : +params.get('p') || 0, 0, 1);
     story.p = p0;
     scrollTo(0, p0 * (document.documentElement.scrollHeight - innerHeight));
   }

@@ -1,16 +1,28 @@
 {
-  "version": 1,
-  "meta": { "title": "Thai Union · 50 years", "playDuration": 60, "scrollLength": 900 },
+  "version": 2,
+  "meta": { "title": "Thai Union · 50 years", "duration": 60, "scrollPerSecond": 15 },
   "settings": {
     "tunaCount": 2000,
     "params": { "post.exposure": 1.05, "post.bloom": 0.28, "post.skyRays": 0.6, "post.underRays": 0.34, "sea.state": 0.45, "water.clarity": 0.7 }
   },
   "chapters": [
-    { "p": 0, "name": "Underwater" },
-    { "p": 0.3, "name": "Ascent" },
-    { "p": 0.43, "name": "Surface" },
-    { "p": 0.5, "name": "The 50" },
-    { "p": 0.84, "name": "Finale" }
+    { "t": 0, "name": "Underwater" },
+    { "t": 18, "name": "Ascent" },
+    { "t": 25.8, "name": "Surface" },
+    { "t": 30, "name": "The 50" },
+    { "t": 50.4, "name": "Finale" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" },
+    { "t": 60, "name": "New chapter" }
   ],
   "notes": [],
   "tracks": [
@@ -20,14 +32,14 @@
       "label": "Camera",
       "drift": 1,
       "keys": [
-        { "p": 0, "pos": [-23.17, -9, 11.79], "look": [0, -9, 0], "follow": 1, "fov": 50 },
-        { "p": 0.15, "pos": [-13.59, -9, 22.17], "look": [0, -9, 0], "follow": 1, "fov": 50 },
-        { "p": 0.3, "pos": [0, -9, 26], "look": [0, -6, 10], "follow": 1, "fov": 50 },
-        { "p": 0.4, "pos": [0, -2, 38], "look": [0, 6, 0], "follow": 0.68, "fov": 50 },
-        { "p": 0.45, "pos": [0, 2.81, 46.25], "look": [0, 6.5, 0], "follow": 0.23, "fov": 50 },
-        { "p": 0.5, "pos": [0, 5, 50], "look": [0, 7, 0], "follow": 0, "fov": 50 },
-        { "p": 0.75, "pos": [-6.87, 5.75, 45.48], "look": [0, 10.86, 0], "follow": 0, "fov": 50 },
-        { "p": 1, "pos": [-12.41, 6.5, 40.12], "look": [0, 12.5, 0], "follow": 0, "fov": 50 }
+        { "t": 0, "pos": [-23.17, -9, 11.79], "look": [0, -9, 0], "follow": 1, "fov": 50 },
+        { "t": 9, "pos": [-13.59, -9, 22.17], "look": [0, -9, 0], "follow": 1, "fov": 50 },
+        { "t": 18, "pos": [0, -9, 26], "look": [0, -6, 10], "follow": 1, "fov": 50 },
+        { "t": 24, "pos": [0, -2, 38], "look": [0, 6, 0], "follow": 0.68, "fov": 50 },
+        { "t": 27, "pos": [0, 2.81, 46.25], "look": [0, 6.5, 0], "follow": 0.23, "fov": 50 },
+        { "t": 30, "pos": [0, 5, 50], "look": [0, 7, 0], "follow": 0, "fov": 50 },
+        { "t": 45, "pos": [-6.87, 5.75, 45.48], "look": [0, 10.86, 0], "follow": 0, "fov": 50 },
+        { "t": 60, "pos": [-12.41, 6.5, 40.12], "look": [0, 12.5, 0], "follow": 0, "fov": 50 }
       ]
     },
     {
@@ -35,9 +47,9 @@
       "type": "captions",
       "label": "Captions",
       "clips": [
-        { "a": 0, "b": 0.12, "size": "large", "y": 34, "title": "Fifty years\nof the open ocean", "sub": "Scroll" },
-        { "a": 0.14, "b": 0.28, "size": "medium", "y": 42, "title": "It all begins beneath the surface", "sub": "" },
-        { "a": 0.32, "b": 0.47, "size": "medium", "y": 42, "title": "Rising, together", "sub": "" }
+        { "a": 0, "b": 7.2, "size": "large", "y": 34, "title": "Fifty years\nof the open ocean", "sub": "Scroll" },
+        { "a": 8.4, "b": 16.8, "size": "medium", "y": 42, "title": "It all begins beneath the surface", "sub": "" },
+        { "a": 19.2, "b": 28.2, "size": "medium", "y": 42, "title": "Rising, together", "sub": "" }
       ]
     },
     {
@@ -46,8 +58,8 @@
       "label": "Sun elevation",
       "bind": "sun.elevation",
       "keys": [
-        { "p": 0.4, "v": 55, "ease": "smooth" },
-        { "p": 0.66, "v": 7, "ease": "smooth" }
+        { "t": 24, "v": 55, "ease": "smooth" },
+        { "t": 39.6, "v": 7, "ease": "smooth" }
       ]
     },
     {
@@ -56,14 +68,23 @@
       "label": "Sun azimuth",
       "bind": "sun.azimuth",
       "keys": [
-        { "p": 0.4, "v": 51.57, "ease": "smooth" },
-        { "p": 0.66, "v": -155.94, "ease": "smooth" }
+        { "t": 24, "v": 51.57, "ease": "smooth" },
+        { "t": 39.6, "v": -155.94, "ease": "smooth" }
       ]
     },
-    { "id": "school-gather", "type": "clip", "label": "School gathers", "bind": "school.gather", "a": 0.22, "b": 0.46, "ease": "smooth" },
-    { "id": "water50-fade", "type": "clip", "label": "Water 50 fades in", "bind": "tentacles.fade", "a": 0.43, "b": 0.46, "ease": "smooth" },
-    { "id": "water50-form", "type": "clip", "label": "Water 50 forms", "bind": "tentacles.form", "a": 0.44, "b": 0.92, "ease": "linear" },
-    { "id": "tuna-free", "type": "clip", "label": "Tuna leaps", "bind": "tuna.free", "a": 0.5, "b": 1, "ease": "gate" },
-    { "id": "tuna-hoop", "type": "clip", "label": "Tuna through the 0", "bind": "tuna.hoop", "a": 0.84, "b": 1, "ease": "gate" }
+    { "id": "school-gather", "type": "clip", "label": "School gathers", "bind": "school.gather", "a": 13.2, "b": 27.6, "ease": "smooth" },
+    { "id": "water50-fade", "type": "clip", "label": "Water 50 fades in", "bind": "tentacles.fade", "a": 25.8, "b": 27.6, "ease": "smooth" },
+    { "id": "water50-form", "type": "clip", "label": "Water 50 forms", "bind": "tentacles.form", "a": 26.4, "b": 55.2, "ease": "linear" },
+    { "id": "tuna-free", "type": "clip", "label": "Tuna leaps", "bind": "tuna.free", "a": 30, "b": 60, "ease": "gate" },
+    { "id": "tuna-hoop", "type": "clip", "label": "Tuna through the 0", "bind": "tuna.hoop", "a": 50.4, "b": 60, "ease": "gate" },
+    {
+      "id": "post-bloom",
+      "type": "curve",
+      "label": "Bloom",
+      "bind": "post.bloom",
+      "keys": [
+        { "t": 60, "v": 0.28, "ease": "smooth" }
+      ]
+    }
   ]
 }

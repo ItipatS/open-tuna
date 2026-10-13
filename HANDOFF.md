@@ -52,11 +52,18 @@ are expected but not defined yet — ask the owner.
 ## Current state
 
 Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps underwater in headless tests:
-- Story mode default; 900vh scroll; captions fade by progress window. **All timing lives in `story.json`.**
-- **Editor (`?edit`)**: toolbar Play / Pause / Stop, Game view (aspect frames) + Scene view (free camera, camera path,
-  draggable key gizmos), outliner (hide objects), inspector, timeline (camera keys, captions, sun curves, beat
-  clips, chapters, notes, per-moment fps lane), undo/redo, save to disk via the local server, drafts, Copy ref,
-  snapshot, Open site at `?p=`. Designer guide: `EDITOR.md`.
+- Story mode default; scroll length = story length × 15 vh/s; captions fade by time window. **All timing lives in
+  `story.json`, in seconds** (the act is 1:00; the story can be made any length — beyond 1:00 is empty until
+  content is added).
+- **Editor (`?edit`)**: File/Edit/View/Help menus, Play / Pause / Stop with play speed, a big colour-coded
+  SCENE | GAME switch (viewport frame blue / green / orange while playing), outliner (hide / solo objects),
+  inspector, real-time timeline (m:ss ruler, draggable story END, camera keys, captions, sun curves, beat clips,
+  chapters, notes, per-moment fps lane), **right-click menus on everything** (cut/copy/paste/duplicate, lock,
+  delete, split / trim to playhead, mute, move track…), **locks** saved in story.json, undo/redo, and a save
+  system: save + autosave, previous versions kept on every save, named checkpoints, Open / Restore (incl. git
+  history), import/export, git commit/push with a public-site warning on main. Designer guide: `EDITOR.md`.
+- story.json still carries the owner's first editor test: 12 "New chapter" markers and a Bloom curve key, all
+  at 1:00 (they hit the old 0..1 wall). Owner to clean up (right-click ▸ Delete) or keep.
 - Fixed a **black-screen bug** on the live site: resizing the window wider than at load (or going fullscreen
   on a wider screen) dropped every frame — a three r180 bug, patched in `main.js` (see CLAUDE.md → Gotchas).
 - Underwater act: school, sharks, whales, jellies, particles, god rays; stylised Snell's window shows the sky.

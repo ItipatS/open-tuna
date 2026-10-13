@@ -40,7 +40,7 @@ No build step, no npm dependencies. ES modules + import map (three from jsDelivr
 needs internet).
 
 ```sh
-python3 tools/serve.py           # dev server (no caching, editor save endpoint); file:// cannot fetch the .glb files
+python3 tools/serve.py           # dev server (no caching, editor save system); file:// cannot fetch the .glb files
 # site: http://localhost:8123   editor: http://localhost:8123/?edit
 ```
 Double-click launchers for non-developers: `Open Editor.bat` (Windows; falls back to `tools/serve.ps1` when
@@ -48,8 +48,8 @@ Python is missing) and `Open Editor.command` (macOS). Designer guide: `EDITOR.md
 the site itself; only the editor's in-place Save needs `tools/serve.py` / `serve.ps1`.
 
 Modes / URL flags:
-- default — **story mode**: page scrolls (`meta.scrollLength` vh spacer), canvas fixed, captions overlaid, no UI panel.
-- `?p=0.62` — story mode opened at that progress (the editor's "Open site" button).
+- default — **story mode**: page scrolls (`meta.duration × meta.scrollPerSecond` vh spacer), canvas fixed, captions overlaid.
+- `?t=42` (seconds) / `?p=0.7` (progress) — story mode opened at that point (the editor's "Open site" uses `?t`).
 - `?edit` — **timeline editor** around the story (see "Story data & editor" below).
 - `?lab` — the old playground: slider panel, orbit camera, looping shot director.
 - `?lab&free` — lab without the director (free orbit camera).
@@ -64,9 +64,12 @@ Browser: current Chrome/Edge (WebGPU). The page shows an error panel if WebGPU i
 index.html          #captions layer (filled from story.json), scroll spacer, lab panel, import map, fonts
 story.json          THE STORY DATA: camera keys, captions, sun curves, beat timings, chapters, notes, settings (edited by ?edit)
 src/timeline.js     Timeline: story.json model + evaluation (Hermite camera, eased curves, clips/gates, captions) + serializer
-src/editor/         ?edit only: editor.js (shell, play mode, undo, save, drafts, Copy ref), timeline-view.js (canvas
-                    timeline), inspector.js, scene-gizmos.js (camera path, key balls, TransformControls), editor.css, dom.js
-tools/serve.py      dev server: no-store caching, POST /__editor/save writes story.json (tools/serve.ps1 = same, PowerShell)
+src/editor/         ?edit only: editor.js (shell, menus, play mode, locks, clipboard, context menus, undo, Copy ref),
+                    saves.js (save / autosave / checkpoints / restore / import-export / git), timeline-view.js (canvas
+                    timeline), inspector.js, scene-gizmos.js (camera path, key balls, TransformControls), menu.js
+                    (context menus, drop-downs, dialogs), editor.css, dom.js
+tools/serve.py      dev server: no-store caching + editor save system endpoints (tools/serve.ps1 = same, PowerShell; keep in sync)
+saves/              editor-made: checkpoints/ (named, committed with the story) and auto/ (previous versions, gitignored)
 src/main.js         bootstrap, asset loading/placement, post-processing (underwater + sky god rays), UI, main loop
 src/story.js        Story: progress -> evaluates the timeline into camera, sun, params, school, tentacles, tuna gates,
                     captions; PARAMS (curve-bindable) + DRIVERS (clip-bindable) registries; flightTargets()
@@ -84,13 +87,14 @@ src/director.js     lab-mode cinematic camera: shot list, fade cuts, letterbox, 
 *.glb               assets (Sketchfab exports) — see Assets
 ```
 
-## Story timeline (progress p = smoothed scroll 0..1)
+## Story timeline (story time x = p · duration, p = smoothed scroll 0..1)
 
-**Timings live in `story.json`, not in code** — edit them there or in the editor; the table below is the
-current content. All state is a pure function of p (plus time for idle motion), so scrolling back rewinds exactly.
-`story.forceP = x` pins progress (used by tests). Smoothing: `p += (target - p)·(1 - e^(-2.4·dt))`.
+**Timings live in `story.json` (seconds), not in code** — edit them there or in the editor. The table below is the
+original 60 s act in progress terms (seconds = p × 60). All state is a pure function of x (plus time for idle
+motion), so scrolling back rewinds exactly. The story can be extended past 60 s (`meta.duration`); keys stay put.
+`story.forceP = p` pins progress (used by tests / the editor). Smoothing: `p += (target - p)·(1 - e^(-2.4·dt))`.
 
-| p | What happens |
+| p (×60 s) | What happens |
 |---|---|
 | 0 – 0.30 | Underwater. Camera arcs around the school at y≈-9 (radius 26). Hero caption. |
 | 0.22 – 0.46 | School goal gathers to (0, -4.5, 18) — under the leap band in front of the 50. |
@@ -124,25 +128,38 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
 - **Split of responsibilities:** `story.json` says *when* (keys, clips, captions, constants); `story.js` says
   *what* a beat does. To add a new story beat: add an entry to `DRIVERS` (clip, 0..1 ramp or `gate`) or
   `PARAMS` (curve, scalar with default/range) in `story.js`, read it in `Story.evaluate` via
-  `tl.clip(id, p)` / `tl.param(id, p, def)` (params also need a setter in `applyParam` in `main.js`), then add
+  `tl.clip(id, x)` / `tl.param(id, x, def)` (x = story time in s; params also need a setter in `applyParam` in `main.js`), then add
   the track to `story.json` (or let the designer add it with "+ Track…"). Missing/muted tracks evaluate to 0 /
   the constant in `settings.params`, so code must tolerate that.
-- Track types: `camera` (keys `{p,pos,look,follow,fov}`, Hermite in p, flat ends; `drift` = hand-held sway;
-  `follow` blends the look-at to the school goal), `curve` (`{p,v,ease}`; ease shapes the segment *after* the
-  key), `clip` (`a,b,ease`; `gate` = on inside), `captions` (`{a,b,title,sub,size,y,fade}`; a caption with
-  a ≤ 0 is visible at load). Plus `chapters` and `notes` (people only — **read `notes` when asked to act on
-  designer feedback**). `Timeline.serialize()` writes one key/clip per line, numbers rounded to 4 dp.
+- **story.json v2 is in seconds** (`meta.duration`, `meta.scrollPerSecond`; `migrate()` upgrades v1 files, which
+  stored progress 0..1). Track types: `camera` (keys `{t,pos,look,follow,fov}`, Hermite in t, flat ends; `drift` =
+  hand-held sway; `follow` blends the look-at to the school goal), `curve` (`{t,v,ease}`; ease shapes the segment
+  *after* the key), `clip` (`a,b,ease` in s; `gate` = on inside; `b ≥ duration` = until the end), `captions`
+  (`{a,b,title,sub,size,y,fade}`; a ≤ 0 = visible at load). Plus `chapters` / `notes` `{t, …}` (people only —
+  **read `notes` when asked to act on designer feedback**). Any of them can carry `locked: true` (the editor
+  won't change it — respect it when editing story.json by hand unless asked) and tracks `mute: true`.
+  `Timeline.serialize()` writes one key/clip per line, numbers rounded to 4 dp; segment lookup is a binary search.
 - `Story` owns a separate shot camera `story.cam` (+ `story.look`); `main.js` copies it into the render camera
   unless the editor's Scene view is active. Captions are DOM nodes rebuilt when `timeline.version` changes.
-- Editor (`?edit`, dynamically imported so the site doesn't load it): pins `story.forceP` to its playhead;
-  Play advances p at 1/`meta.playDuration` per second (no smoothing). Edits mutate `timeline.data` directly →
-  `editor.changed()` (live) / `editor.commit()` (undo snapshot = serialized JSON, localStorage draft).
-  Save: `POST ./__editor/save` → else File System Access picker → else download. Selection is held by
-  object reference and re-resolved by index after undo. The Performance lane records fps per p bucket (400).
+- Editor (`?edit`, dynamically imported so the site doesn't load it): playhead `editor.time` (s) → pins
+  `story.forceP = time / duration`; Play advances in real time × play speed (no smoothing). Edits mutate
+  `timeline.data` directly → `editor.changed()` (live) / `editor.commit()` (undo snapshot = serialized JSON).
+  Selection is held by object reference and re-resolved by index after undo. Every action that changes data
+  must go through `isLocked()` / `guard()`. Context menus are built in `Editor.contextItems(target)`; menu bar in
+  `menuFile/Edit/View/Help`. The Performance lane records fps per 0.5 s bucket. The Scene | Game state is
+  `#ed[data-mode]` (scene / game / playing) → frame + badge colour.
+- Saves (`saves.js` + `tools/serve.py`): Save → `POST /__editor/save` (server copies the previous story.json to
+  `saves/auto/<stamp>.json`, keeps 100) → else File System Access picker → else download. Autosave (default 60 s,
+  2 s after the last edit, per-browser setting). Checkpoints `POST /__editor/checkpoint?name=` →
+  `saves/checkpoints/`. Restore lists `GET /__editor/list` (checkpoints, autos, `git log -- story.json`) and loads
+  with `GET /__editor/load?file=|?git=` — loading is one undo step. Git: `git/status`, `git/commit` (only
+  `story.json` + `saves/checkpoints`), `git/push` (`-u origin HEAD` if no upstream; `GIT_TERMINAL_PROMPT=0`).
+  The server only reads/deletes `story.json` and `saves/**/*.json`.
   Hooks it uses from `main.js`: `hidden` set (outliner), `setTimeScale` (sim speed / freeze), `capture()`
   (PNG of the next frame), `fpsInfo`, `onResize` (render size = `editor.viewSize()`), `setTunaCount`.
-- "Copy ref" (`editor.reference()`) produces a text block like `p=0.620 (chapter "The 50") … active:
-  tentacles.form 37% … camera: key #6 → #7 …`. When a user pastes one, map it to the tracks in `story.json`.
+- "Copy ref" (`editor.reference()`) produces a text block like `@ 0:37.20 (t=37.20 s of 60 s, p=0.620), chapter
+  "The 50" … active: tentacles.form 37% … camera: key #6 → #7 …`. When a user pastes one, map it to the tracks
+  in `story.json`.
 
 ### Global uniforms (`shared.js` → `U`)
 `time, under (camera below water 0/1), sunDir, sunColor, sunIntensity, camDepth, deep/mid/shallow`
@@ -300,10 +317,11 @@ Then a puppeteer-core script (`puppeteer-core@19` works with Node 16) does
 screenshots, collects console errors, then navigates the tab to `about:blank` and disconnects.
 Lab shots: `__ocean.director.shotIndex = n - 1; __ocean.director.next()`.
 `window.__ocean` exposes camera, controls, tuna, reef, sharks, turtles, director, story, tentacles, timeline, opts,
-buildPost, renderer, scene, systems, and in `?edit` the `editor` (`editor.setP(p)`, `setView('scene'|'game')`,
-`select({kind:'key', track, item})`, `addKey()`, `undo()`, `save()`, `reference()`, `perf`).
+buildPost, renderer, scene, systems, and in `?edit` the `editor` (`editor.setTime(s)`, `setView('scene'|'game')`,
+`select({kind:'key', track, item})`, `addKey()`, `toggleLock()`, `copy()/paste()`, `setDuration(s)`, `undo()`,
+`saves.save()`, `reference()`, `contextItems(target)`, `perf`).
 Editor checks: drive it with real mouse/keyboard events (scrub the ruler canvas, K, Ctrl+Z, drag a clip, Space)
-and back up `story.json` first if a test saves. Also test a resize to a wider aspect (black-frame regression).
+and back up `story.json` first if a test saves (and delete the `saves/` files a test creates). Also test a resize to a wider aspect (black-frame regression).
 WebGPU validation errors don't reach the console — attach `renderer.backend.device.addEventListener('uncapturederror', …)`
 when a frame renders black.
 

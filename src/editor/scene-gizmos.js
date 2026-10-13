@@ -1,6 +1,6 @@
-// Scene view gizmos: the camera path (blue line), camera keys (blue balls) and their look targets
-// (orange), the shot camera's frustum, and a move gizmo on the selected camera key. Click a ball to
-// select its key. Only visible in the Scene view.
+// Scene view gizmos: the camera path (blue line), camera keys (blue balls; grey when locked) and their
+// look targets (orange), the shot camera's frustum, and a move gizmo on the selected (unlocked) camera
+// key. Click a ball to select its key, right-click it for its options. Only visible in the Scene view.
 import * as THREE from 'three/webgpu';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
@@ -28,6 +28,7 @@ export class SceneGizmos {
     this.matKey = over(new THREE.MeshBasicNodeMaterial({ color: 0x4fb8ff }));
     this.matLook = over(new THREE.MeshBasicNodeMaterial({ color: 0xffb35c, opacity: 0.8 }));
     this.matSel = over(new THREE.MeshBasicNodeMaterial({ color: 0xffffff }));
+    this.matLocked = over(new THREE.MeshBasicNodeMaterial({ color: 0x7d8a99, opacity: 0.8 }));
     this.markers = [];
 
     // a short stand-in for the shot camera (its real far plane is 9 km)
@@ -54,21 +55,23 @@ export class SceneGizmos {
       ed.changed();
     });
 
-    // click a ball to select its key
+    // click a ball to select its key; right-click (without dragging) for its options
     const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
     let down = null;
-    renderer.domElement.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
-    renderer.domElement.addEventListener('pointerup', (e) => {
+    const canvas = renderer.domElement;
+    canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('pointerup', (e) => {
       if (!down || !ed.sceneView || tc.dragging || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
-      const r = renderer.domElement.getBoundingClientRect();
+      const r = canvas.getBoundingClientRect();
       ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, camera);
       const hit = ray.intersectObjects(this.markers.filter((m) => m.visible), false)[0];
-      if (hit) {
-        const { key, look } = hit.object.userData;
-        this.mode = look ? 'look' : 'pos';
-        ed.select({ kind: 'key', track: ed.tl.ofType('camera'), item: key });
-      }
+      if (!hit) return;
+      const { key, look } = hit.object.userData, track = ed.tl.ofType('camera');
+      this.mode = look ? 'look' : 'pos';
+      if (e.button === 2) ed.contextMenu(e.clientX, e.clientY, { kind: 'key', track, item: key });
+      else ed.select({ kind: 'key', track, item: key });
     });
   }
 
@@ -84,7 +87,7 @@ export class SceneGizmos {
     // path
     const a = this.path.geometry.attributes.position, k = { pos: [0, 0, 0], look: [0, 0, 0] };
     for (let i = 0; i < N; i++) {
-      if (tl.camera(i / (N - 1), k)) a.setXYZ(i, ...k.pos);
+      if (tl.camera((i / (N - 1)) * tl.duration, k)) a.setXYZ(i, ...k.pos);
     }
     a.needsUpdate = true;
     // look lines
@@ -117,7 +120,8 @@ export class SceneGizmos {
     for (const m of this.markers) {
       if (!m.visible) continue;
       const s = m.userData.key === sel;
-      m.material = s && (m.userData.look ? this.mode === 'look' : this.mode === 'pos') ? this.matSel : m.userData.look ? this.matLook : this.matKey;
+      const lk = m.userData.key.locked || ed.tl.ofType('camera')?.locked;
+      m.material = s && (m.userData.look ? this.mode === 'look' : this.mode === 'pos') ? this.matSel : lk ? this.matLocked : m.userData.look ? this.matLook : this.matKey;
       // keep balls a constant size on screen
       const d = m.position.distanceTo(ed.app.camera.position);
       m.scale.setScalar(Math.max(0.15, d * 0.012) * (m.userData.look ? 0.7 : 1) * (s ? 1.3 : 1));
@@ -126,7 +130,7 @@ export class SceneGizmos {
     if (fc.fov !== sc.fov || fc.aspect !== sc.aspect) { fc.fov = sc.fov; fc.aspect = sc.aspect; fc.updateProjectionMatrix(); }
     fc.matrixWorld.copy(sc.matrixWorld);
     this.frustum.update();
-    if (sel) {
+    if (sel && !ed.isLocked(ed.sel)) {
       if (!this.tc.dragging) this.proxy.position.fromArray(this.mode === 'look' ? sel.look : sel.pos);
       if (this.tc.object !== this.proxy) this.tc.attach(this.proxy);
       this.tcHelper.visible = true;

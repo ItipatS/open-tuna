@@ -1,44 +1,53 @@
 // Open Tuna editor (?edit): a Unity-style shell around the story.
-//   toolbar   Play / Pause / Stop, readout, sim speed, undo / redo, copy reference, snapshot, open site, save
-//   left      outliner: scene objects (hide / focus) and post effects
-//   centre    viewport: Game view (the story camera, captions, aspect frame) or Scene view (free camera,
-//             camera-path gizmos)
+//   top bar   menus (File / Edit / View / Help) · transport (start, Play/Pause, Stop, speed) · big Scene | Game
+//             switch · time readout · save status · Copy ref · fps · Save
+//   left      outliner: scene objects (hide / solo / focus) and post effects
+//   centre    viewport: Game (the story camera, captions, aspect frame) or Scene (free camera, camera gizmos);
+//             the frame colour says which (blue Scene, green Game, orange Playing)
 //   right     inspector for the selection
-//   bottom    timeline of story.json
-// Edits apply live. Save writes story.json via the local dev server (tools/serve.py / serve.ps1) and
-// falls back to a file picker / download (e.g. on GitHub Pages). Unsaved work is kept as a browser draft.
+//   bottom    timeline of story.json in story time (seconds; the story length can be extended)
+// Right-click anything for its options. Locked items (track / key / clip / marker `locked: true`) can't be
+// moved, edited or deleted. Saving, autosave, checkpoints, restore and git live in saves.js.
 import * as THREE from 'three/webgpu';
 import { h, btn, icon, download } from './dom.js';
+import { openMenu, dialog } from './menu.js';
 import { Inspector } from './inspector.js';
 import { TimelineView } from './timeline-view.js';
 import { SceneGizmos } from './scene-gizmos.js';
+import { Saves } from './saves.js';
 import { PARAMS, DRIVERS } from '../story.js';
+import { EASES, fmtTime, migrate } from '../timeline.js';
 
-const DRAFT_KEY = 'openTuna.draft.v1';
 const ASPECTS = { '16:9': 16 / 9, '16:10': 16 / 10, '21:9': 21 / 9, '4:3': 4 / 3, '9:19.5': 9 / 19.5, free: 0 };
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const CLIP_KEY = 'openTuna.clipboard.v2';
+const PERF_STEP = 0.5; // s per fps bucket
+const r4 = (x) => Math.round(x * 1e4) / 1e4;
+const isMac = /Mac/.test(navigator.platform);
+const mod = isMac ? '⌘' : 'Ctrl+';
 
 export class Editor {
   constructor(app) {
     this.app = app;
     this.tl = app.timeline;
     this.story = app.story;
-    this.p = 0;
+    this.time = 0; // playhead (s)
     this.playing = false;
     this.playFrom = 0;
+    this.speed = 1; // play speed
     this.view = 'game';
     this.aspect = '16:9';
     this.maxOnPlay = false;
     this.snap = true;
     this.sel = null;
-    this.perf = new Float32Array(400); // fps measured along the story
+    this.perf = new Float32Array(Math.ceil(this.tl.duration / PERF_STEP) + 1); // fps measured along the story
     this.born = performance.now();
     this.history = [this.tl.serialize()];
     this.hi = 0;
-    this.saved = this.history[0];
     this.sceneCam = null; // remembered Scene view pose
+    try { this.clipboard = JSON.parse(localStorage.getItem(CLIP_KEY) || 'null'); } catch { this.clipboard = null; }
 
     document.head.append(h('link', { rel: 'stylesheet', href: new URL('./editor.css', import.meta.url).href }));
+    this.saves = new Saves(this);
     this.buildDOM();
     this.inspector = new Inspector(this, this.$right);
     this.timeline = new TimelineView(this, this.$tlwrap);
@@ -47,42 +56,61 @@ export class Editor {
     this.bindKeys();
     this.setView('game');
     this.select(null);
-    this.story.forceP = this.p;
-    this.ping();
-    this.checkDraft();
+    this.setTime(0);
+    this.saves.ping();
+    this.saves.checkDraft();
+    setInterval(() => this.saves.tick(), 1000);
+    addEventListener('beforeunload', (e) => { if (this.saves.dirty && !this.saves.autosave) { e.preventDefault(); e.returnValue = ''; } });
   }
 
   get sceneView() { return this.view === 'scene' && !this.playing; }
+  get duration() { return this.tl.duration; }
+  current() { return this.tl.serialize(); }
 
   // ------------------------------------------------------------------ layout
   buildDOM() {
     const { renderer } = this.app;
-    const tb = (label, fn, opt) => btn(label, fn, opt);
-    this.$play = tb('', () => (this.playing ? this.pause() : this.play()), { ico: 'play', title: 'Play / Pause (Space)', id: 'ed-play' });
+    this.$play = btn('', () => (this.playing ? this.pause() : this.play()), { ico: 'play', title: 'Play / Pause (Space)', id: 'ed-play' });
     this.$readout = h('div', { id: 'ed-readout' });
     this.$fps = h('div', { id: 'ed-fps' });
-    this.$save = tb('Save', () => this.save(), { ico: 'save', title: 'Save story.json (Ctrl+S)', cls: 'primary' });
-    this.$undo = tb('', () => this.undo(), { ico: 'undo', title: 'Undo (Ctrl+Z)' });
-    this.$redo = tb('', () => this.redo(), { ico: 'redo', title: 'Redo (Ctrl+Y)' });
-    const speed = h('select', { title: 'Simulation speed (fish, water, particles). 0 = freeze the moment.' },
-      [['1', 'Sim 1×'], ['0.5', 'Sim ½×'], ['0.25', 'Sim ¼×'], ['0', 'Sim frozen']].map(([v, t]) => h('option', { value: v }, t)));
-    speed.addEventListener('change', () => { this.app.setTimeScale(+speed.value); speed.blur(); });
+    this.$status = h('div', { id: 'ed-status', title: 'Save status — File menu for autosave, checkpoints and restore' });
+    this.$save = btn('Save', () => this.saves.save(), { ico: 'save', title: `Save story.json (${mod}S)`, cls: 'primary' });
+    this.$speed = h('select', { title: 'Play speed (for long stories)' }, ['0.25', '0.5', '1', '2', '4', '8'].map((v) => h('option', { value: v }, `${v}×`)));
+    this.$speed.value = '1';
+    this.$speed.addEventListener('change', () => { this.speed = +this.$speed.value; this.$speed.blur(); });
+
+    const menus = h('nav', { id: 'ed-menus' }, ['File', 'Edit', 'View', 'Help'].map((name) => {
+      const b = h('button', { class: 'mb' }, name);
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const r = b.getBoundingClientRect();
+        openMenu(r.left, r.bottom + 2, this[`menu${name}`]());
+      });
+      return b;
+    }));
+
+    // the big Scene | Game switch
+    this.$mode = {
+      scene: h('button', { class: 'm scene', onclick: () => this.setView('scene'), title: 'Scene view — free camera to look around and place camera keys (1)' },
+        icon('camera'), h('span', {}, h('b', {}, 'SCENE'), h('small', {}, 'edit · free camera'))),
+      game: h('button', { class: 'm game', onclick: () => this.setView('game'), title: 'Game view — exactly what a visitor sees (2)' },
+        icon('play'), h('span', {}, h('b', {}, 'GAME'), h('small', {}, 'what visitors see'))),
+    };
 
     const bar = h('header', { id: 'ed-bar' },
-      h('div', { class: 'brand' }, h('b', {}, 'OPEN TUNA'), ' · EDITOR'),
-      tb('', () => { this.pause(); this.setP(0); }, { ico: 'start', title: 'Go to start (Home)' }),
+      h('div', { class: 'brand' }, h('b', {}, 'OPEN TUNA')),
+      menus,
+      h('div', { class: 'sep' }),
+      btn('', () => { this.pause(); this.setTime(0); }, { ico: 'start', title: 'Go to start (Home)' }),
       this.$play,
-      tb('', () => this.stop(), { ico: 'stop', title: 'Stop — back to where Play started (Esc)' }),
+      btn('', () => this.stop(), { ico: 'stop', title: 'Stop — back to where Play started (Esc)' }),
+      this.$speed,
+      h('div', { class: 'sep' }),
+      h('div', { id: 'ed-mode' }, this.$mode.scene, this.$mode.game),
       this.$readout,
-      h('div', { class: 'sep' }),
-      speed,
-      h('div', { class: 'sep' }),
-      this.$undo, this.$redo,
-      h('div', { class: 'sep' }),
-      tb('Copy ref', () => this.copyRef(), { ico: 'copy', title: 'Copy a precise reference to this moment — paste it to Claude' }),
-      tb('', () => this.snapshot(), { ico: 'image', title: 'Save a PNG of the viewport' }),
-      tb('Open site', () => window.open(`./?p=${this.p.toFixed(3)}`, '_blank'), { ico: 'link', title: 'Open the real scroll site at this moment (new tab)' }),
       h('div', { class: 'grow' }),
+      this.$status,
+      btn('Copy ref', () => this.copyRef(), { ico: 'copy', title: 'Copy a precise reference to this moment — paste it to Claude' }),
       this.$fps,
       this.$save,
     );
@@ -90,19 +118,15 @@ export class Editor {
     this.$outliner = h('div');
     const left = h('aside', { id: 'ed-left' }, h('div', { class: 'ed-h' }, 'Scene'), this.$outliner);
 
-    this.$tabs = {
-      scene: h('button', { class: 'tab', onclick: () => this.setView('scene'), title: 'Free camera + camera path (1)' }, 'Scene'),
-      game: h('button', { class: 'tab', onclick: () => this.setView('game'), title: 'What the visitor sees (2)' }, 'Game'),
-    };
     const aspect = h('select', { title: 'Game view frame' }, Object.keys(ASPECTS).map((k) => h('option', { value: k }, k === 'free' ? 'Free aspect' : k)));
     aspect.value = this.aspect;
     aspect.addEventListener('change', () => { this.aspect = aspect.value; aspect.blur(); this.layoutStage(); });
-    const maxBtn = h('button', { class: 'tab', title: 'Hide the editor panels while playing' }, 'Maximize on Play');
-    maxBtn.addEventListener('click', () => { this.maxOnPlay = !this.maxOnPlay; maxBtn.classList.toggle('on', this.maxOnPlay); });
+    this.$aspect = aspect;
+    this.$maxBtn = h('button', { class: 'tab', title: 'Hide the editor panels while playing' }, 'Maximize on Play');
+    this.$maxBtn.addEventListener('click', () => this.toggleMax());
     this.$viewHint = h('span', { class: 'hint' });
-    const align = h('button', { class: 'tab', title: 'Put the Scene camera where the story camera is', onclick: () => this.alignToShot() }, 'Align to shot');
-    this.$align = align;
-    const tabs = h('div', { id: 'ed-tabs' }, this.$tabs.scene, this.$tabs.game, aspect, maxBtn, align, this.$viewHint);
+    this.$align = h('button', { class: 'tab', title: 'Put the Scene camera where the story camera is', onclick: () => this.alignToShot() }, 'Align to shot');
+    const tabs = h('div', { id: 'ed-tabs' }, aspect, this.$maxBtn, this.$align, this.$viewHint);
 
     this.$stage = h('div', { id: 'ed-stage' });
     this.$badge = h('div', { id: 'ed-badge' });
@@ -116,9 +140,10 @@ export class Editor {
     const add = (label, fn, title) => btn(label, fn, { ico: 'plus', title });
     this.$addTrack = h('select', { title: 'Add a track that animates a parameter or drives a story beat' });
     this.$addTrack.addEventListener('change', () => { const v = this.$addTrack.value; this.$addTrack.value = ''; this.$addTrack.blur(); if (v) this.addTrack(v); });
-    const snapBtn = btn('Snap', () => { this.snap = !this.snap; snapBtn.classList.toggle('on', this.snap); }, { title: 'Snap to keys, chapters, playhead and grid (hold Shift to bypass)', cls: 'on' });
-    this.$pInput = h('input', { type: 'text', title: 'Type a position (0–1) and press Enter' });
-    this.$pInput.addEventListener('change', () => { const v = parseFloat(this.$pInput.value); if (Number.isFinite(v)) this.setP(clamp01(v)); this.$pInput.blur(); });
+    this.$snapBtn = btn('Snap', () => this.toggleSnap(), { title: 'Snap to keys, chapters, the playhead and the grid (hold Shift to bypass)', cls: 'on' });
+    this.$tInput = h('input', { type: 'text', title: 'Type a time (e.g. 1:05 or 65) and press Enter' });
+    this.$tInput.addEventListener('change', () => { const v = parseTime(this.$tInput.value); if (v !== null) this.setTime(v); this.$tInput.blur(); });
+    this.$len = h('button', { class: 'ed-btn', title: 'Story length — click to change, or drag the end marker on the ruler', onclick: () => this.lengthDialog() });
     const tlbar = h('div', { id: 'ed-tlbar' },
       add('Key', () => this.addKey(), 'Add a key at the playhead to the selected camera / curve track (K)'),
       add('Caption', () => this.addCaption(), 'Add a caption at the playhead'),
@@ -126,10 +151,11 @@ export class Editor {
       add('Chapter', () => this.addChapter(), 'Start a new chapter at the playhead'),
       this.$addTrack,
       h('div', { class: 'sep' }),
-      snapBtn,
-      btn('Fit', () => { this.timeline.fit(); this.timeline.draw(); }, { title: 'Show the whole story (F)' }),
-      this.$pInput,
-      h('span', { class: 'hint' }, 'Drag the ruler to scrub · Ctrl+wheel zoom · Shift+wheel pan · double-click a lane to add'),
+      this.$snapBtn,
+      btn('Fit', () => { this.timeline.fit(); }, { title: 'Show the whole story (F)' }),
+      this.$tInput,
+      this.$len,
+      h('span', { class: 'hint' }, 'Right-click anything for options · drag the ruler to scrub · Ctrl+wheel zoom · Shift+wheel pan'),
       h('div', { class: 'grow' }),
     );
     this.$tlwrap = h('div', { id: 'ed-tlwrap' });
@@ -140,6 +166,7 @@ export class Editor {
     document.body.append(this.$root);
     // a clicked button keeps focus and would also react to Space (play / pause)
     this.$root.addEventListener('click', (e) => e.target.closest?.('button')?.blur());
+    this.$root.addEventListener('contextmenu', (e) => { if (!/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) e.preventDefault(); });
 
     split.addEventListener('pointerdown', (e) => {
       split.setPointerCapture(e.pointerId);
@@ -157,8 +184,8 @@ export class Editor {
   layoutStage() {
     const W = this.$wrap.clientWidth, H = this.$wrap.clientHeight;
     const r = this.view === 'game' || this.playing ? ASPECTS[this.aspect] : 0;
-    let w = W, hh = H;
-    if (r) { if (W / H > r) w = H * r; else hh = W / r; }
+    let w = W - 8, hh = H - 8; // room for the coloured frame
+    if (r) { if (w / hh > r) w = hh * r; else hh = w / r; }
     this.$stage.style.width = `${Math.max(1, Math.floor(w))}px`;
     this.$stage.style.height = `${Math.max(1, Math.floor(hh))}px`;
     this.app.onResize();
@@ -176,13 +203,20 @@ export class Editor {
       else this.alignToShot(true);
     }
     controls.enabled = this.sceneView;
-    for (const [k, b] of Object.entries(this.$tabs)) b.classList.toggle('on', k === v);
-    this.$stage.classList.toggle('scene', v === 'scene');
     this.$align.style.display = v === 'scene' ? '' : 'none';
     this.$viewHint.textContent = v === 'scene'
       ? 'Drag orbit · right-drag pan · wheel zoom · WASD/QE fly (Shift fast) · click a ball to pick a camera key · K adds a key from this view'
-      : 'The story camera — exactly what the site shows at this point';
+      : 'The story camera — exactly what the site shows at this moment';
+    this.syncMode();
     this.layoutStage();
+  }
+
+  syncMode() {
+    const mode = this.playing ? 'playing' : this.view;
+    for (const [k, b] of Object.entries(this.$mode)) b.classList.toggle('on', k === this.view);
+    this.$root.dataset.mode = mode;
+    this.$stage.classList.toggle('scene', this.view === 'scene' && !this.playing);
+    this.$badge.textContent = this.playing ? '▶  PLAYING' : this.view === 'scene' ? 'SCENE · free camera' : 'GAME · visitor view';
   }
 
   alignToShot(keepView) {
@@ -191,6 +225,212 @@ export class Editor {
     camera.quaternion.copy(this.story.cam.quaternion);
     controls.target.copy(this.story.look);
     if (!keepView) this.setView('scene');
+  }
+
+  toggleMax() { this.maxOnPlay = !this.maxOnPlay; this.$maxBtn.classList.toggle('on', this.maxOnPlay); }
+  toggleSnap() { this.snap = !this.snap; this.$snapBtn.classList.toggle('on', this.snap); }
+
+  // ------------------------------------------------------------------ menus
+  menuFile() {
+    const s = this.saves, A = s.autosave;
+    return [
+      { label: 'Save', shortcut: `${mod}S`, onClick: () => s.save() },
+      { label: 'Save checkpoint…', shortcut: `${mod}⇧S`, onClick: () => s.checkpointDialog(), disabled: !s.server },
+      { label: 'Open / Restore…', shortcut: `${mod}O`, onClick: () => s.openDialog() },
+      { label: 'Autosave', items: [0, 30, 60, 300].map((v) => ({ label: v ? (v < 60 ? `Every ${v} s` : `Every ${v / 60} min`) : 'Off', checked: A === v, onClick: () => s.setAutosave(v) })) },
+      { label: 'Revert to saved file', onClick: () => s.revert(), disabled: !s.dirty },
+      '-',
+      { label: 'Import story JSON…', onClick: () => s.importFile() },
+      { label: 'Export / download story JSON', onClick: () => s.exportFile() },
+      '-',
+      { label: 'Commit to git…', onClick: () => s.gitDialog(), disabled: !s.git },
+      '-',
+      { label: 'Open site at this moment ↗', onClick: () => this.openSite() },
+      { label: 'Snapshot (PNG of the viewport)', onClick: () => this.snapshot() },
+    ];
+  }
+
+  menuEdit() {
+    const s = this.sel, locked = this.isLocked(s);
+    return [
+      { label: 'Undo', shortcut: `${mod}Z`, onClick: () => this.undo(), disabled: this.hi <= 0 },
+      { label: 'Redo', shortcut: `${mod}Y`, onClick: () => this.redo(), disabled: this.hi >= this.history.length - 1 },
+      '-',
+      { label: 'Cut', shortcut: `${mod}X`, onClick: () => this.cut(), disabled: !this.copyable(s) || locked },
+      { label: 'Copy', shortcut: `${mod}C`, onClick: () => this.copy(), disabled: !this.copyable(s) },
+      { label: `Paste at ${fmtTime(this.time)}`, shortcut: `${mod}V`, onClick: () => this.paste(), disabled: !this.clipboard },
+      { label: 'Duplicate at playhead', shortcut: `${mod}D`, onClick: () => this.duplicate(), disabled: !this.copyable(s) },
+      { label: 'Delete', shortcut: 'Del', onClick: () => this.deleteSelection(), disabled: !s || s.kind === 'object' || locked, danger: true },
+      '-',
+      { label: locked ? 'Unlock' : 'Lock', shortcut: 'L', onClick: () => this.toggleLock(), disabled: !s || s.kind === 'object' },
+      '-',
+      { label: 'Add key at playhead', shortcut: 'K', onClick: () => this.addKey() },
+      { label: 'Add caption at playhead', onClick: () => this.addCaption() },
+      { label: 'Add note at playhead', onClick: () => this.addNote() },
+      { label: 'Add chapter at playhead', onClick: () => this.addChapter() },
+      { label: 'Add track', items: this.trackItems() },
+      '-',
+      { label: 'Story length…', onClick: () => this.lengthDialog() },
+    ];
+  }
+
+  menuView() {
+    return [
+      { label: 'Scene view', shortcut: '1', checked: this.view === 'scene', onClick: () => this.setView('scene') },
+      { label: 'Game view', shortcut: '2', checked: this.view === 'game', onClick: () => this.setView('game') },
+      { label: 'Game aspect', items: Object.keys(ASPECTS).map((k) => ({ label: k === 'free' ? 'Free' : k, checked: this.aspect === k, onClick: () => { this.aspect = k; this.$aspect.value = k; this.layoutStage(); } })) },
+      { label: 'Maximize on Play', checked: this.maxOnPlay, onClick: () => this.toggleMax() },
+      '-',
+      { label: 'Snap on timeline', checked: this.snap, onClick: () => this.toggleSnap() },
+      { label: 'Fit timeline', shortcut: 'F', onClick: () => this.timeline.fit() },
+      { label: 'Zoom timeline to 10 s around playhead', onClick: () => this.timeline.zoomTo(this.time - 5, this.time + 5) },
+      '-',
+      { label: 'Simulation speed', items: [[1, '1× (normal)'], [0.5, '½×'], [0.25, '¼×'], [0, 'Frozen']].map(([v, l]) => ({ label: l, checked: this.simSpeed === v || (v === 1 && this.simSpeed === undefined), onClick: () => { this.simSpeed = v; this.app.setTimeScale(v); } })) },
+      { label: 'Show all objects', onClick: () => this.showAll() },
+    ];
+  }
+
+  menuHelp() {
+    return [
+      { label: 'Keyboard shortcuts', onClick: () => this.shortcutsDialog() },
+      { label: 'Editor guide (EDITOR.md) ↗', onClick: () => window.open('./EDITOR.md', '_blank') },
+      { label: 'Copy reference for Claude', onClick: () => this.copyRef() },
+    ];
+  }
+
+  trackItems() {
+    const used = new Set(this.tl.tracks.map((t) => t.bind).filter(Boolean));
+    return [
+      ...Object.entries(PARAMS).map(([k, v]) => ({ label: `Curve: ${v.label}`, disabled: used.has(k), onClick: () => this.addTrack(`curve:${k}`) })),
+      '-',
+      ...Object.entries(DRIVERS).map(([k, v]) => ({ label: `Clip: ${v}`, disabled: used.has(k), onClick: () => this.addTrack(`clip:${k}`) })),
+      ...(this.tl.tracks.some((t) => t.type === 'camera') ? [] : ['-', { label: 'Camera', onClick: () => this.addTrack('camera:') }]),
+      ...(this.tl.tracks.some((t) => t.type === 'captions') ? [] : [{ label: 'Captions', onClick: () => this.addTrack('captions:') }]),
+    ];
+  }
+
+  // context menu for a target {kind, track?, item?, t?} at screen x, y (the target gets selected)
+  contextMenu(x, y, target) {
+    const items = this.contextItems(target);
+    if (items.length) openMenu(x, y, items);
+  }
+
+  contextItems(tg) {
+    const at = tg.t ?? this.time;
+    const here = `at ${fmtTime(at)}`;
+    const go = { label: `Move playhead here`, onClick: () => this.setTime(at) };
+    const paste = { label: `Paste ${here}`, shortcut: `${mod}V`, disabled: !this.clipboard, onClick: () => { this.setTime(at); this.paste(tg.track); } };
+    const sel = (s) => { if (s) this.select(s); };
+    const lockItem = (s) => {
+      const own = s.item ?? s.track, trackLocked = s.item && s.track?.locked;
+      return { label: own?.locked ? 'Unlock' : 'Lock', shortcut: 'L', disabled: !!trackLocked && !own?.locked, onClick: () => { this.select(s); this.toggleLock(); } };
+    };
+    const del = (s) => ({ label: 'Delete', shortcut: 'Del', danger: true, disabled: this.isLocked(s), onClick: () => { this.select(s); this.deleteSelection(); } });
+    const ccp = (s) => [
+      { label: 'Cut', shortcut: `${mod}X`, disabled: this.isLocked(s), onClick: () => { this.select(s); this.cut(); } },
+      { label: 'Copy', shortcut: `${mod}C`, onClick: () => { this.select(s); this.copy(); } },
+      { label: 'Duplicate at playhead', shortcut: `${mod}D`, onClick: () => { this.select(s); this.duplicate(); } },
+    ];
+
+    switch (tg.kind) {
+      case 'key': {
+        const s = { kind: 'key', track: tg.track, item: tg.item }; sel(s);
+        const L = this.isLocked(s), k = tg.item;
+        return [
+          { label: `Go to key (${fmtTime(k.t)})`, onClick: () => this.setTime(k.t) },
+          tg.track.type === 'camera' ? { label: 'Set from Scene view', disabled: L, onClick: () => this.keyFromView(k) } : null,
+          tg.track.type === 'camera' ? { label: 'Move key to playhead', disabled: L, onClick: () => { k.t = r4(this.time); this.commit(); } } : null,
+          tg.track.type === 'curve' ? { label: 'Ease to next', disabled: L, items: Object.keys(EASES).map((e) => ({ label: e, checked: (k.ease || 'smooth') === e, onClick: () => { k.ease = e; this.commit(); } })) } : null,
+          '-', ...ccp(s), paste, '-', lockItem(s), del(s),
+        ];
+      }
+      case 'clip': { // a caption, or the bar of a clip track
+        const isCap = tg.track.type === 'captions';
+        const s = isCap ? { kind: 'clip', track: tg.track, item: tg.item } : { kind: 'track', track: tg.track }; sel(s);
+        const c = tg.item, L = this.isLocked(s);
+        return [
+          { label: `Go to start (${fmtTime(c.a)})`, onClick: () => this.setTime(c.a) },
+          { label: `Set start to playhead (${fmtTime(this.time)})`, disabled: L || this.time >= c.b, onClick: () => { c.a = r4(this.time); this.commit(); } },
+          { label: `Set end to playhead (${fmtTime(this.time)})`, disabled: L || this.time <= c.a, onClick: () => { c.b = r4(this.time); this.commit(); } },
+          isCap ? { label: 'Split at playhead', disabled: L || this.time <= c.a || this.time >= c.b, onClick: () => this.splitCaption(tg.track, c) } : null,
+          !isCap ? { label: 'Ease', disabled: L, items: [...Object.keys(EASES).filter((e) => e !== 'hold'), 'gate'].map((e) => ({ label: e, checked: (c.ease || 'linear') === e, onClick: () => { c.ease = e; this.commit(); } })) } : null,
+          '-', ...(isCap ? [...ccp(s), paste, '-', lockItem(s), del(s)] : this.trackMenuTail(tg.track)),
+        ].flat();
+      }
+      case 'track': {
+        const s = { kind: 'track', track: tg.track }; sel(s);
+        const t = tg.track, i = this.tl.tracks.indexOf(t), L = !!t.locked;
+        return [
+          { label: 'Rename…', disabled: L, onClick: () => this.inspector.focus('Name') },
+          t.keys ? { label: `Add key at playhead (${fmtTime(this.time)})`, shortcut: 'K', disabled: L, onClick: () => this.addKey(t) } : null,
+          t.type === 'captions' ? { label: `Add caption at playhead`, disabled: L, onClick: () => this.addCaption() } : null,
+          t.keys || t.clips ? paste : null,
+          '-',
+          { label: t.mute ? 'Unmute' : 'Mute', onClick: () => { if (t.mute) delete t.mute; else t.mute = true; this.commit(); } },
+          { label: L ? 'Unlock track' : 'Lock track', shortcut: 'L', onClick: () => this.toggleLock() },
+          '-',
+          { label: 'Move up', disabled: i <= 0, onClick: () => this.moveTrack(t, -1) },
+          { label: 'Move down', disabled: i >= this.tl.tracks.length - 1, onClick: () => this.moveTrack(t, 1) },
+          '-',
+          { label: 'Delete track', danger: true, disabled: L, onClick: () => this.deleteSelection() },
+        ];
+      }
+      case 'lane': {
+        const t = tg.track; sel({ kind: 'track', track: t });
+        const L = !!t.locked;
+        return [
+          go,
+          t.keys ? { label: `Add key ${here}`, disabled: L, onClick: () => { this.setTime(at); this.addKey(t); } } : null,
+          t.type === 'captions' ? { label: `Add caption ${here}`, disabled: L, onClick: () => { this.setTime(at); this.addCaption(); } } : null,
+          t.keys || t.clips ? paste : null,
+          '-',
+          { label: `Add note ${here}`, onClick: () => { this.setTime(at); this.addNote(); } },
+          '-', ...this.trackMenuTail(t),
+        ];
+      }
+      case 'chapter': case 'note': {
+        const s = { kind: tg.kind, item: tg.item }; sel(s);
+        const L = this.isLocked(s);
+        return [
+          { label: `Go to (${fmtTime(tg.item.t)})`, onClick: () => this.setTime(tg.item.t) },
+          { label: tg.kind === 'note' ? 'Edit text…' : 'Rename…', disabled: L, onClick: () => this.inspector.focus(tg.kind === 'note' ? 'Text' : 'Name') },
+          { label: 'Move to playhead', disabled: L, onClick: () => { tg.item.t = r4(this.time); this.commit(); } },
+          '-', ...ccp(s), '-', lockItem(s), del(s),
+        ];
+      }
+      case 'ruler':
+        return [
+          go,
+          { label: `Add chapter ${here}`, onClick: () => { this.setTime(at); this.addChapter(); } },
+          { label: `Add note ${here}`, onClick: () => { this.setTime(at); this.addNote(); } },
+          { label: 'Paste marker', disabled: !['chapter', 'note'].includes(this.clipboard?.kind), onClick: () => { this.setTime(at); this.paste(); } },
+          '-',
+          { label: 'Make the story longer', items: [10, 30, 60, 300, 600].map((d) => ({ label: `+ ${d < 60 ? `${d} s` : `${d / 60} min`}`, onClick: () => this.setDuration(this.duration + d) })) },
+          { label: `End the story here (${fmtTime(at)})`, disabled: at < this.tl.contentEnd(), onClick: () => this.setDuration(at) },
+          { label: 'Story length…', onClick: () => this.lengthDialog() },
+          '-',
+          { label: 'Fit timeline', shortcut: 'F', onClick: () => this.timeline.fit() },
+        ];
+      case 'object': {
+        const o = tg.item;
+        this.select({ kind: 'object', item: o });
+        return [
+          { label: this.isHidden(o) ? 'Show' : 'Hide', onClick: () => this.setHidden(o, !this.isHidden(o)) },
+          { label: 'Show only this (solo)', onClick: () => this.solo(o) },
+          { label: 'Show all', onClick: () => this.showAll() },
+          '-',
+          { label: 'Focus in Scene view', disabled: !this.focusPoint(o), onClick: () => this.focus(o) },
+        ];
+      }
+      default: return [];
+    }
+  }
+
+  trackMenuTail(t) {
+    return [
+      { label: t.mute ? 'Unmute track' : 'Mute track', onClick: () => { if (t.mute) delete t.mute; else t.mute = true; this.commit(); } },
+      { label: t.locked ? 'Unlock track' : 'Lock track', onClick: () => { this.select({ kind: 'track', track: t }); this.toggleLock(); } },
+    ];
   }
 
   // ------------------------------------------------------------------ outliner
@@ -204,7 +444,10 @@ export class Editor {
       const el = h('div', { class: 'ed-item' }, eye, h('span', { class: 'name' }, entry.name));
       const sync = () => { const on = isOn(); el.classList.toggle('off', !on); eye.replaceChildren(icon(on ? 'eye' : 'eyeOff')); };
       eye.addEventListener('click', (e) => { e.stopPropagation(); toggle(); sync(); if (this.sel?.item === entry) this.inspector.show(); });
-      if (selectable) el.addEventListener('click', () => this.select({ kind: 'object', item: entry }));
+      if (selectable) {
+        el.addEventListener('click', () => this.select({ kind: 'object', item: entry }));
+        el.addEventListener('contextmenu', (e) => { e.preventDefault(); this.contextMenu(e.clientX, e.clientY, { kind: 'object', item: entry }); });
+      }
       entry.el = el;
       entry.sync = sync;
       sync();
@@ -231,7 +474,10 @@ export class Editor {
     if (hide) { this.hiddenEntries.add(o); for (const x of list) this.app.hidden.add(x); }
     else { this.hiddenEntries.delete(o); for (const x of list) { this.app.hidden.delete(x); x.visible = true; } }
     o.sync?.();
+    if (this.sel?.item === o) this.inspector.show();
   }
+  solo(o) { for (const x of this.app.objects) this.setHidden(x, x !== o); }
+  showAll() { for (const x of this.app.objects) this.setHidden(x, false); }
 
   focusPoint(o) {
     const { tuna, tentacles } = this.app;
@@ -252,7 +498,7 @@ export class Editor {
     camera.position.copy(p).addScaledVector(dir, o.name === 'Water tentacles' ? 60 : 22);
   }
 
-  // ------------------------------------------------------------------ selection & editing
+  // ------------------------------------------------------------------ selection, locks & editing
   select(sel) {
     this.sel = sel;
     for (const o of this.app.objects) o.el?.classList.toggle('sel', sel?.kind === 'object' && sel.item === o);
@@ -260,9 +506,71 @@ export class Editor {
     this.timeline.draw();
   }
 
-  setP(p) {
-    this.p = clamp01(p);
-    this.story.forceP = this.p;
+  // locked: the item itself, or the track it lives on
+  isLocked(s) {
+    if (!s || s.kind === 'object') return false;
+    return !!(s.item?.locked || s.track?.locked);
+  }
+
+  toggleLock() {
+    const s = this.sel;
+    if (!s || s.kind === 'object') return;
+    const own = s.kind === 'track' ? s.track : s.item;
+    if (!own.locked && s.track?.locked && s.kind !== 'track') return this.toast('The whole track is locked — unlock the track', true);
+    if (own.locked) delete own.locked; else own.locked = true;
+    this.commit();
+    this.toast(own.locked ? 'Locked' : 'Unlocked');
+  }
+
+  // refuses (with a message) when the selection is locked
+  guard(s = this.sel) {
+    if (this.isLocked(s)) { this.toast('Locked — right-click ▸ Unlock (or press L) to change it', true); return false; }
+    return true;
+  }
+
+  setTime(x) {
+    this.time = Math.min(this.duration, Math.max(0, x));
+    this.story.forceP = this.time / this.duration;
+  }
+
+  setDuration(d) {
+    const min = Math.max(1, Math.ceil(this.tl.contentEnd() * 10) / 10);
+    d = Math.max(min, Math.round(d * 10) / 10);
+    if (d === this.duration) return;
+    const old = this.duration;
+    this.tl.meta.duration = d;
+    // keep "until the end" clips / captions running to the new end
+    for (const t of this.tl.tracks) {
+      if (t.type === 'clip' && t.b >= old - 1e-6) t.b = d;
+      if (t.clips) for (const c of t.clips) if (c.b >= old - 1e-6) c.b = d;
+    }
+    this.commit();
+    this.setTime(Math.min(this.time, d));
+    this.timeline.fit();
+    this.toast(`Story length ${fmtTime(d, 0)}`);
+  }
+
+  lengthDialog() {
+    const input = h('input', { type: 'text', value: fmtTime(this.duration, 0) });
+    const per = h('input', { type: 'number', value: String(this.tl.meta.scrollPerSecond), step: '1', min: '2', max: '200' });
+    const apply = () => {
+      const v = parseTime(input.value);
+      if (v === null || v <= 0) { this.toast('Type a length like 2:30 or 150', true); return false; }
+      const sp = +per.value;
+      if (sp > 0 && sp !== this.tl.meta.scrollPerSecond) { this.tl.meta.scrollPerSecond = sp; this.commit(); }
+      this.setDuration(v);
+      return true;
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && apply()) d.close(); });
+    const d = dialog({
+      title: 'Story length',
+      body: [
+        h('label', { class: 'lbl' }, 'Length (m:ss or h:mm:ss)', input),
+        h('label', { class: 'lbl' }, 'Scroll per second of story (vh)', per),
+        h('p', { class: 'muted' }, `Keys keep their times when you change the length. Can't be shorter than the last thing on the timeline (${fmtTime(this.tl.contentEnd())}). On the site, the page is length × scroll-per-second tall: 15 vh/s means a visitor scrolls about one screen every ~7 s of story.`),
+      ],
+      buttons: [{ label: 'Cancel' }, { label: 'Apply', primary: true, onClick: apply }],
+    });
   }
 
   // live edit: re-sort + redraw (no undo step yet)
@@ -271,7 +579,7 @@ export class Editor {
     this.timeline.draw();
   }
 
-  // finish an edit: one undo step, draft autosave
+  // finish an edit: one undo step, draft + autosave bookkeeping
   commit() {
     this.tl.changed();
     const s = this.tl.serialize();
@@ -284,7 +592,12 @@ export class Editor {
   }
 
   afterEdit(s) {
-    try { if (s !== this.saved) localStorage.setItem(DRAFT_KEY, JSON.stringify({ text: s, time: Date.now() })); else localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
+    this.saves.edited(s);
+    if (this.perf.length !== Math.ceil(this.duration / PERF_STEP) + 1) {
+      const p = new Float32Array(Math.ceil(this.duration / PERF_STEP) + 1);
+      p.set(this.perf.subarray(0, Math.min(p.length, this.perf.length)));
+      this.perf = p;
+    }
     this.refreshAddTrack();
     this.syncButtons();
     if (!this.$right.contains(document.activeElement)) this.inspector.show();
@@ -297,12 +610,28 @@ export class Editor {
     this.sel = this.resolve(path);
     const n = this.tl.data.settings.tunaCount;
     if (n && n !== this.app.tuna.count) this.app.setTunaCount(n);
+    this.setTime(this.time);
     this.afterEdit(s);
     this.inspector.show();
   }
 
   undo() { if (this.hi > 0) { this.hi--; this.restore(this.history[this.hi]); } }
   redo() { if (this.hi < this.history.length - 1) { this.hi++; this.restore(this.history[this.hi]); } }
+
+  // replace the whole story (open / restore / import) — one undo step
+  loadText(text, label) {
+    const data = migrate(JSON.parse(text));
+    if (!Array.isArray(data.tracks)) throw new Error('not a story file (no tracks)');
+    this.tl.set(data);
+    this.sel = null;
+    const n = data.settings?.tunaCount;
+    if (n && n !== this.app.tuna.count) this.app.setTunaCount(n);
+    this.commit();
+    this.setTime(this.time);
+    this.timeline.fit();
+    this.select(null);
+    this.toast(`Loaded ${label} — ${mod}Z to undo, Save to keep it`);
+  }
 
   // selection as indices (survives undo / redo, which rebuild the data objects)
   selPath() {
@@ -335,22 +664,23 @@ export class Editor {
 
   addKey(track = this.keyTrack()) {
     if (!track) return this.toast('Select a camera or curve track first');
-    const p = +this.p.toFixed(4);
-    let key = track.keys.find((k) => Math.abs(k.p - p) < 1e-4);
+    if (track.locked) return this.toast(`“${track.label}” is locked`, true);
+    const t = r4(this.time);
+    let key = track.keys.find((k) => Math.abs(k.t - t) < 1e-3);
+    if (key?.locked) return this.toast('That key is locked', true);
     const isNew = !key;
     if (track.type === 'camera') {
-      const pose = this.currentPose();
-      key ??= { p };
-      Object.assign(key, pose);
+      key ??= { t };
+      Object.assign(key, this.currentPose());
     } else {
       const P = PARAMS[track.bind] || { def: 0 };
-      key ??= { p, ease: 'smooth' };
-      key.v = +this.tl.param(track.bind, p, P.def).toFixed(4);
+      key ??= { t, ease: 'smooth' };
+      key.v = r4(this.tl.param(track.bind, t, P.def));
     }
     if (isNew) track.keys.push(key);
     this.commit();
     this.select({ kind: 'key', track, item: key });
-    this.toast(isNew ? `Key added at p ${p.toFixed(3)}${track.type === 'camera' && this.sceneView ? ' from the Scene view' : ''}` : `Key at p ${p.toFixed(3)} updated`);
+    this.toast(isNew ? `Key added at ${fmtTime(t)}${track.type === 'camera' && this.sceneView ? ' from the Scene view' : ''}` : `Key at ${fmtTime(t)} updated`);
   }
 
   // camera pose for a new key: the Scene view camera, or (Game view) the story camera's current pose
@@ -359,40 +689,57 @@ export class Editor {
     const r = (v) => v.toArray().map((x) => +x.toFixed(3));
     if (this.sceneView) return { pos: r(camera.position), look: r(controls.target), follow: 0, fov: +camera.fov.toFixed(1) };
     const k = { pos: [0, 0, 0], look: [0, 0, 0], follow: 0, fov: 50 };
-    this.tl.camera(this.p, k);
+    this.tl.camera(this.time, k);
     return { pos: k.pos.map((x) => +x.toFixed(3)), look: k.look.map((x) => +x.toFixed(3)), follow: +k.follow.toFixed(3), fov: +k.fov.toFixed(1) };
   }
 
   keyFromView(key) {
     if (!this.sceneView) { this.toast('Switch to the Scene view (1), frame the shot, then press this again'); return; }
+    if (!this.guard()) return;
     const pose = this.currentPose();
     Object.assign(key, { pos: pose.pos, look: pose.look, follow: 0 });
     this.commit();
     this.toast('Key set from the Scene view');
   }
 
-  addCaption() {
+  captionsTrack() {
     let t = this.tl.tracks.find((x) => x.type === 'captions');
     if (!t) { t = { id: 'captions', type: 'captions', label: 'Captions', clips: [] }; this.tl.tracks.splice(1, 0, t); }
-    const a = +this.p.toFixed(4), c = { a, b: Math.min(1, +(a + 0.08).toFixed(4)), size: 'medium', y: 42, title: 'New caption', sub: '' };
+    return t;
+  }
+
+  addCaption() {
+    const t = this.captionsTrack();
+    if (t.locked) return this.toast('The Captions track is locked', true);
+    const a = r4(Math.min(this.time, this.duration - 0.5)), c = { a, b: r4(Math.min(this.duration, a + 5)), size: 'medium', y: 42, title: 'New caption', sub: '' };
     t.clips.push(c);
     this.commit();
     this.select({ kind: 'clip', track: t, item: c });
   }
 
+  splitCaption(track, c) {
+    const x = r4(this.time), right = { ...structuredClone(c), a: x };
+    delete right.locked;
+    c.b = x;
+    track.clips.push(right);
+    this.commit();
+    this.select({ kind: 'clip', track, item: right });
+  }
+
   addNote() {
-    const n = { p: +this.p.toFixed(4), text: '' };
+    const n = { t: r4(this.time), text: '' };
     this.tl.data.notes.push(n);
     this.commit();
     this.select({ kind: 'note', item: n });
-    setTimeout(() => this.$right.querySelector('textarea')?.focus(), 0);
+    setTimeout(() => this.inspector.focus('Text'), 0);
   }
 
   addChapter() {
-    const c = { p: +this.p.toFixed(4), name: 'New chapter' };
+    const c = { t: r4(this.time), name: 'New chapter' };
     this.tl.data.chapters.push(c);
     this.commit();
     this.select({ kind: 'chapter', item: c });
+    setTimeout(() => this.inspector.focus('Name'), 0);
   }
 
   refreshAddTrack() {
@@ -403,28 +750,42 @@ export class Editor {
       h('optgroup', { label: 'Animate a parameter (curve)' }, Object.entries(PARAMS).map(([k, v]) => opt(`curve:${k}`, v.label))),
       h('optgroup', { label: 'Drive a story beat (clip)' }, Object.entries(DRIVERS).map(([k, v]) => opt(`clip:${k}`, v))),
       ...(this.tl.tracks.some((t) => t.type === 'camera') ? [] : [h('option', { value: 'camera:' }, 'Camera')]),
+      ...(this.tl.tracks.some((t) => t.type === 'captions') ? [] : [h('option', { value: 'captions:' }, 'Captions')]),
     );
+    this.$len.textContent = `Length ${fmtTime(this.duration, 0)}`;
   }
 
   addTrack(spec) {
-    const [type, bind] = spec.split(':'), p = +this.p.toFixed(4);
+    const [type, bind] = spec.split(':'), t0 = r4(this.time);
     let t;
     if (type === 'curve') {
       const P = PARAMS[bind];
-      t = { id: bind.replace('.', '-'), type, label: P.label.replace(/ \(.*\)/, ''), bind, keys: [{ p, v: +this.tl.param(bind, p, P.def).toFixed(4), ease: 'smooth' }] };
+      t = { id: bind.replace('.', '-'), type, label: P.label.replace(/ \(.*\)/, ''), bind, keys: [{ t: t0, v: r4(this.tl.param(bind, t0, P.def)), ease: 'smooth' }] };
     } else if (type === 'clip') {
-      t = { id: bind.replace('.', '-'), type, label: DRIVERS[bind].replace(/ \(.*\)/, ''), bind, a: p, b: Math.min(1, +(p + 0.1).toFixed(4)), ease: bind.startsWith('tuna.') ? 'gate' : 'smooth' };
+      t = { id: bind.replace('.', '-'), type, label: DRIVERS[bind].replace(/ \(.*\)/, ''), bind, a: t0, b: r4(Math.min(this.duration, t0 + 6)), ease: bind.startsWith('tuna.') ? 'gate' : 'smooth' };
+    } else if (type === 'captions') {
+      t = this.captionsTrack();
+      this.commit();
+      return this.select({ kind: 'track', track: t });
     } else {
-      t = { id: 'camera', type: 'camera', label: 'Camera', drift: 1, keys: [{ p, ...this.currentPose() }] };
+      t = { id: 'camera', type: 'camera', label: 'Camera', drift: 1, keys: [{ t: t0, ...this.currentPose() }] };
     }
     this.tl.tracks.push(t);
     this.commit();
     this.select({ kind: 'track', track: t });
   }
 
+  moveTrack(t, dir) {
+    const a = this.tl.tracks, i = a.indexOf(t), j = i + dir;
+    if (j < 0 || j >= a.length) return;
+    [a[i], a[j]] = [a[j], a[i]];
+    this.commit();
+  }
+
   deleteSelection() {
     const s = this.sel, d = this.tl.data;
-    if (!s || s.kind === 'object') return;
+    if (!s || s.kind === 'object' || !this.guard()) return;
+    if (s.kind === 'track' && (s.track.keys?.some((k) => k.locked) || s.track.clips?.some((c) => c.locked))) return this.toast('This track has locked items — unlock them first', true);
     const drop = (arr, it) => { const i = arr.indexOf(it); if (i >= 0) arr.splice(i, 1); };
     if (s.kind === 'key') drop(s.track.keys, s.item);
     else if (s.kind === 'clip') drop(s.track.clips, s.item);
@@ -434,49 +795,93 @@ export class Editor {
     const back = s.kind === 'key' || s.kind === 'clip' ? { kind: 'track', track: s.track } : null;
     this.commit();
     this.select(back);
-    this.toast('Deleted — Ctrl+Z to undo');
+    this.toast(`Deleted — ${mod}Z to undo`);
+  }
+
+  // ------------------------------------------------------------------ clipboard
+  copyable(s) { return !!s && ['key', 'clip', 'chapter', 'note'].includes(s.kind); }
+
+  copy() {
+    const s = this.sel;
+    if (!this.copyable(s)) return;
+    const item = structuredClone(s.item);
+    delete item.locked;
+    this.clipboard = { kind: s.kind, type: s.track?.type, bind: s.track?.bind, item };
+    try { localStorage.setItem(CLIP_KEY, JSON.stringify(this.clipboard)); } catch { /* storage unavailable */ }
+    navigator.clipboard?.writeText(JSON.stringify(this.clipboard, null, 1)).catch(() => {});
+    this.toast('Copied');
+  }
+
+  cut() {
+    if (!this.copyable(this.sel) || !this.guard()) return;
+    this.copy();
+    this.deleteSelection();
+  }
+
+  // paste at the playhead; keys go to a matching track (the given / selected one if it fits)
+  paste(into) {
+    const c = this.clipboard;
+    if (!c) return;
+    const x = r4(this.time), it = structuredClone(c.item);
+    const fits = (t) => t && t.type === c.type && (c.type !== 'curve' || t.bind === c.bind);
+    if (c.kind === 'key') {
+      const t = [into, this.sel?.track].find(fits) ?? this.tl.tracks.find(fits);
+      if (!t) return this.toast(`No ${c.type === 'curve' ? `“${c.bind}”` : c.type} track to paste into`, true);
+      if (t.locked) return this.toast(`“${t.label}” is locked`, true);
+      it.t = x;
+      t.keys = t.keys.filter((k) => Math.abs(k.t - x) > 1e-3 || k.locked);
+      t.keys.push(it);
+      this.commit();
+      return this.select({ kind: 'key', track: t, item: it });
+    }
+    if (c.kind === 'clip') {
+      const t = this.captionsTrack();
+      if (t.locked) return this.toast('The Captions track is locked', true);
+      const w = it.b - it.a;
+      it.a = r4(Math.max(0, Math.min(x, this.duration - w)));
+      it.b = r4(it.a + w);
+      t.clips.push(it);
+      this.commit();
+      return this.select({ kind: 'clip', track: t, item: it });
+    }
+    it.t = x;
+    this.tl.data[c.kind === 'chapter' ? 'chapters' : 'notes'].push(it);
+    this.commit();
+    this.select({ kind: c.kind, item: it });
   }
 
   duplicate() {
-    const s = this.sel, p = +this.p.toFixed(4);
-    if (s?.kind === 'key') {
-      const k = structuredClone(s.item);
-      k.p = p;
-      s.track.keys = s.track.keys.filter((x) => Math.abs(x.p - p) > 1e-4);
-      s.track.keys.push(k);
-      this.commit();
-      this.select({ kind: 'key', track: s.track, item: k });
-    } else if (s?.kind === 'clip') {
-      const c = structuredClone(s.item), w = c.b - c.a;
-      c.a = Math.min(p, 1 - w); c.b = c.a + w;
-      s.track.clips.push(c);
-      this.commit();
-      this.select({ kind: 'clip', track: s.track, item: c });
-    }
+    if (!this.copyable(this.sel)) return;
+    const keep = this.clipboard;
+    this.copy();
+    this.paste(this.sel.track);
+    this.clipboard = keep;
   }
 
   stepKey(dir) {
     const keys = [];
     const tracks = this.sel?.track ? [this.sel.track] : this.tl.tracks;
     for (const t of tracks) {
-      if (t.keys) keys.push(...t.keys.map((k) => k.p));
+      if (t.keys) keys.push(...t.keys.map((k) => k.t));
       if (t.clips) for (const c of t.clips) keys.push(c.a, c.b);
       if (t.type === 'clip') keys.push(t.a, t.b);
     }
+    if (!this.sel?.track) for (const c of this.tl.data.chapters) keys.push(c.t);
     keys.sort((a, b) => a - b);
-    const next = dir > 0 ? keys.find((k) => k > this.p + 1e-5) : keys.reverse().find((k) => k < this.p - 1e-5);
-    if (next !== undefined) this.setP(next);
+    const next = dir > 0 ? keys.find((k) => k > this.time + 1e-4) : keys.reverse().find((k) => k < this.time - 1e-4);
+    if (next !== undefined) this.setTime(next);
   }
 
   // ------------------------------------------------------------------ play mode
   play() {
-    if (this.p >= 1) this.setP(0);
+    if (this.time >= this.duration - 1e-3) this.setTime(0);
     this.playing = true;
-    this.playFrom = this.p;
+    this.playFrom = this.time;
     const { camera, controls } = this.app;
     if (this.view === 'scene') this.sceneCam = { pos: camera.position.clone(), target: controls.target.clone() };
     if (this.maxOnPlay) this.$root.classList.add('max');
-    this.app.controls.enabled = false;
+    controls.enabled = false;
+    this.syncMode();
     this.layoutStage();
     this.syncButtons();
   }
@@ -494,19 +899,20 @@ export class Editor {
   stop() {
     if (!this.playing) return;
     this.pause();
-    this.setP(this.playFrom);
+    this.setTime(this.playFrom);
   }
 
   // ------------------------------------------------------------------ per frame
   preUpdate(rdt) {
     if (this.playing) {
-      this.setP(this.p + rdt / (this.tl.meta.playDuration || 60));
-      if (this.p >= 1) this.pause();
+      this.setTime(this.time + rdt * this.speed);
+      if (this.time >= this.duration) this.pause();
+      this.timeline.follow();
     }
-    this.story.forceP = this.p;
-    // performance lane: fps at this point of the story (after a warm-up)
+    this.story.forceP = this.time / this.duration;
+    // performance lane: fps at this moment of the story (after a warm-up)
     if (rdt > 0 && performance.now() - this.born > 4000 && !document.hidden) {
-      const fps = 1 / rdt, i = Math.min(this.perf.length - 1, Math.floor(this.p * this.perf.length));
+      const fps = 1 / rdt, i = Math.min(this.perf.length - 1, Math.floor(this.time / PERF_STEP));
       this.perf[i] = this.perf[i] ? this.perf[i] * 0.85 + fps * 0.15 : fps;
     }
   }
@@ -517,13 +923,14 @@ export class Editor {
     const now = performance.now();
     if (now - (this.lastUi || 0) > 120) {
       this.lastUi = now;
-      const tl = this.tl, ch = tl.chapter(this.p);
-      this.$readout.innerHTML = `<b>p ${this.p.toFixed(3)}</b> · ${(this.p * (tl.meta.playDuration || 60)).toFixed(1)} s / ${tl.meta.playDuration || 60} s${ch ? ` · <b>${ch.name}</b>` : ''}`;
-      if (document.activeElement !== this.$pInput) this.$pInput.value = this.p.toFixed(3);
+      const ch = this.tl.chapter(this.time);
+      this.$readout.innerHTML = `<b>${fmtTime(this.time)}</b> / ${fmtTime(this.duration, 0)}${ch ? ` · <b>${esc(ch.name)}</b>` : ''}`;
+      if (document.activeElement !== this.$tInput) this.$tInput.value = fmtTime(this.time, 2);
       const { fps, res } = this.app.fpsInfo;
       this.$fps.innerHTML = `<span style="color:${fps >= 55 ? 'var(--good)' : fps >= 40 ? 'var(--warn)' : 'var(--bad)'}">${Math.round(fps)} fps</span> · ${Math.round(res * 100)}%`;
-      this.$badge.textContent = this.playing ? '▶ Playing' : this.view === 'scene' ? 'Scene' : 'Game';
-      this.$badge.className = this.playing ? 'play' : '';
+      const st = this.saves.status();
+      this.$status.textContent = st.text;
+      this.$status.className = st.cls;
       this.inspector.refresh();
     }
   }
@@ -531,33 +938,36 @@ export class Editor {
   syncButtons() {
     this.$play.replaceChildren(icon(this.playing ? 'pause' : 'play'));
     this.$play.classList.toggle('on', this.playing);
-    this.$undo.disabled = this.hi <= 0;
-    this.$redo.disabled = this.hi >= this.history.length - 1;
-    this.$save.classList.toggle('dirty', this.history[this.hi] !== this.saved);
+    this.$save.classList.toggle('dirty', this.saves.dirty);
+    this.syncMode();
   }
 
   // ------------------------------------------------------------------ keyboard
   bindKeys() {
     addEventListener('keydown', (e) => {
+      if (document.querySelector('.ed-modal')) return; // a dialog is open
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.code === 'KeyS') { e.preventDefault(); this.save(); return; }
+      const cmd = e.ctrlKey || e.metaKey;
+      if (cmd && e.code === 'KeyS') { e.preventDefault(); if (e.shiftKey) this.saves.checkpointDialog(); else this.saves.save(); return; }
+      if (cmd && e.code === 'KeyO') { e.preventDefault(); this.saves.openDialog(); return; }
       if (typing) return;
-      if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? this.redo() : this.undo(); return; }
-      if (mod && e.code === 'KeyY') { e.preventDefault(); this.redo(); return; }
-      if (mod && e.code === 'KeyD') { e.preventDefault(); this.duplicate(); return; }
-      if (mod) return;
-      const step = e.shiftKey ? 0.01 : 0.001;
+      if (cmd) {
+        const k = { KeyZ: () => (e.shiftKey ? this.redo() : this.undo()), KeyY: () => this.redo(), KeyD: () => this.duplicate(), KeyC: () => this.copy(), KeyX: () => this.cut(), KeyV: () => this.paste() }[e.code];
+        if (k) { e.preventDefault(); k(); }
+        return;
+      }
+      const frame = e.shiftKey ? 1 : 1 / 30;
       switch (e.code) {
         case 'Space': e.preventDefault(); this.playing ? this.pause() : this.play(); break;
         case 'Escape': if (this.playing) this.stop(); else this.select(null); break;
-        case 'Home': this.pause(); this.setP(0); break;
-        case 'End': this.pause(); this.setP(1); break;
-        case 'ArrowLeft': e.preventDefault(); this.pause(); this.setP(this.p - step); break;
-        case 'ArrowRight': e.preventDefault(); this.pause(); this.setP(this.p + step); break;
+        case 'Home': this.pause(); this.setTime(0); break;
+        case 'End': this.pause(); this.setTime(this.duration); break;
+        case 'ArrowLeft': e.preventDefault(); this.pause(); this.setTime(this.time - frame); break;
+        case 'ArrowRight': e.preventDefault(); this.pause(); this.setTime(this.time + frame); break;
         case 'Comma': this.pause(); this.stepKey(-1); break;
         case 'Period': this.pause(); this.stepKey(1); break;
         case 'KeyK': this.addKey(); break;
+        case 'KeyL': this.toggleLock(); break;
         case 'Delete': case 'Backspace': e.preventDefault(); this.deleteSelection(); break;
         case 'Digit1': this.setView('scene'); break;
         case 'Digit2': this.setView('game'); break;
@@ -567,86 +977,48 @@ export class Editor {
     });
   }
 
-  // ------------------------------------------------------------------ save / drafts
-  async ping() {
-    try {
-      const r = await fetch('./__editor/ping', { cache: 'no-store' });
-      this.server = r.ok && (await r.json()).save === true;
-    } catch { this.server = false; }
-    this.$save.title = this.server ? 'Save story.json (Ctrl+S)' : 'No editor server: Save downloads story.json — start the editor with “Open Editor” to save in place';
-  }
-
-  async save() {
-    const text = this.tl.serialize();
-    const done = (msg) => {
-      this.saved = text;
-      try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
-      this.syncButtons();
-      this.toast(msg);
-    };
-    if (this.server !== false) {
-      try {
-        const r = await fetch('./__editor/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
-        if (r.ok) return done('Saved story.json');
-        this.toast(`Save failed: ${(await r.json().catch(() => ({}))).error || r.status}`, true);
-        return;
-      } catch { this.server = false; }
-    }
-    if (window.showSaveFilePicker) {
-      try {
-        this.fileHandle ??= await window.showSaveFilePicker({ suggestedName: 'story.json', types: [{ description: 'Story timeline', accept: { 'application/json': ['.json'] } }] });
-        const w = await this.fileHandle.createWritable();
-        await w.write(text);
-        await w.close();
-        return done(`Saved ${this.fileHandle.name}`);
-      } catch (e) { if (e.name === 'AbortError') return; }
-    }
-    download('story.json', text);
-    done('Downloaded story.json — put it in the project folder');
-  }
-
-  checkDraft() {
-    let draft = null;
-    try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { /* ignore */ }
-    if (!draft || draft.text === this.saved) return;
-    const when = new Date(draft.time).toLocaleString();
-    this.toast(h('span', {}, `Unsaved changes from ${when}. `,
-      btn('Restore', (e) => { this.history.push(draft.text); this.hi = this.history.length - 1; this.restore(draft.text); e.target.closest('div').remove(); }),
-      ' ',
-      btn('Discard', (e) => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } e.target.closest('div').remove(); })), false, 0);
+  shortcutsDialog() {
+    const rows = [
+      ['Space', 'Play / Pause'], ['Esc', 'Stop (back to start of play) / deselect'], ['← →', 'Step 1 frame (Shift: 1 s)'], ['Home / End', 'Start / end of story'],
+      [', .', 'Previous / next key'], ['K', 'Add key here (Scene view: from your view)'], ['L', 'Lock / unlock selection'], ['Del', 'Delete'],
+      [`${mod}C / X / V`, 'Copy / cut / paste at playhead'], [`${mod}D`, 'Duplicate at playhead'], [`${mod}Z / Y`, 'Undo / redo'],
+      [`${mod}S`, 'Save'], [`${mod}⇧S`, 'Save checkpoint'], [`${mod}O`, 'Open / restore'], ['1 / 2', 'Scene / Game view'], ['F', 'Fit timeline'],
+      ['WASD QE', 'Fly (Scene view, Shift = fast)'], ['Right-click', 'Options for anything'], ['Ctrl + wheel', 'Zoom timeline'], ['Shift + wheel', 'Pan timeline'], ['Shift + drag', 'Move without snapping'],
+    ];
+    dialog({ title: 'Keyboard shortcuts', body: h('div', { class: 'ed-help' }, rows.map(([k, v]) => h('div', {}, h('kbd', {}, k), ` ${v}`))), buttons: [{ label: 'Close', primary: true }] });
   }
 
   // ------------------------------------------------------------------ sharing
   // A precise, human + Claude readable description of the current moment.
   reference() {
-    const tl = this.tl, p = this.p, d = tl.data;
+    const tl = this.tl, x = this.time, d = tl.data;
     const lines = [];
-    const ch = tl.chapter(p);
-    lines.push(`Open Tuna — story.json @ p=${p.toFixed(3)}${ch ? ` (chapter "${ch.name}")` : ''}, ${(p * (d.meta.playDuration || 60)).toFixed(1)} s into the ${d.meta.playDuration || 60} s play`);
+    const ch = tl.chapter(x);
+    lines.push(`Open Tuna — story.json @ ${fmtTime(x, 2)} (t=${x.toFixed(2)} s of ${tl.duration} s, p=${(x / tl.duration).toFixed(3)})${ch ? `, chapter "${ch.name}"` : ''}`);
     const active = [];
     for (const t of tl.tracks) {
       if (t.mute) continue;
       if (t.type === 'clip') {
-        const v = tl.clip(t.bind, p);
-        if (t.ease === 'gate') { if (v) active.push(`${t.bind} ON (${t.a}–${t.b})`); }
-        else if (p >= t.a && p <= t.b) active.push(`${t.bind} ${Math.round(v * 100)}% (${t.a}–${t.b})`);
+        const v = tl.clip(t.bind, x);
+        if (t.ease === 'gate') { if (v) active.push(`${t.bind} ON (${t.a}–${t.b} s)`); }
+        else if (x >= t.a && x <= t.b) active.push(`${t.bind} ${Math.round(v * 100)}% (${t.a}–${t.b} s)`);
       }
-      if (t.type === 'curve') active.push(`${t.bind}=${+tl.param(t.bind, p, 0).toFixed(2)}`);
+      if (t.type === 'curve') active.push(`${t.bind}=${+tl.param(t.bind, x, 0).toFixed(2)}`);
     }
     if (active.length) lines.push(`active: ${active.join(' · ')}`);
     const cam = tl.ofType('camera');
     if (cam?.keys.length) {
-      const i = cam.keys.findLastIndex((k) => k.p <= p);
+      const i = cam.keys.findLastIndex((k) => k.t <= x);
       const a = cam.keys[i], b = cam.keys[i + 1];
-      lines.push(`camera: ${a ? `key #${i + 1} (p ${a.p})` : 'before first key'}${b ? ` → key #${i + 2} (p ${b.p})` : ''}; at [${this.story.cam.position.toArray().map((x) => x.toFixed(1)).join(', ')}] looking at [${this.story.look.toArray().map((x) => x.toFixed(1)).join(', ')}]`);
+      lines.push(`camera: ${a ? `key #${i + 1} (t ${a.t})` : 'before first key'}${b ? ` → key #${i + 2} (t ${b.t})` : ''}; at [${this.story.cam.position.toArray().map((v) => v.toFixed(1)).join(', ')}] looking at [${this.story.look.toArray().map((v) => v.toFixed(1)).join(', ')}]`);
     }
-    const caps = tl.captions().filter((c) => p >= c.a && p <= c.b).map((c) => `"${c.title.replace(/\n/g, ' ')}"`);
+    const caps = tl.captions().filter((c) => x >= c.a && x <= c.b).map((c) => `"${c.title.replace(/\n/g, ' ')}"`);
     if (caps.length) lines.push(`caption on screen: ${caps.join(', ')}`);
-    const notes = d.notes.filter((n) => Math.abs(n.p - p) < 0.03 && n.text);
-    if (notes.length) lines.push(`notes nearby: ${notes.map((n) => `p ${n.p}: "${n.text}"`).join(' · ')}`);
+    const notes = d.notes.filter((n) => Math.abs(n.t - x) < 3 && n.text);
+    if (notes.length) lines.push(`notes nearby: ${notes.map((n) => `t ${n.t}: "${n.text}"`).join(' · ')}`);
     const s = this.sel;
-    if (s && s.kind !== 'object') lines.push(`selected: ${s.kind}${s.track ? ` on track "${s.track.label}"` : ''}${s.item?.p !== undefined ? ` at p ${s.item.p}` : ''}`);
-    lines.push(`fps here: ${Math.round(this.app.fpsInfo.fps)} · view: ${this.view === 'scene' ? 'Scene' : `Game ${this.aspect}`} · unsaved changes: ${this.history[this.hi] !== this.saved ? 'yes' : 'no'}`);
+    if (s && s.kind !== 'object') lines.push(`selected: ${s.kind}${s.track ? ` on track "${s.track.label}"` : ''}${s.item?.t !== undefined ? ` at t ${s.item.t}` : ''}${this.isLocked(s) ? ' (locked)' : ''}`);
+    lines.push(`fps here: ${Math.round(this.app.fpsInfo.fps)} · view: ${this.view === 'scene' ? 'Scene' : `Game ${this.aspect}`} · unsaved changes: ${this.saves.dirty ? 'yes' : 'no'}`);
     return lines.join('\n');
   }
 
@@ -663,15 +1035,27 @@ export class Editor {
     }
   }
 
+  openSite() { window.open(`./?t=${this.time.toFixed(2)}`, '_blank'); }
+
   async snapshot() {
     const blob = await this.app.capture();
-    if (blob) download(`open-tuna_p${this.p.toFixed(3)}.png`, blob);
+    if (blob) download(`open-tuna_${fmtTime(this.time, 1).replace(/:/g, '-')}.png`, blob);
     else this.toast('Snapshot failed', true);
   }
 
   toast(msg, err = false, ms = 3200) {
     const el = h('div', { class: err ? 'err' : '' }, msg);
     this.$toast.append(el);
+    while (this.$toast.children.length > 4) this.$toast.firstChild.remove();
     if (ms) setTimeout(() => el.remove(), ms);
   }
+}
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// "1:05", "1:05.5", "65", "1:02:03" -> seconds (null if unreadable)
+export function parseTime(s) {
+  const parts = String(s).trim().split(':').map((x) => x.trim());
+  if (!parts.length || parts.some((x) => x === '' || !Number.isFinite(+x))) return null;
+  return parts.reduce((acc, x) => acc * 60 + +x, 0);
 }

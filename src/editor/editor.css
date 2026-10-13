@@ -30,7 +30,7 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 .ed-btn.dirty::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--play); }
 .ed-btn svg { width: 14px; height: 14px; fill: currentColor; }
 #ed-play.on { background: #8a4b12; border-color: var(--play); color: #fff; }
-#ed-readout { font-variant-numeric: tabular-nums; min-width: 230px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ed-readout { font-variant-numeric: tabular-nums; min-width: 150px; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #ed-readout b { color: var(--text); font-weight: 600; }
 #ed-fps { font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; color: var(--dim); }
 #ed select { height: 28px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 6px; padding: 0 6px; }
@@ -92,8 +92,14 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 #ed-toast div { pointer-events: auto; padding: 8px 12px; border-radius: 7px; background: rgba(20, 24, 30, .92); border: 1px solid var(--line2); box-shadow: 0 6px 24px rgba(0,0,0,.4); animation: edIn .18s ease-out; display: flex; gap: 10px; align-items: center; }
 #ed-toast div.err { border-color: var(--bad); }
 @keyframes edIn { from { opacity: 0; transform: translateY(6px); } }
-#ed-badge { position: absolute; left: 10px; top: 10px; z-index: 4; padding: 3px 8px; border-radius: 5px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; background: rgba(0,0,0,.45); color: #fff; pointer-events: none; }
-#ed-badge.play { background: rgba(255, 159, 67, .85); }
+/* which view am I in? the frame + badge colour says it: blue Scene, green Game, orange Playing */
+#ed { --mode: #3fa9f5; }
+#ed[data-mode="game"] { --mode: #3ccf7a; }
+#ed[data-mode="playing"] { --mode: #ff9f43; }
+#ed-stage { outline: 3px solid var(--mode); outline-offset: 0; }
+#ed[data-mode="playing"] #ed-stage { animation: edPulse 1.6s ease-in-out infinite; }
+@keyframes edPulse { 50% { outline-color: #ffd3a3; } }
+#ed-badge { position: absolute; left: 0; top: 0; z-index: 4; padding: 5px 12px 6px 10px; border-bottom-right-radius: 8px; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; background: var(--mode); color: #08131c; pointer-events: none; }
 
 /* ---- timeline */
 #ed-tl { grid-area: tl; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-top: 1px solid var(--line); position: relative; }
@@ -106,3 +112,76 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 #ed-tlbar .hint { color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #ed-tlwrap { flex: 1; position: relative; min-height: 0; }
 #ed-tlwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* ---- menu bar, transport, Scene | Game switch, save status */
+#ed-menus { display: flex; gap: 2px; }
+#ed-menus .mb { height: 28px; padding: 0 10px; border: 0; border-radius: 5px; background: none; cursor: pointer; color: var(--text); }
+#ed-menus .mb:hover { background: var(--panel2); }
+#ed-mode { display: flex; padding: 3px; gap: 3px; border-radius: 9px; background: #121418; border: 1px solid var(--line2); }
+#ed-mode .m { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px 0 10px; border: 0; border-radius: 6px; background: none; color: var(--dim); cursor: pointer; text-align: left; }
+#ed-mode .m svg { width: 15px; height: 15px; fill: currentColor; }
+#ed-mode .m span { display: flex; flex-direction: column; line-height: 1.05; }
+#ed-mode .m b { font-size: 12px; letter-spacing: .12em; }
+#ed-mode .m small { font-size: 9.5px; opacity: .8; }
+#ed-mode .m:hover { color: var(--text); background: #1d2127; }
+#ed-mode .m.scene.on { background: #3fa9f5; color: #06121c; }
+#ed-mode .m.game.on { background: #3ccf7a; color: #06160d; }
+#ed[data-mode="playing"] #ed-mode .m.on { background: #ff9f43; color: #1c0f02; }
+#ed-bar #ed-speed, #ed-bar select { height: 28px; }
+#ed-status { font-size: 11px; color: var(--dim); white-space: nowrap; padding: 0 4px; }
+#ed-status.dirty { color: var(--play); }
+#ed-status.ok { color: var(--good); }
+
+/* ---- context / drop-down menus */
+.ed-menu { position: fixed; z-index: 100; min-width: 220px; padding: 5px; background: #23272e; border: 1px solid #3c424b; border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.55); font-size: 12px; }
+.ed-menu .ed-menu { position: absolute; }
+.ed-menu .mi { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 6px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+.ed-menu .mi:hover { background: #2f5f8a; }
+.ed-menu .mi .ck { color: var(--accent); text-align: center; }
+.ed-menu .mi .sc { color: var(--faint); font-size: 11px; padding-left: 18px; }
+.ed-menu .mi:hover .sc { color: #c7d6e6; }
+.ed-menu .mi.off { opacity: .38; cursor: default; }
+.ed-menu .mi.off:hover { background: none; }
+.ed-menu .mi.danger .lb { color: #ff9b9b; }
+.ed-menu .sep { height: 1px; margin: 4px 6px; background: #3a3f48; }
+
+/* ---- dialogs */
+.ed-modal { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(5, 8, 12, .55); backdrop-filter: blur(2px); }
+.ed-dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 60px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.6); user-select: text; }
+.ed-dialog.wide { width: min(760px, calc(100vw - 32px)); }
+.ed-dialog .dh { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ed-dialog .dh .x { border: 0; background: none; color: var(--dim); cursor: pointer; font-size: 14px; }
+.ed-dialog .db { padding: 14px; overflow: auto; line-height: 1.5; }
+.ed-dialog .db p { margin: 0 0 10px; color: var(--dim); }
+.ed-dialog .df { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.ed-dialog input[type=text], .ed-dialog input[type=number] { width: 100%; height: 32px; margin-top: 4px; padding: 0 9px; background: #15171b; border: 1px solid var(--line2); border-radius: 6px; color: var(--text); font-size: 13px; }
+.ed-dialog input:focus { outline: none; border-color: var(--accent); }
+.ed-dialog .lbl { display: block; margin: 10px 0; color: var(--dim); }
+.ed-dialog .chk { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+.ed-dialog .muted { color: var(--faint) !important; font-size: 11.5px; }
+.ed-dialog .warn { color: var(--play) !important; }
+.ed-dialog .kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; margin-bottom: 10px; }
+.ed-dialog .kv > span:nth-child(odd) { color: var(--faint); }
+.ed-dialog pre.changes { margin: 8px 0; padding: 8px 10px; max-height: 120px; overflow: auto; background: #15171b; border-radius: 6px; font: 11px/1.5 ui-monospace, Consolas, monospace; color: #b9c4d0; }
+.ed-dialog .ed-btn.danger, .ed-btn.danger { border-color: #6b2c2c; color: #ffb3b3; }
+.ed-saves section { margin-bottom: 16px; }
+.ed-saves h4 { margin: 0 0 6px; font-size: 12px; letter-spacing: .04em; }
+.ed-saves h4 span { margin-left: 8px; font-weight: 400; color: var(--faint); }
+.ed-saves .rows { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; max-height: 220px; overflow-y: auto; }
+.ed-saves .r { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 6px 8px 6px 10px; }
+.ed-saves .r:nth-child(odd) { background: #1b1e23; }
+.ed-saves .r .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-saves .r .mt { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ed-saves .r .ac { display: flex; gap: 6px; }
+.ed-saves .r .ed-btn { height: 24px; font-size: 11px; }
+
+/* ---- inspector extras */
+.ins .locked { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; padding: 7px 10px; border-radius: 7px; background: #3a2a14; border: 1px solid #7a5524; color: #ffcf8a; }
+.ins .locked .ed-btn { height: 24px; }
+.ins .with { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ins .with input { flex: 1; }
+.ins .tm { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ins .tm.big { color: var(--text); font-size: 13px; }
+.ins .list .li.lk span:first-child { color: #ffcf8a; }
+.ins input:disabled, .ins textarea:disabled, .ins select:disabled { opacity: .55; }
+#ed-tlbar .ed-btn#ed-len, #ed-tlbar > .ed-btn:not([title*="Add"]) { font-variant-numeric: tabular-nums; }

@@ -1,7 +1,7 @@
-// Scroll-driven story: one progress value (0..1, smoothed) drives the camera, sun, school, the water
-// "50", the tuna stunts and the captions. *When* things happen lives in story.json (see timeline.js),
-// edited with the timeline editor (?edit); *what* happens is code here and in the systems.
-// Everything is a function of progress, so scrolling back rewinds.
+// Scroll-driven story: scroll progress p (0..1, smoothed) maps to story time x = p · duration (s), which
+// drives the camera, sun, school, the water "50", the tuna stunts and the captions. *When* things happen
+// lives in story.json (see timeline.js), edited with the timeline editor (?edit); *what* happens is code
+// here and in the systems. Everything is a function of x, so scrolling back rewinds.
 import * as THREE from 'three/webgpu';
 import { captionOpacity } from './timeline.js';
 
@@ -63,7 +63,8 @@ export class Story {
     this.cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.2, 9000); // the shot camera
     this.look = new THREE.Vector3(); // where the shot camera looks
     this.k = { pos: [0, 0, 0], look: [0, 0, 0], follow: 0, fov: 50, drift: 1 };
-    this.p = 0;
+    this.p = 0; // scroll progress 0..1
+    this.x = 0; // story time (s) = p · duration
     this.forceP = null; // editor / tests: pin progress (no smoothing)
     this.capVersion = -1;
   }
@@ -80,32 +81,34 @@ export class Story {
     this.evaluate(this.p, t);
   }
 
+  // p = progress 0..1, t = simulation time (idle motion)
   evaluate(p, t) {
     const { tuna, timeline: tl, apply, cam, look, k } = this;
     const tu = this.tentacles.userData;
+    const x = this.x = p * tl.duration;
 
     // sun + post / sea parameters (curves or constants)
-    apply.sun(tl.param('sun.elevation', p, PARAMS['sun.elevation'].def), THREE.MathUtils.degToRad(tl.param('sun.azimuth', p, PARAMS['sun.azimuth'].def)));
-    for (const id in PARAMS) if (apply[id]) apply[id](tl.param(id, p, PARAMS[id].def));
+    apply.sun(tl.param('sun.elevation', x, PARAMS['sun.elevation'].def), THREE.MathUtils.degToRad(tl.param('sun.azimuth', x, PARAMS['sun.azimuth'].def)));
+    for (const id in PARAMS) if (apply[id]) apply[id](tl.param(id, x, PARAMS[id].def));
 
     // water tentacles braid up out of the sea, unfurl and draw the 50 (see tentacles.js)
-    const fade = tl.clip('tentacles.fade', p);
+    const fade = tl.clip('tentacles.fade', x);
     tu.u.visible.value = fade;
     this.tentacles.visible = fade > 0;
-    if (this.tentacles.visible) tu.update(tl.clip('tentacles.form', p), t);
+    if (this.tentacles.visible) tu.update(tl.clip('tentacles.form', x), t);
 
     // school: wander at depth, then gather under the leap band in front of the 50
-    const gather = tl.clip('school.gather', p);
+    const gather = tl.clip('school.gather', x);
     tuna.u.goal.value.set(
       Math.cos(t * 0.045) * 10 * (1 - gather),
       lerp(-9 + Math.sin(t * 0.11) * 1.5, -4.5, gather),
       Math.sin(t * 0.063) * 8 * (1 - gather) + 18 * gather,
     );
-    tuna.u.free.value = tl.clip('tuna.free', p);
-    tuna.u.hoop.value = tl.clip('tuna.hoop', p);
+    tuna.u.free.value = tl.clip('tuna.free', x);
+    tuna.u.hoop.value = tl.clip('tuna.hoop', x);
 
     // camera: keyframed path + slow hand-held drift; `follow` blends the look-at toward the school
-    if (tl.camera(p, k)) {
+    if (tl.camera(x, k)) {
       cam.position.fromArray(k.pos);
       cam.position.x += Math.sin(t * 0.15) * 0.6 * k.drift;
       cam.position.y += Math.sin(t * 0.25) * 0.4 * k.drift;
@@ -119,7 +122,7 @@ export class Story {
     // captions
     if (this.capVersion !== tl.version) this.buildCaptions();
     tl.captions().forEach((c, i) => {
-      const el = this.capEls[i], o = captionOpacity(c, p);
+      const el = this.capEls[i], o = captionOpacity(c, x, tl.duration);
       el.style.opacity = o.toFixed(3);
       el.style.visibility = o > 0.001 ? 'visible' : 'hidden';
       el.style.transform = `translateY(${((1 - o) * 14).toFixed(1)}px)`;
