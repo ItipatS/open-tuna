@@ -68,6 +68,9 @@ See [dev-server.md](dev-server.md).
   saved). A 409 means the file changed outside the editor: autosave pauses and a dialog offers *Load theirs*
   (undoable) or *Keep mine* (`X-Force: 1`).
 - **Autosave** (default 60 s) waits for 2 s without edits.
+- **Leaving:** `project.unsaved` (story dirty, .tuna out of date, upload / save running) drives the `beforeunload`
+  prompt, the • in the title and `project.leave()` → *Save changes?* (Save / Don't save / Cancel) before any
+  navigation inside the studio. Navigate with `project.go()` (sets `editor.leaving`, so the prompt doesn't fire twice).
 - **Without the dev server:** the File System Access picker, or else a download.
 
 ## Adding an editor feature: checklist

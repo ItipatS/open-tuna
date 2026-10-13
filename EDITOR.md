@@ -279,6 +279,7 @@ Once the site is handed over, the customer only edits the CMS. Design the parts 
 |---|---|
 | **Save** | **Ctrl+S** (or Save). Writes `story.json`. The top bar says *Saved 3:15 PM* or *Unsaved changes*. |
 | **Changed elsewhere** | If `story.json` changed on disk since you opened the editor (Claude edited it, a git pull, another tab), saving is paused and you're asked: **Load theirs** (your version stays in undo) or **Keep mine**. Nothing gets overwritten silently. |
+| **Leaving with unsaved work** | A **•** in the tab title means unsaved changes. Closing or reloading the tab asks *“Leave site?”*. Going Home / opening another project asks **Save changes?** — *Save*, *Don’t save* (your edits stay in the studio’s copy of the project, only the .tuna file isn’t updated) or *Cancel*. |
 | **Autosave** | On by default (every minute, after you stop editing for 2 s). Change it in File ▸ Autosave. |
 | **Previous versions** | Every save keeps the version it replaced (last 100) in `saves/auto/`. |
 | **Checkpoints** | **Ctrl+Shift+S** saves a *named* copy ("before new ending"). Kept until you delete them. They're included when you commit. |
