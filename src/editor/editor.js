@@ -24,6 +24,7 @@ import { ProjectFiles } from './project.js';
 import { ModelThumbs } from './thumbs.js';
 import { SiteBuilder } from './build.js';
 import { PROJECT } from '../project.js';
+import { listPaths } from '../data.js';
 import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime, migrate } from '../timeline.js';
 
@@ -39,6 +40,7 @@ export class Editor {
     this.app = app;
     this.tl = app.timeline;
     this.story = app.story;
+    this.story.authored = true; // the playhead is story time: stretch regions show one cycle (story.previewItem)
     this.time = 0; // playhead (s)
     this.playing = false;
     this.playFrom = 0;
@@ -417,6 +419,8 @@ export class Editor {
       ...Object.entries(DRIVERS).map(([k, v]) => ({ label: `Clip: ${v}`, disabled: used.has(k), onClick: () => this.addTrack(`clip:${k}`) })),
       '-',
       ...Object.entries(ACTORS).map(([k, v]) => ({ label: `Path: move the ${v.toLowerCase()}`, onClick: () => this.addTrack(`path:${k}`) })),
+      '-',
+      { label: 'Stretch: repeat a scene for each CMS item', onClick: () => this.addTrack('stretch:') },
       ...(this.tl.tracks.some((t) => t.type === 'camera') ? [] : ['-', { label: 'Camera', onClick: () => this.addTrack('camera:') }]),
       ...(this.tl.tracks.some((t) => t.type === 'captions') ? [] : [{ label: 'Captions', onClick: () => this.addTrack('captions:') }]),
     ];
@@ -996,6 +1000,10 @@ export class Editor {
       t = { id: `path-${bind}-${Date.now().toString(36)}`, type, label: `${ACTORS[bind]} path`, bind, lane: this.defaultLane('path', 'Creatures').id, a: t0, b: r4(Math.min(this.duration, t0 + 20)), blend: 2,
         keys: [{ t: t0, pos: p.map((v) => +v.toFixed(2)) }, { t: t1, pos: p.map((v, i) => +(v + f[i] * 25).toFixed(2)) }] };
       this.toast(`${ACTORS[bind]} path added — move its waypoints in the Scene view (1), or press K there to add one where you look`);
+    } else if (type === 'stretch') {
+      const list = listPaths(this.app.data)[0] ?? listPaths({ values: Object.fromEntries((this.tl.data.sources ?? []).map((q) => [q.id, q.sample])) })[0] ?? '';
+      t = { id: `stretch-${Date.now().toString(36)}`, type, label: 'Repeat per item', list, a: t0, b: r4(Math.min(this.duration, t0 + 8)), min: 0, max: 50 };
+      this.toast(list ? `Repeats once per item of ${list} on the site — design ONE item inside it with {{item.…}} bindings` : 'Connect a data source (Data tab) with a list, then pick it in the Inspector', !list, 6000);
     } else if (type === 'captions') {
       t = this.captionsTrack();
       this.commit();
@@ -1129,7 +1137,7 @@ export class Editor {
     for (const t of tracks) {
       if (t.keys) keys.push(...t.keys.map((k) => k.t));
       if (t.clips) for (const c of t.clips) keys.push(c.a, c.b);
-      if (t.type === 'clip') keys.push(t.a, t.b);
+      if (t.type === 'clip' || t.type === 'stretch') keys.push(t.a, t.b);
     }
     if (!this.sel?.track) for (const c of this.tl.data.chapters) keys.push(c.t);
     keys.sort((a, b) => a - b);
@@ -1304,6 +1312,8 @@ export class Editor {
     const lay = this.lt.reference(x);
     if (lay) lines.push(lay);
     const notes = d.notes.filter((n) => Math.abs(n.t - x) < 3 && n.text);
+    const reg = tl.regionAt(x);
+    if (reg) lines.push(`inside stretch "${reg.t.label}" (${reg.t.a}–${reg.t.b} s, repeats per item of ${reg.t.list}: ${reg.n} items now → site +${((reg.n - 1) * reg.per).toFixed(1)} s); previewing item ${this.story.item + 1}`);
     const srcs = d.sources ?? [];
     if (srcs.length) lines.push(`data sources: ${srcs.map((q) => `${q.id} (${q.url || 'sample only'}; ${this.app.data.status[q.id]?.state ?? '?'})`).join(' · ')}`);
     if (notes.length) lines.push(`notes nearby: ${notes.map((n) => `t ${n.t}: "${n.text}"`).join(' · ')}`);
@@ -1326,7 +1336,8 @@ export class Editor {
     }
   }
 
-  openSite() { window.open(`./?${PROJECT ? `project=${PROJECT}&` : ''}t=${this.time.toFixed(2)}`, '_blank'); }
+  // the site's time for this moment (stretch regions: the previewed item's cycle)
+  openSite() { window.open(`./?${PROJECT ? `project=${PROJECT}&` : ''}t=${this.tl.warp(this.time, this.story.previewItem).toFixed(2)}`, '_blank'); }
 
   // window title + the project button in the top bar
   syncTitle() {

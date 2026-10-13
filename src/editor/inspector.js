@@ -6,7 +6,7 @@ import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime } from '../timeline.js';
 import { isGPU, REVEALS } from '../layers.js';
 import { LOOKS } from './layer-tools.js';
-import { hasBinding } from '../data.js';
+import { hasBinding, listPaths } from '../data.js';
 import { assetURL } from '../project.js';
 
 export class Inspector {
@@ -44,6 +44,7 @@ export class Inspector {
       if (s.track.type === 'group' || s.track.type === 'lane') this.container(el, s.track);
       else if (s.track.type === 'layer') this.layer(el, s.track);
       else if (s.track.type === 'path') this.path(el, s.track);
+      else if (s.track.type === 'stretch') this.stretch(el, s.track);
       else this.track(el, s.track);
     }
     else if (s.kind === 'key') {
@@ -231,12 +232,18 @@ export class Inspector {
       const a = ed.assets.items.find((x) => x.file === t.src) ?? { file: t.src };
       el.append(h('div', { class: 'ed-preview', title: 'Hover to turn it around' }, ed.thumbs.spin(a)));
     }
-    if (t.kind === 'html') el.append(this.text('HTML', () => t.html, (v) => { t.html = v; }, { area: true, placeholder: '<h2>Title</h2><p>Text</p> — any HTML; style with inline CSS' }));
+    if (t.kind === 'html') {
+      el.append(this.text('HTML', () => t.html, (v) => { t.html = v; }, { area: true, placeholder: '<h2>Title</h2><p>Text</p> — any HTML; style with inline CSS' }));
+      el.append(this.check('Shrink to fit', () => t.shrink, (v) => { if (v) { t.shrink = true; t.h ??= 40; } else delete t.shrink; }));
+      el.append(h('div', { class: 'hint' }, 'A list from the CMS: {{#each partners.items}}<li>{{name}}</li>{{/each}} repeats the inside for every item. Shrink to fit scales the content down when it outgrows the box (set a Height).'));
+    }
     else if (t.kind === 'text') {
       el.append(this.text('Small line', () => t.kicker, (v) => { t.kicker = v; }, { placeholder: 'e.g. CHAPTER II' }));
       el.append(this.text('Headline', () => t.title, (v) => { t.title = v; }, { area: true, placeholder: 'Line breaks are kept' }));
       el.append(this.text('Body', () => t.body, (v) => { t.body = v; }, { area: true, placeholder: 'optional paragraph' }));
       el.append(this.num('Headline size', () => t.size ?? 180, (v) => { t.size = Math.round(v); }, { step: 5, min: 40, max: 600, dec: 0, live: false }));
+      el.append(this.num('Max lines', () => t.maxLines ?? 0, (v) => { if (v > 0) t.maxLines = Math.round(v); else delete t.maxLines; }, { step: 1, min: 0, max: 12, dec: 0, live: false }));
+      el.append(h('div', { class: 'hint' }, 'Max lines: a longer headline (e.g. a long name from the CMS) gets smaller instead of wrapping onto more lines. 0 = off.'));
       el.append(this.select('Align', { center: 'Centre', left: 'Left', right: 'Right' }, () => t.align || 'center', (v) => { t.align = v; }));
       el.append(this.text('Colour', () => t.color ?? '#f4fbff', (v) => { t.color = v; }, { placeholder: '#f4fbff' }));
     } else if (t.kind !== 'glass') el.append(this.text(t.kind === 'iframe' ? 'Page URL' : 'File / URL', () => t.src, (v) => { t.src = v; }));
@@ -389,6 +396,71 @@ export class Inspector {
     this.sec(el, 'Path');
     el.append(this.placement(t));
     this.buttons(el, btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete path', () => ed.deleteSelection(), { cls: 'danger' }));
+  }
+
+  // a stretch region: [a, b] plays once per item of a CMS list on the site
+  stretch(el, t) {
+    const { ed } = this, tl = ed.tl, story = ed.story;
+    const per = t.b - t.a;
+    this.header(el, t.label || 'Repeat per item', `stretch · ${fmtTime(t.a)} → ${fmtTime(t.b)} · one cycle = ${per.toFixed(1)} s`);
+    el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
+    const lists = listPaths(ed.app.data);
+    if (t.list && !lists.includes(t.list)) lists.unshift(t.list);
+    el.append(this.select('Repeat for each', Object.fromEntries([['', '— pick a data list —'], ...lists.map((p) => [p, p])]), () => t.list ?? '', (v) => { t.list = v; }));
+    el.append(this.readout('Items now', () => {
+      const q = tl.regions?.find((x) => x.t === t), m = q?.n ?? 1, src = ed.app.data.status[(t.list || '').split(/[.[]/)[0]]?.state ?? 'no source';
+      return `${m} (${src}) → ${m === 0 ? 'skipped on the site' : `${fmtTime(m * per, 0)} on the site (+${fmtTime((m - 1) * per, 0)})`}`;
+    }));
+    el.append(this.num('Min items', () => t.min ?? 0, (v) => { t.min = Math.max(0, Math.round(v)); }, { step: 1, min: 0, max: 500, dec: 0, live: false }));
+    el.append(this.num('Max items', () => t.max ?? 50, (v) => { t.max = Math.max(1, Math.round(v)); }, { step: 1, min: 1, max: 500, dec: 0, live: false }));
+    el.append(h('div', { class: 'hint' }, 'Min 0: with an empty list the whole scene is skipped. Max keeps a huge CMS list from making the site endless.'));
+    this.sec(el, 'Cycle (one item)');
+    el.append(this.time('Start', () => t.a, (v) => { t.a = Math.min(v, t.b - 0.5); }));
+    el.append(this.time('End', () => t.b, (v) => { t.b = Math.max(v, t.a + 0.5); }));
+    const count = () => tl.regions?.find((q) => q.t === t)?.n ?? 1;
+    const prev = h('span');
+    const show = () => { prev.textContent = `${Math.min(count(), story.previewItem + 1)} / ${count()}`; };
+    show();
+    this.binds.push(show);
+    const go = (d) => { story.previewItem = Math.max(0, Math.min(count() - 1, story.previewItem + d)); show(); if (ed.time < t.a || ed.time >= t.b) ed.setTime(t.a); };
+    el.append(this.row('Preview item', h('span', { class: 'pv' }, this.free(btn('◀', () => go(-1))), prev, this.free(btn('▶', () => go(1))))));
+    el.append(h('div', { class: 'hint' }, 'Design ONE item inside the cycle: layers, captions and camera moves. Bindings: {{item.name}} (any field of the item), {{item.number}} (1, 2, 3…), {{item.count}}. On the site the cycle plays once per item and everything after it moves later; the page gets longer by itself when the CMS adds items. The editor shows one cycle with the item chosen above.'));
+    // checks: things that would jump at every new item
+    const out = { pos: [0, 0, 0], look: [0, 0, 0] }, out2 = { pos: [0, 0, 0], look: [0, 0, 0] };
+    const issues = [];
+    if (tl.camera(t.a, out) && tl.camera(t.b, out2)) {
+      const d = Math.hypot(...out.pos.map((v, i) => v - out2.pos[i])) + Math.hypot(...out.look.map((v, i) => v - out2.look[i]));
+      if (d > 0.05) issues.push(['camera', `The camera ends ${d.toFixed(1)} m away from where it starts, so it jumps at every new item.`]);
+    }
+    for (const c of tl.tracks) {
+      if (c.type !== 'curve' || tl.muted(c)) continue;
+      const v0 = tl.param(c.bind, t.a, 0), v1 = tl.param(c.bind, t.b, 0);
+      if (Math.abs(v0 - v1) > 1e-3 * Math.max(1, Math.abs(v0))) issues.push(['curve', `“${c.label}” goes ${+v0.toFixed(2)} → ${+v1.toFixed(2)}: it snaps back at every new item.`]);
+    }
+    this.sec(el, issues.length ? `Seams (${issues.length})` : 'Seams');
+    if (!issues.length) el.append(h('div', { class: 'hint ok' }, 'The cycle loops cleanly: camera and curves end where they start.'));
+    for (const [kind, msg] of issues) el.append(h('div', { class: 'hint warn' }, msg));
+    if (issues.some(([k]) => k === 'camera')) this.buttons(el, btn('Close the camera loop', () => this.closeLoop(t), { title: 'Adds / sets camera keys at the cycle start and end to the same shot' }));
+    this.sec(el, 'Track');
+    el.append(this.placement(t));
+    this.buttons(el, btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
+  }
+
+  // camera keys at the cycle start and end = the shot at the start, so the cycle repeats without a jump
+  closeLoop(t) {
+    const { ed } = this, tl = ed.tl, cam = tl.ofType('camera');
+    if (!cam) return ed.toast('There is no camera track', true);
+    if (tl.lockedTrack(cam)) return ed.toast('The camera track is locked', true);
+    const k = { pos: [0, 0, 0], look: [0, 0, 0] };
+    tl.camera(t.a, k);
+    const pose = { pos: k.pos.map((v) => +v.toFixed(3)), look: k.look.map((v) => +v.toFixed(3)), fov: +k.fov.toFixed(2), follow: +k.follow.toFixed(3) };
+    for (const time of [t.a, t.b]) {
+      const key = cam.keys.find((q) => Math.abs(q.t - time) < 1e-3);
+      if (key?.locked) return ed.toast(`The camera key at ${fmtTime(time)} is locked`, true);
+      if (key) Object.assign(key, pose); else cam.keys.push({ t: time, ...structuredClone(pose) });
+    }
+    ed.commit();
+    ed.toast('Camera loop closed — the cycle ends on the shot it starts with');
   }
 
   pathKey(el, t, k) {

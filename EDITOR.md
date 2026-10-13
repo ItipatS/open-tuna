@@ -251,6 +251,23 @@ site then updates when the CMS changes, without rebuilding.
 allow requests from your site (ask its admin about **CORS**). Anything in *Headers* is visible to every visitor:
 only use public, read-only keys.
 
+### Scenes that grow with the CMS (after handoff)
+
+Once the site is handed over, the customer only edits the CMS. Design the parts that should grow with it:
+
+- **A scene per product / partner:** *+ Track ▸ Stretch: repeat a scene for each CMS item*. Pick the list in the
+  Inspector (*Repeat for each*). Then design **one** item inside the amber block: text with `{{item.name}}`, a
+  picture with `{{item.image}}`, captions, a camera move. On the website that block plays once per item. Add a
+  product in the CMS and the scene and the page get longer by themselves; with no items the scene is skipped.
+  - ◀ ▶ *Preview item* shows each item in the editor (try the longest name!).
+  - *Seams* warns about anything that would jump when the next item starts (the camera, the sun…). *Close the
+    camera loop* makes the camera end on the shot it starts with.
+  - `{{item.number}} / {{item.count}}` gives "2 / 5".
+- **A list in one element:** in an HTML layer, `{{#each partners.items}}<li>{{name}}</li>{{/each}}` writes one
+  line per partner. Tick **Shrink to fit** (with a Height) so a longer list scales down instead of spilling out.
+- **Long names:** set **Max lines** on a text layer: a longer headline gets smaller instead of wrapping onto more
+  lines.
+
 ## Saving: you can't really lose work
 
 | What | How |

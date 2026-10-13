@@ -85,9 +85,22 @@ export class Story {
     this.look = new THREE.Vector3(); // where the shot camera looks
     this.k = { pos: [0, 0, 0], look: [0, 0, 0], follow: 0, fov: 50, drift: 1 };
     this.p = 0; // scroll progress 0..1
-    this.x = 0; // story time (s) = p · duration
+    this.x = 0; // story time (s)
+    this.xr = 0; // site time (s) = p · realDuration (longer than the story when stretch regions repeat per item)
     this.forceP = null; // editor / tests: pin progress (no smoothing)
+    this.authored = false; // editor: p is story progress (one cycle per stretch region), showing item `previewItem`
+    this.previewItem = 0;
+    this.countKey = '';
+    this.syncCounts();
     this.capVersion = -1;
+  }
+
+  // stretch regions: how many items each list has now (live CMS / sample) -> the site's real length
+  syncCounts() {
+    const tl = this.timeline, ck = `${tl.version}|${this.data?.version ?? 0}`;
+    if (ck === this.countKey) return;
+    this.countKey = ck;
+    tl.setCounts((t) => Math.min(t.max ?? 50, Math.max(t.min ?? 0, this.data ? this.data.count(t.list) : 1)));
   }
 
   target() {
@@ -107,7 +120,21 @@ export class Story {
   evaluate(p, t) {
     const { tuna, timeline: tl, apply, cam, look, k } = this;
     const tu = this.tentacles.userData;
-    const x = this.x = p * tl.duration;
+    this.syncCounts();
+    let x, region = null, item = 0;
+    if (this.authored) {
+      x = p * tl.duration;
+      region = tl.regionAt(x);
+      item = region ? Math.max(0, Math.min(this.previewItem, region.n - 1)) : 0;
+      this.xr = tl.warp(x, item);
+    } else {
+      this.xr = p * tl.realDuration;
+      ({ x, region, k: item } = tl.unwarp(this.xr));
+    }
+    this.x = x;
+    this.region = region;
+    this.item = item;
+    this.data?.setItem(region ? { list: region.t.list, k: item, n: region.n } : null);
 
     // sun + post / sea parameters (curves or constants)
     apply.sun(tl.param('sun.elevation', x, PARAMS['sun.elevation'].def), THREE.MathUtils.degToRad(tl.param('sun.azimuth', x, PARAMS['sun.azimuth'].def)));

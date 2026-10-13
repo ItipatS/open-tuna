@@ -28,7 +28,8 @@ lab-only school goal · predators (sharks update → tuna.setPredator, scaled by
 humpPath / bluePath / turtles step · animation mixers
 editor.preUpdate(rdt)                          (playhead → story.forceP; site-play scroll / auto-play)
 syncData()                                     (timeline changed → DataHub.sync(sources): refetch what changed)
-story.update(dt, t)                            → camera pose, sun, params, school goal, water 50, leap gates,
+story.update(dt, t)                            → site time xr = p·realDuration → unwarp → story time x + stretch item
+                                                 (DataHub.setItem: {{item…}}), then camera pose, sun, params, school goal, water 50, leap gates,
                                                  creature paths (override what the creatures did above), captions
 render camera ← story.cam  (unless the editor's Scene view: orbit / fly camera)
 seabed / waterline clamps (the waterline band pushes the camera *through* the surface)

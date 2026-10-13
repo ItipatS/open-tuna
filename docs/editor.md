@@ -44,7 +44,9 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 
 ## Time and play
 
-- **Playhead:** `editor.time` (s). Every frame `story.forceP = time / duration` (no smoothing).
+- **Playhead:** `editor.time` (s), always **story time**. Every frame `story.forceP = time / duration` (no
+  smoothing), with `story.authored = true`: stretch regions show one cycle, for item `story.previewItem` (the
+  stretch inspector's ◀ ▶). *Open site* converts with `tl.warp(time, previewItem)`.
 - **Play (`playMode 'site'`):** wheel, keys, page drag or the scrollbar move `scrollT`. The px → s conversion uses
   the site's real page length: `(duration·scrollPerSecond − 100) vh`. `time` eases toward `scrollT` with the site's
   smoothing, and `layers.editing = false`, so clickable layers work.

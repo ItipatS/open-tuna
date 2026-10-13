@@ -100,5 +100,17 @@ the JSON as a tree; clicking a value copies its binding or puts it into the sele
 *Save the current data as the sample* snapshots the live response. The inspector shows what each bound field
 resolves to right now. Renaming a source rewrites the bindings that use it.
 
+### After handoff: content that grows with the CMS
+
+Once the site is handed over, the customer only edits the CMS. The design decides **where** content can grow:
+- **A scene per item:** a `stretch` region (story-format.md). Adding a product in the CMS adds one more cycle of
+  that scene, and the site and the page get longer. Removing all items skips the scene.
+- **An element that lists items:** an HTML layer with `{{#each partners.items}}…{{/each}}` plus *Shrink to fit*.
+- **Text that can get long:** *Max lines* on headlines, fallbacks (`| …`) on every binding.
+
+Nothing at runtime needs the dev team or an AI: counts come from the data the site already fetches. Test a design
+the way the customer will break it: preview the first, longest and last items (◀ ▶ in the stretch inspector), and
+check an empty list, a very long name and a missing image.
+
 Not done yet (ideas): repeating a layer per array item (product cards from a list), images from a CMS in GPU layers
 needing CORS on the image CDN (DOM layers don't), and secrets through a proxy.

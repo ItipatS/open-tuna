@@ -13,8 +13,8 @@ const SUB = 24; // height of one clip row inside a lane
 const THIN = 14; // a collapsed row
 const INDENT = 12;
 const PERF_H = 34;
-const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', layer: '#f78fb3', path: '#7be3d0', lane: '#b49cff', group: '#9aa4b2', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f' };
-const TYPE = { camera: 'CAM', captions: 'TXT', curve: 'CRV', clip: 'CLIP', layer: 'LYR', path: 'PATH', lane: 'LANE', group: '' };
+const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', stretch: '#ffb86b', layer: '#f78fb3', path: '#7be3d0', lane: '#b49cff', group: '#9aa4b2', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f' };
+const TYPE = { camera: 'CAM', captions: 'TXT', curve: 'CRV', clip: 'CLIP', stretch: 'REP', layer: 'LYR', path: 'PATH', lane: 'LANE', group: '' };
 const BAR = new Set(['layer', 'path']); // tracks drawn as one bar with keys inside (the keys move with the bar)
 const KIND = { image: 'IMG', video: 'VID', html: 'HTML', iframe: 'WEB' };
 const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
@@ -192,6 +192,7 @@ export class TimelineView {
       } else if (r.t.type === 'camera') this.drawKeys(r.t, y, r.h);
       else if (r.t.type === 'curve') this.drawCurve(r.t, y, r.h);
       else if (r.t.type === 'clip') this.drawClip(r.t, y, r.h);
+      else if (r.t.type === 'stretch') this.drawStretch(r.t, y, r.h);
       else if (r.t.type === 'captions') this.drawCaptions(r.t, y, r.h);
       else if (BAR.has(r.t.type)) this.drawLayer(r.t, y, r.h);
       ctx.restore();
@@ -362,6 +363,18 @@ export class TimelineView {
     if (x1 - x0 > 40) ctx.fillText(this.ellipsis(label, Math.min(x1, this.W) - Math.max(x0, HEAD) - 12), Math.max(x0, HEAD) + 6, y + hgt / 2);
   }
 
+  // a stretch region: one designed cycle, repeated once per CMS item on the site
+  drawStretch(t, y, hgt) {
+    const { ctx, ed } = this, c = COL.stretch;
+    const x0 = this.X(t.a), x1 = this.X(t.b), cy = y + hgt / 2;
+    const selected = ed.sel?.kind === 'track' && ed.sel.track === t;
+    this.bar(x0, x1, y + 4, hgt - 8, c, selected, t.locked);
+    const r = ed.tl.regions?.find((q) => q.t === t), n = r?.n ?? 1, per = t.b - t.a;
+    ctx.fillStyle = '#ffe2c2';
+    const label = `↻ ${t.label || 'Repeat per item'} · ${t.list || 'no list'} · ×${n} → ${n === 0 ? 'skipped on the site' : n === 1 ? 'once' : `+${fmtTime((n - 1) * per, 0)} on the site`} · item ${Math.min(n, ed.story.previewItem + 1)}/${n}`;
+    if (x1 - x0 > 40) ctx.fillText(this.ellipsis(label, Math.min(x1, this.W) - Math.max(x0, HEAD) - 12), Math.max(x0, HEAD) + 6, cy);
+  }
+
   drawCaptions(t, y, hgt) {
     const { ctx, ed } = this, c = COL.captions;
     for (const cl of t.clips) {
@@ -445,6 +458,14 @@ export class TimelineView {
       const x = this.X(t);
       ctx.fillRect(x, RULER - 11, 1, 10);
       if (this.X(D) - x > 64 || t === 0) ctx.fillText(fmtTime(t, dec), x + 3, CH + 10); // leave room for the END flag
+    }
+    // stretch regions: an amber strip on the ruler (this part repeats per CMS item)
+    for (const st of tl.tracks) {
+      if (st.type !== 'stretch' || tl.muted(st)) continue;
+      const x0 = this.X(st.a), x1 = this.X(st.b);
+      if (x1 < HEAD || x0 > W) continue;
+      ctx.fillStyle = 'rgba(255,184,107,0.35)';
+      ctx.fillRect(x0, RULER - 4, x1 - x0, 3);
     }
     // outside the story
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -542,7 +563,7 @@ export class TimelineView {
       for (const k of t.keys) { const d = Math.abs(this.X(k.t) - x); if (d < bd) { bd = d; best = k; } }
       if (best) return { type: 'key', track: t, item: best };
     }
-    if (t.type === 'clip' || BAR.has(t.type)) {
+    if (t.type === 'clip' || t.type === 'stretch' || BAR.has(t.type)) {
       const x0 = this.X(t.a), x1 = this.X(t.b);
       if (Math.abs(x - x0) < 6) return { type: 'edgeA', track: t, item: t };
       if (Math.abs(x - x1) < 6) return { type: 'edgeB', track: t, item: t };
@@ -569,7 +590,7 @@ export class TimelineView {
     for (const n of tl.data.notes) if (n !== self) cand.push(n.t);
     for (const tr of tl.tracks) {
       if (tr.keys) for (const k of tr.keys) if (k !== self) cand.push(k.t);
-      if ((tr.type === 'clip' || BAR.has(tr.type)) && tr !== self) cand.push(tr.a, tr.b);
+      if ((tr.type === 'clip' || tr.type === 'stretch' || BAR.has(tr.type)) && tr !== self) cand.push(tr.a, tr.b);
       if (tr.clips) for (const c of tr.clips) if (c !== self) cand.push(c.a, c.b);
     }
     let best = null, bd = 7 / this.k;

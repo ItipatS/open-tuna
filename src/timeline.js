@@ -1,6 +1,7 @@
 // The story timeline: the data model behind story.json, shared by the site (scroll / play) and the
 // editor (?edit). The whole story is a pure function of the story time `x` (seconds, 0..meta.duration).
-// On the site, scroll progress p (0..1) maps to x = p · duration.
+// On the site, scroll progress p (0..1) maps to x = p · duration — unless `stretch` tracks repeat part of the story
+// once per item of a CMS list: then the site is longer (realDuration) and unwarp() maps site time -> story time.
 //
 // story.json (version 2):
 //   meta      { title, duration (s), scrollPerSecond (vh of page per second of story) }
@@ -21,6 +22,9 @@
 //     path      a creature follows keyed waypoints while the clip [a, b] is on: { bind (actor: school, bluewhale,
 //               humpback, shark1, shark2, turtle1, turtle2), a, b, blend (s to ease in / out), keys: [{ t, pos[3] }] }
 //               (Hermite through the waypoints; the creature faces along the path)
+//     stretch   { a, b, list: "products.items", min, max }: on the site [a, b] plays once per item of that data list
+//               (n = list length clamped to min..max; 0 skips it), everything after it moves later and the page grows.
+//               Inside it {{item.…}} bindings show the current item. The editor shows one cycle (story time).
 //   group     a folder of tracks in the editor: { id, label, collapsed }; tracks join it with `parent: <group id>`
 //   lane      an editor row that holds several layer / path clips (like a video-editor track): { id, label };
 //             layer / path tracks join it with `lane: <lane id>` and are drawn inside it instead of on their own row
@@ -182,10 +186,57 @@ export class Timeline {
     for (const t of d.tracks) {
       if (t.keys) for (const k of t.keys) e = Math.max(e, k.t);
       if (t.clips) for (const c of t.clips) e = Math.max(e, Math.min(c.b, c.a + 0.5));
-      if (t.type === 'clip' || t.type === 'layer' || t.type === 'path') e = Math.max(e, Math.min(t.b, t.a + 0.5));
+      if (t.type === 'clip' || t.type === 'layer' || t.type === 'path' || t.type === 'stretch') e = Math.max(e, Math.min(t.b, t.a + 0.5));
     }
     return e;
   }
+
+  // ---------------------------------------------------------------- data stretch
+  // stretch regions in order (overlapping ones after the first are ignored)
+  stretches() {
+    const out = [];
+    let end = -Infinity;
+    for (const t of this.data.tracks.filter((q) => q.type === 'stretch' && !this.muted(q) && q.b > q.a).sort((p, q) => p.a - q.a)) {
+      if (t.a < end - 1e-9) continue;
+      out.push(t);
+      end = t.b;
+    }
+    return out;
+  }
+
+  // countOf(track) -> items in its list; sets `regions` and `realDuration` (the site's length)
+  setCounts(countOf) {
+    this.regions = this.stretches().map((t) => ({ t, a: t.a, per: t.b - t.a, n: Math.max(0, Math.round(countOf(t))) }));
+    this.realDuration = this.duration + this.regions.reduce((s, r) => s + (r.n - 1) * r.per, 0);
+  }
+
+  // site time -> { x: story time, region, k: item index }
+  unwarp(xr) {
+    let shift = 0;
+    for (const r of this.regions ?? []) {
+      const s = r.a + shift, len = r.n * r.per;
+      if (xr < s) break;
+      if (xr < s + len) {
+        const k = Math.min(r.n - 1, Math.floor((xr - s) / r.per));
+        return { x: r.a + (xr - s - k * r.per), region: r, k };
+      }
+      shift += len - r.per;
+    }
+    return { x: xr - shift, region: null, k: 0 };
+  }
+
+  // story time (+ item k inside a region) -> site time
+  warp(x, k = 0) {
+    let shift = 0;
+    for (const r of this.regions ?? []) {
+      if (x < r.a) break;
+      if (x < r.a + r.per) return r.n ? r.a + shift + Math.min(k, r.n - 1) * r.per + (x - r.a) : r.a + shift;
+      shift += (r.n - 1) * r.per;
+    }
+    return x + shift;
+  }
+
+  regionAt(x) { return (this.regions ?? []).find((r) => x >= r.a && x < r.a + r.per) ?? null; }
 
   // clip driver value (0 when there is no such track or it is muted)
   clip(bind, x) {

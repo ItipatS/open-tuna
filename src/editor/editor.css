@@ -288,3 +288,9 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 .ed-build .fl div { display: flex; justify-content: space-between; gap: 10px; }
 .ed-build .fl small { color: var(--dim); }
 .ed-build .acts { display: flex; gap: 8px; margin-top: 12px; }
+
+/* ---- stretch inspector */
+.ins .hint.warn { color: var(--warn); }
+.ins .hint.ok { color: var(--good); }
+.ins .pv { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.ins .pv .ed-btn { height: 22px; padding: 0 8px; }

@@ -93,6 +93,12 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
   - **Live data sources** (API / CMS JSON, with a saved sample as the fallback) bind into layers and captions with
     `{{bindings}}` (Data tab).
   - **Turntable previews** of every 3D model in the Assets tab and the inspector.
+  - **Content that grows with the CMS after handoff.** `stretch` regions repeat a designed scene once per CMS item;
+    the site and the page get longer, and an empty list skips the scene. There are also `{{#each}}` lists in HTML
+    elements, plus auto-fit (*Max lines* on text, *Shrink to fit* on HTML).
+    - Tested: adding a product to the data took the site from 166 s to 174 s, with nobody touching the editor.
+    - Still to do: an owner / CTO decision on what's contractually customer-editable; a "travel along the route
+      per item" camera mode (today a cycle must loop back to where it started).
 
   Details: docs/projects-build-data.md.
 - **Docs restructured for AI agents**: CLAUDE.md is now a short index → `docs/` (ai-workflows, story-format,

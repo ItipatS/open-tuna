@@ -128,6 +128,25 @@ Media / text / glass / GUI / 3D model clips. Rendered by `src/layers.js`.
 All numeric and array key fields are interpolated (`evalKeys`). A layer with one key just sits still. The editor's
 parallax preset writes two linear keys (start / end).
 
+### stretch (a scene that grows with the CMS)
+
+```jsonc
+{ "id": "stretch-…", "type": "stretch", "label": "Products", "list": "cms.products", "a": 60, "b": 68, "min": 0, "max": 50 }
+```
+`[a, b]` is **one cycle**, designed for one item. On the site it plays once per item of `list` (n = list length,
+clamped to `min..max`; a value that isn't a list counts as 1; n = 0 skips the scene). Everything after `b` moves
+later by `(n − 1)·(b − a)`, and the page height follows (`tl.realDuration`). Inside, `{{item.<field>}}`,
+`{{item.number}}` (1-based), `{{item.index}}` and `{{item.count}}` show the current item.
+
+Everything inside the cycle repeats: camera, curves, clips, captions and layers. Anything that doesn't end where it
+starts jumps at each new item, so the editor's Seams check lists it, and *Close the camera loop* fixes the camera.
+Regions don't overlap (later overlapping ones are ignored). Code: `Timeline.setCounts / unwarp / warp / regionAt`
+(timeline.js), `Story.syncCounts` and evaluate (story.js).
+
+**Site time vs story time.** `story.json` times are always story time. The site runs on site time
+`xr = p · realDuration`, and `unwarp(xr)` gives `{ x, region, k }`. `?t=` on the site is site time. The editor works
+in story time (`story.authored = true`) and previews item `story.previewItem`.
+
 ### group / lane (editor organisation)
 ```json
 { "id": "group-demo", "type": "group", "label": "Demo — The Journey", "collapsed": false },
@@ -145,7 +164,11 @@ copy, shown first and kept if the fetch fails. `headers` are public (read-only t
 
 Text fields can bind to them: `{{id.path}}` or `{{id.path | fallback}}`, with a path of `.key` / `[index]` parts,
 e.g. `{{products.items[0].name | Coming soon}}`. This is resolved in layer `title`, `kicker`, `body`, `html`, `src`
-and caption `title`, `sub`. Details: [projects-build-data.md](projects-build-data.md).
+and caption `title`, `sub`. `{{item.…}}` = the current item of a stretch region. In HTML, `{{#each list}}…{{/each}}`
+repeats its inside per element (`{{field}}`, `{{this}}`, `{{@number}}`); values are HTML-escaped there.
+
+Auto-fit for CMS content: text layers `maxLines` (the headline shrinks down to 35 % instead of wrapping past it);
+HTML layers `shrink: true` (with `h`: content that outgrows the box is scaled down with CSS `zoom`). Details: [projects-build-data.md](projects-build-data.md).
 
 ## The current story (approximate; the file is the truth)
 

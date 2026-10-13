@@ -416,7 +416,15 @@ async function main() {
   const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions'), actors, data });
   const layers = story ? new Layers({ timeline, root: $('captions'), scene, data }) : null; // images / video / HTML / iframes
   // page length grows with the story (meta.scrollPerSecond vh per second of story)
-  const fitScroll = () => { if (story) $('scrollspace').style.height = `${Math.round(timeline.duration * timeline.meta.scrollPerSecond)}vh`; };
+  // (realDuration: stretch regions repeated once per CMS item make the site longer than the story)
+  let scrollFor = -1;
+  const fitScroll = () => {
+    if (!story) return;
+    const d = timeline.realDuration ?? timeline.duration;
+    if (d === scrollFor) return;
+    scrollFor = d;
+    $('scrollspace').style.height = `${Math.round(d * timeline.meta.scrollPerSecond)}vh`;
+  };
   fitScroll();
 
   let camTween = null;
@@ -548,7 +556,7 @@ async function main() {
   if (LAB && !params.has('free')) director.start();
   // ?t=42 (seconds) or ?p=0.7 (progress) opens the story at that point (the editor's "Open site" links here)
   if (story && !EDIT && (params.has('t') || params.has('p'))) {
-    const p0 = THREE.MathUtils.clamp(params.has('t') ? (+params.get('t') || 0) / timeline.duration : +params.get('p') || 0, 0, 1);
+    const p0 = THREE.MathUtils.clamp(params.has('t') ? (+params.get('t') || 0) / timeline.realDuration : +params.get('p') || 0, 0, 1);
     story.p = p0;
     scrollTo(0, p0 * (document.documentElement.scrollHeight - innerHeight));
   }
@@ -596,7 +604,7 @@ async function main() {
     // camera: the story's shot camera, the lab director, or a free orbit / fly camera
     if (editor) editor.preUpdate(rdt);
     syncData();
-    if (story) story.update(dt, t);
+    if (story) { story.update(dt, t); fitScroll(); }
     if (story && !editor?.sceneView) {
       camera.position.copy(story.cam.position);
       camera.quaternion.copy(story.cam.quaternion);

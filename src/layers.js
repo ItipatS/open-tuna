@@ -64,7 +64,16 @@ export function drawText(t) {
   const W = 2048, pad = 60, inner = W - pad * 2;
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
-  const size = t.size ?? 180;
+  let size = t.size ?? 180;
+  // "Max lines": a headline longer than that (a long CMS name) gets smaller until it fits, down to 35 %
+  if (t.maxLines > 0 && t.title) {
+    for (let i = 0; i < 24 && size > (t.size ?? 180) * 0.35; i++) {
+      g.font = `500 ${size}px "Cormorant Garamond", Georgia, serif`;
+      g.letterSpacing = '0px';
+      if (wrap(g, t.title, inner).length <= t.maxLines) break;
+      size *= 0.92;
+    }
+  }
   const parts = [];
   if (t.kicker) parts.push({ text: t.kicker.toUpperCase(), font: '600 46px Inter, system-ui, sans-serif', lh: 70, spacing: '18px', color: t.accent || '#9fe7ff', gap: 24 });
   if (t.title) parts.push({ text: t.title, font: `500 ${size}px "Cormorant Garamond", Georgia, serif`, lh: size * 1.02, spacing: '0px', color: t.color || '#f4fbff', gap: 30 });
@@ -195,9 +204,9 @@ export class Layers {
   }
 
   // a layer's content with {{bindings}} resolved and asset paths turned into URLs (what build() reads)
-  resolved(t) {
-    const R = (v) => (this.data ? this.data.resolve(v) : v);
-    const r = { ...t, src: assetURL(R(t.src)), html: fixHTML(R(t.html)) };
+  resolved(t, item) {
+    const R = (v, html) => (this.data ? this.data.resolve(v, { html, item }) : v);
+    const r = { ...t, src: assetURL(R(t.src)), html: fixHTML(R(t.html, true)) };
     if (t.kind === 'text') for (const f of ['kicker', 'title', 'body']) r[f] = R(t[f]);
     return r;
   }
@@ -210,7 +219,7 @@ export class Layers {
       seen.add(t0.id);
       const t = this.resolved(t0);
       const gpu = isGPU(t);
-      const text = t.kind === 'text' ? [t.kicker, t.title, t.body, t.size, t.align, t.color, t.accent, this.fontsReady].join('¦') : '';
+      const text = t.kind === 'text' ? [t.kicker, t.title, t.body, t.size, t.maxLines, t.align, t.color, t.accent, this.fontsReady].join('¦') : '';
       const sig = [t.kind, gpu, t.src, t.kind === 'html' ? t.html : '', (t.glass ?? 0) > 0, text, t.kind === 'model' ? `${!!t.flip}:${t.anim ?? ''}` : ''].join('|');
       let it = this.items.get(t.id);
       if (!it || it.sig !== sig) {
@@ -224,6 +233,21 @@ export class Layers {
     for (const [id, it] of this.items) if (!seen.has(id)) { this.dispose(it); this.items.delete(id); }
     this.version = this.tl.version;
     this.dataVersion = this.data?.version ?? 0;
+    this.preloadNext();
+  }
+
+  // inside a stretch region: warm the browser cache with the next item's pictures / videos, so they're ready
+  preloadNext() {
+    const it = this.data?.item;
+    if (!it || it.k + 1 >= it.n) return;
+    const next = this.data.itemFor(it.list, it.k + 1, it.n);
+    for (const t of this.tl.layers()) {
+      if (!/\{\{\s*item/.test(t.src ?? '') || !['image', 'video'].includes(t.kind)) continue;
+      const url = assetURL(this.data.resolve(t.src, { item: next }));
+      if (!url || this.preloaded?.has(url)) continue;
+      (this.preloaded ??= new Set()).add(url);
+      if (t.kind === 'image') { const im = new Image(); im.crossOrigin = 'anonymous'; im.src = url; } else fetch(url).catch(() => {});
+    }
   }
 
   media(t, forTexture) {
@@ -384,7 +408,19 @@ export class Layers {
       st.zIndex = String(Math.round(t.z ?? 5));
       st.pointerEvents = this.pickable || (t.interactive && !this.editing) ? 'auto' : 'none';
       if (t.fit && m.tagName !== 'DIV') m.style.objectFit = t.fit;
+      if (t.shrink && m.tagName === 'DIV') this.shrink(it);
     }
+  }
+
+  // "Shrink to fit": an HTML layer whose content (e.g. a CMS list) outgrows its box is scaled down to fit
+  shrink(it) {
+    const el = it.el, m = it.media;
+    const key = `${el.clientWidth}x${el.clientHeight}|${it.sig}`;
+    if (key === it.fitKey || !el.clientHeight) return;
+    it.fitKey = key;
+    m.style.zoom = 1;
+    const s = Math.min(1, el.clientHeight / Math.max(1, m.scrollHeight), el.clientWidth / Math.max(1, m.scrollWidth));
+    m.style.zoom = s < 0.999 ? s.toFixed(3) : '';
   }
 
   gpu(it, t, k, on, view, shot, speed) {
