@@ -102,7 +102,7 @@ export class SiteBuilder {
 
     for (const s of data.sources ?? []) {
       if (s.url && /^https?:/.test(s.url)) notes.push(`Data “${s.id}” loads live from ${new URL(s.url).host} — that API must allow requests from the site’s domain (CORS).`);
-      if (s.sample === undefined) notes.push(`Data “${s.id}” has no saved sample: if the API is down, its bindings show their fallback text.`);
+      if (s.sample === undefined && /^https?:/.test(s.url || '')) notes.push(`Data “${s.id}” has no saved sample: if the API is down, its bindings show their fallback text.`);
       if (s.headers) notes.push(`Data “${s.id}” sends headers — they are public in the built site.`);
     }
     const external = new Set((story.match(/https?:\/\/[^"'\s)\\]+/g) ?? []).filter((u) => !(data.sources ?? []).some((s) => s.url === u)).map((u) => new URL(u).host));

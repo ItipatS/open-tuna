@@ -94,6 +94,12 @@ JSON; a missing value or an empty string gives the fallback.
 A relative `url` is a file of the story (`assets/data.json`, through `assetURL`). Absolute URLs are fetched from the
 visitor's browser, so the API must send CORS headers for the site's domain.
 
+**Exports keep the data live.** The DataHub is part of the player, so a built site fetches its sources from the
+visitor's browser exactly like the editor does. Relative sources (`assets/data.json`) are bundled into the export.
+Verified: a blank project with a public JSON API and a stretch scene loaded live from a plain static server
+(10 items → the scene ×10, the page 60 → 114 s). One difference to keep in mind: CORS is checked against the
+*site's* domain, so the API must allow the customer's domain, not just the studio's.
+
 **Security:** `headers` ship to every visitor. Only public, read-only tokens belong there (a CMS "delivery" key).
 For anything secret, put a small proxy / serverless function in front and point `url` at that.
 
