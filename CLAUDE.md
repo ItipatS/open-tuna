@@ -59,7 +59,8 @@ Use Chrome or Edge (WebGPU). For non-developers there are double-click launchers
 which falls back to `tools/serve.ps1` without Python) and `Open Editor.command` (macOS).
 
 Pages:
-- `/` (`index.html`) — the studio home: demos, new / open / recent projects. Old `/?t=` `/?edit` links redirect.
+- `/` (`index.html`) — the studio start screen (like an Adobe app's Home): New project, Open…, Recent, Demos, Learn.
+  Offline (no server, e.g. GitHub Pages) it says so and only plays demos. Old `/?t=` `/?edit` links redirect.
 - `editor.html?project=<id>` — the editor. `<id>` = `demo/thai-union` (a demo) or a project slug.
 - `play.html?project=<id>` — the player: the project as visitors will see the export. `&t=42` / `&p=0.7` open it at a
   point; `play.html?lab` (`&free`) is the old playground.
@@ -73,7 +74,7 @@ happen. The team's real studio runs on a company server (docs/deploy.md). Keep p
 ## Where things are
 
 ```
-index.html            the studio home (+ home/*.jpg, frames of the demo); uses src/editor/project.js helpers
+index.html            the studio start screen (Home / Your projects / Demos / Learn); uses src/editor/project.js helpers
 editor.html           the editor page    } the same page shell (src/page.css); window.OPEN_TUNA_PAGE says which.
 play.html             the player page    } play.html is also the template of every exported site — keep them in sync
 src/main.js           bootstrap, scene assembly, post, params -> uniforms, main loop
@@ -91,7 +92,8 @@ src/models.js         GLTF loading / baking / material conversion        src/dir
 src/editor/           the editor (editor.html only) — docs/editor.md; project.js (.tuna), build.js (export)
 tools/serve.py|.ps1   studio servers (projects, saves, uploads, ranges, git for demos) — docs/dev-server.md
 models/               the tool's built-in GLB models (creatures, coral)
-demos/<id>/           demo projects: story.json, manifest.json, assets/, saves/checkpoints/ (committed)
+demos/<id>/           demo projects: story.json, manifest.json, thumb.jpg, assets/, saves/checkpoints/ (committed)
+demos/index.json      the demo list for the start screen when there's no server (GitHub Pages) — add new demos here
 projects/<slug>/      working copies of .tuna projects (gitignored — may be someone's only copy: never delete)
 EDITOR.md  HANDOFF.md  docs/
 ```

@@ -56,7 +56,10 @@ With `?project=<slug>`:
   IndexedDB = fnv1a of the story last written to the file).
 - **Demos:** Ctrl+S saves the demo's `story.json` in place (and *Commit to git* commits its folder). *File ▸ Save a
   copy as .tuna…* packages it (story + assets + checkpoints) into a .tuna without switching to it.
-- **New project:** blank (ocean, a camera, an empty timeline) or a copy of the current story. Either way it's packed
+- **New project:** blank (ocean, a camera, an empty timeline) or a copy of the current story / a demo (the start
+  screen copies the demo folder on the server, including its `thumb.*`).
+- **Previews:** every Ctrl+S also writes the `.tuna`'s `thumb.webp` into the working copy, so the start screen's
+  Recent shows it. Demos have a committed `thumb.jpg`; `demos/index.json` lists them for the offline start screen. Either way it's packed
   and unpacked like an opened file.
 
 ## Build site (`src/editor/build.js`)

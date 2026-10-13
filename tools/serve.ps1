@@ -150,7 +150,7 @@ function Putable($P, [string]$rel) {
   if (-not $full.StartsWith($P.root + $sep)) { throw 'path outside the project' }
   $r = Rel $P $full
   $ext = [IO.Path]::GetExtension($r).TrimStart('.').ToLower()
-  if ($r -in @('story.json', 'manifest.json', 'thumb.webp', 'thumb.png') -or ($r.StartsWith('assets/') -and $uploadExt -contains $ext) -or
+  if ($r -in @('story.json', 'manifest.json', 'thumb.webp', 'thumb.png', 'thumb.jpg') -or ($r.StartsWith('assets/') -and $uploadExt -contains $ext) -or
       ($r.StartsWith('saves/checkpoints/') -and $ext -eq 'json' -and ($r.Split('/').Count -eq 3))) { return $full }
   throw "$rel can't be part of a project"
 }
@@ -201,6 +201,7 @@ function Editor($ctx, [string]$path) {
       (Get-Item (Join-Path $d 'story.json')).LastWriteTime = Get-Date  # a fresh date: it's a new project
       if (Test-Path $repo.assets) { Copy-Item -Recurse -LiteralPath $repo.assets (Join-Path $d 'assets') }
       if (Test-Path $repo.check) { New-Item -ItemType Directory -Force (Join-Path $d 'saves') | Out-Null; Copy-Item -Recurse -LiteralPath $repo.check (Join-Path $d 'saves\checkpoints') }
+      foreach ($t in @('thumb.webp', 'thumb.png', 'thumb.jpg')) { if (Test-Path (Join-Path $repo.root $t)) { Copy-Item -LiteralPath (Join-Path $repo.root $t) (Join-Path $d $t) } }  # its picture until the first save
       $nm = if ($q['name']) { $q['name'] } else { $slug }
       WriteFile (Join-Path $d 'manifest.json') (ConvertTo-Json ([ordered]@{ format = 'open-tuna'; version = 1; name = $nm; created = (Get-Date).ToString('s') }))
     }

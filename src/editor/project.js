@@ -154,7 +154,7 @@ export class ProjectFiles {
       out[f.file] = [new Uint8Array(await res.arrayBuffer()), { level: STORED.has(f.file.split('.').pop().toLowerCase()) ? 0 : 6 }];
     }
     if (thumb) {
-      const t = await this.thumb();
+      const t = this.lastThumb = await this.thumb();
       if (t) out['thumb.webp'] = [t, { level: 0 }];
     }
     progress?.('Compressing…');
@@ -244,6 +244,8 @@ export class ProjectFiles {
       } else download(this.fileName, new Blob([bytes], { type: 'application/octet-stream' }));
       if (this.isFile) {
         this.savedHash = fnv1a(text);
+        // the same preview in the working copy: the studio home shows it in Recent
+        if (this.lastThumb) fetch(editorAPI('put?file=thumb.webp'), { method: 'POST', body: this.lastThumb }).catch(() => {});
         if (handle) this.handle = handle;
         try {
           await kv(`saved:${this.slug}`, this.savedHash);

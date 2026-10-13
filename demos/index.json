@@ -1,0 +1,6 @@
+{
+  "about": "The demo projects that ship with the studio. The home page reads this list when there is no studio server (e.g. GitHub Pages); with a server it lists demos/ itself. Add an entry when you add a demo folder.",
+  "demos": [
+    { "project": "demo/thai-union", "name": "Thai Union · 50 years", "thumb": "demos/thai-union/thumb.jpg", "about": "Underwater world, a water “50” at golden hour, a product journey with glass cards, 3D models and creature paths." }
+  ]
+}

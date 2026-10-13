@@ -12,8 +12,9 @@ website you can upload anywhere: that export is what a customer gets, never the 
 2. Double-click the launcher in the project folder:
    - **Windows:** `Open Editor.bat`
    - **Mac:** `Open Editor.command` (first time: right-click → Open, to get past Gatekeeper)
-3. Chrome or Edge opens the **studio home page** (`http://localhost:8123/`): start from the demo, make
-   a new project, open a `.tuna`, or pick a recent project. Keep the black server window open while you work;
+3. Chrome or Edge opens the **studio start screen** (`http://localhost:8123/`): **New project** (blank or from a
+   demo), **Open…** a `.tuna` (or drop one on the page, or Ctrl+O), or click a project under **Recent**. The ⋯ on a
+   card opens it or previews it. Keep the black server window open while you work;
    closing it stops the editor. (On your company's studio server, just open its address.)
 
 The Mac launcher needs Python 3 (`xcode-select --install`). On Windows it uses Python if it's

@@ -179,7 +179,7 @@ class Proj:
         p = self.inside(rel)
         r = self.rel(p)
         ext = r.rsplit('.', 1)[-1].lower() if '.' in r else ''
-        if r in ('story.json', 'manifest.json', 'thumb.webp', 'thumb.png') \
+        if r in ('story.json', 'manifest.json', 'thumb.webp', 'thumb.png', 'thumb.jpg') \
                 or (r.startswith('assets/') and ext in UPLOAD_EXT) \
                 or (r.startswith('saves/checkpoints/') and ext == 'json' and r.count('/') == 2):
             return p
@@ -394,6 +394,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             shutil.copytree(src.assets, os.path.join(d, 'assets'))
                         if os.path.isdir(src.check):
                             shutil.copytree(src.check, os.path.join(d, 'saves', 'checkpoints'))
+                        for t in ('thumb.webp', 'thumb.png', 'thumb.jpg'):  # its picture on the home page until the first save
+                            if os.path.isfile(os.path.join(src.root, t)):
+                                shutil.copyfile(os.path.join(src.root, t), os.path.join(d, t))
                         write(os.path.join(d, 'manifest.json'), json.dumps({'format': 'open-tuna', 'version': 1, 'name': q.get('name') or slug, 'created': datetime.datetime.now().isoformat(timespec='seconds')}, indent=2).encode())
                     return self.reply(200, {'ok': True, 'project': slug})
                 P = Proj(q.get('project', ''))
