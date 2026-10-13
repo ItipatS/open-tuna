@@ -60,6 +60,7 @@ export class LayerTools {
   }
 
   async addFile(file, opts = {}) {
+    if (/\.tuna$/i.test(file.name)) { this.ed.project.openTuna(file); return null; } // a project file: open it
     const kind = kindOf(file.name);
     if (!kind) return this.ed.toast(`Can't use ${file.name} — images, videos, .glb models or .html pages only`, true);
     try {
@@ -167,6 +168,8 @@ export class LayerTools {
   // a drop on the timeline: onto a lane (or a new lane in the group under the pointer), starting at `at`
   async dropOnTimeline(dt, at, target) {
     const ed = this.ed;
+    const tuna = [...dt.files].find((f) => /\.tuna$/i.test(f.name));
+    if (tuna) return ed.project.openTuna(tuna); // a project file: open it (no lane)
     let lane = target?.type === 'lane' ? target : null;
     if (!lane) lane = ed.addLane({ parent: target?.type === 'group' ? target.id : target?.parent, select: false });
     if (ed.tl.lockedTrack(lane)) return ed.toast(`“${lane.label}” is locked`, true);

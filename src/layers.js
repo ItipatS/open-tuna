@@ -7,7 +7,8 @@
 //                refracts the ocean behind it. "screen" GPU layers ride in front of the story camera at `depth`
 //                metres, so fish closer than that swim in front of them; "world" layers are planes in the 3D world.
 // Each layer is visible from `a` to `b` (s) with a `fade` (the reveal), keyframes animate x / y (or pos) / s / r / o.
-// Rebuilt incrementally when the timeline changes (videos / iframes only reload when their source changes).
+// Rebuilt incrementally when the timeline or live data changes (videos / iframes only reload when their source
+// changes). Text / html / src may hold {{data bindings}} (src/data.js); they're resolved before building.
 import * as THREE from 'three/webgpu';
 import {
   uniform, float, vec2, vec3, uv, texture, mix, smoothstep, sin, cos, abs, max, length, clamp, pow,
@@ -17,6 +18,7 @@ import { evalKeys, captionOpacity } from './timeline.js';
 import { U, causticTex } from './shared.js';
 import { createLoader } from './models.js';
 import { createAnimated } from './creatures.js';
+import { assetURL, fixHTML } from './project.js';
 
 export const SCREEN_KEY = { x: 50, y: 50, s: 1, r: 0, o: 1 };
 export const WORLD_KEY = { pos: [0, 8, 10], s: 1, r: 0, o: 1 };
@@ -171,8 +173,10 @@ function layerMaterial(tex, withGlass) {
 }
 
 export class Layers {
-  constructor({ timeline, root, scene }) {
+  constructor({ timeline, root, scene, data = null }) {
     this.tl = timeline;
+    this.data = data; // DataHub: {{bindings}} in text / html / src
+    this.dataVersion = -1;
     this.root = root; // the overlay container (#captions), container-type: size
     this.wrap = document.createElement('div');
     this.wrap.className = 'lays';
@@ -190,12 +194,21 @@ export class Layers {
     document.fonts?.ready.then(() => { this.fontsReady = true; this.version = -1; });
   }
 
-  // (re)build what changed since the last timeline version
+  // a layer's content with {{bindings}} resolved and asset paths turned into URLs (what build() reads)
+  resolved(t) {
+    const R = (v) => (this.data ? this.data.resolve(v) : v);
+    const r = { ...t, src: assetURL(R(t.src)), html: fixHTML(R(t.html)) };
+    if (t.kind === 'text') for (const f of ['kicker', 'title', 'body']) r[f] = R(t[f]);
+    return r;
+  }
+
+  // (re)build what changed since the last timeline / data version
   sync() {
     const seen = new Set();
-    for (const t of this.tl.layers()) {
-      t.id ??= `layer-${Math.random().toString(36).slice(2, 8)}`;
-      seen.add(t.id);
+    for (const t0 of this.tl.layers()) {
+      t0.id ??= `layer-${Math.random().toString(36).slice(2, 8)}`;
+      seen.add(t0.id);
+      const t = this.resolved(t0);
       const gpu = isGPU(t);
       const text = t.kind === 'text' ? [t.kicker, t.title, t.body, t.size, t.align, t.color, t.accent, this.fontsReady].join('¦') : '';
       const sig = [t.kind, gpu, t.src, t.kind === 'html' ? t.html : '', (t.glass ?? 0) > 0, text, t.kind === 'model' ? `${!!t.flip}:${t.anim ?? ''}` : ''].join('|');
@@ -206,10 +219,11 @@ export class Layers {
         it.sig = sig;
         this.items.set(t.id, it);
       }
-      it.track = t;
+      it.track = t0;
     }
     for (const [id, it] of this.items) if (!seen.has(id)) { this.dispose(it); this.items.delete(id); }
     this.version = this.tl.version;
+    this.dataVersion = this.data?.version ?? 0;
   }
 
   media(t, forTexture) {
@@ -345,7 +359,7 @@ export class Layers {
 
   // shot: the story camera (screen GPU layers ride in front of it); view: the camera rendering (billboards)
   update(x, view, shot = view) {
-    if (this.version !== this.tl.version) this.sync();
+    if (this.version !== this.tl.version || this.dataVersion !== (this.data?.version ?? 0)) this.sync();
     const now = performance.now(), dt = Math.max(1e-3, (now - this.lastT) / 1000);
     if (this.lastX !== null) this.vel += ((x - this.lastX) / dt - this.vel) * Math.min(1, dt * 6);
     this.lastX = x;

@@ -2,7 +2,8 @@
 
 The editor lets you change **when** things happen in the story (camera moves, captions, sun, the
 water 50, tuna leaps) and see the result immediately, like Unity's Timeline. Everything you edit is
-saved in one file: **`story.json`**.
+saved in one file: **`story.json`** (the repo's story), or in a **`.tuna` project file** that you keep anywhere,
+like a .psd. **Build site** turns either one into a website you can upload anywhere.
 
 ## Open it
 
@@ -15,6 +16,27 @@ saved in one file: **`story.json`**.
 
 The Mac launcher needs Python 3 (`xcode-select --install`). On Windows it uses Python if it's
 installed, otherwise a built-in PowerShell server, so there's nothing to install.
+
+## Projects: .tuna files
+
+The button next to **OPEN TUNA** in the top bar shows what you're editing: *Repo story* (the site in this
+repository, saved to git) or a project file such as *Japan launch.tuna*. Click it to switch between projects.
+
+- **File ▸ New project…**: blank (ocean, a camera and an empty timeline) or a copy of what's open.
+- **File ▸ Open .tuna file…** (**Ctrl+O**), or drag a `.tuna` onto the editor.
+- **Ctrl+S** saves into the `.tuna` file you opened. The first time, it asks where to keep it. Autosave keeps your
+  work safe in between; the top bar says *.tuna not saved* until you press Ctrl+S.
+- **File ▸ Save .tuna as…** saves a copy somewhere else. On the repo story it's *Save as .tuna file…*, which
+  packages the story so you can send it to someone.
+- A `.tuna` holds the story, every file in its Assets tab, its checkpoints and a preview picture. Send it by email
+  or put it on a shared drive. Anyone with the editor can open it.
+
+## Build the website
+
+**File ▸ Build site…** makes a standalone copy of the story, as it is now, with nothing of the editor in it. Choose
+**Download .zip** or **Build into a folder…**, then upload the folder to any web host: Netlify (drag and drop),
+Vercel, S3, GitHub Pages… The site must be served over **https**. The dialog lists every file and warns you about
+anything that needs attention (for example data from an API).
 
 ## The screen
 
@@ -77,6 +99,8 @@ thumbnails. The pink number on a thumbnail is how many layers use that file.
 - **Upload…**, or drop files onto the panel, to add files without placing them yet.
 - The project's **3D models** (`.glb`: shark, turtle, whales, tuna, coral…) are listed too, marked *built-in*.
   You can place them, but not delete them. Uploaded `.glb` / `.gltf` files work the same way.
+- Models show a **3D preview**: hover the tile to turn the model around. Very big models render their preview the
+  first time you hover them. The Inspector of a model clip shows the same preview.
 
 ### 3D model clips
 
@@ -208,6 +232,25 @@ image or video to a plain HTML overlay.
   own `.html` files always work.
 - On screen, sizes are in **% of the view**, so layers scale with the window and phone screens.
 
+## Live data (API / CMS)
+
+Text and pictures can come from a **CMS or an API** instead of being typed in: prices, product names, news. The
+site then updates when the CMS changes, without rebuilding.
+
+1. **Data** tab (left) ▸ **+ Source**: give it a name (`products`) and the URL that returns JSON.
+2. The data appears as a tree. **Click a value** to put it into the selected text layer (title, small line or
+   body), the selected picture / video (its file), or the selected caption. Or copy its binding and type it
+   anywhere.
+3. A binding looks like `{{products.items[0].name}}`. Add a fallback after `|`: `{{products.items[0].name | Coming soon}}`.
+   The Inspector shows what each binding says right now.
+4. **⋯ ▸ Save the current data as the sample.** The story then works offline and in the editor, and if the API
+   is ever down the site shows the sample instead of empty text. You can also paste sample JSON to design before
+   the API exists.
+
+*Reload* (Load once / every 10 s / every minute / every 5 min) sets how often the site asks again. The API must
+allow requests from your site (ask its admin about **CORS**). Anything in *Headers* is visible to every visitor:
+only use public, read-only keys.
+
 ## Saving: you can't really lose work
 
 | What | How |
@@ -217,7 +260,7 @@ image or video to a plain HTML overlay.
 | **Autosave** | On by default (every minute, after you stop editing for 2 s). Change it in File ▸ Autosave. |
 | **Previous versions** | Every save keeps the version it replaced (last 100) in `saves/auto/`. |
 | **Checkpoints** | **Ctrl+Shift+S** saves a *named* copy ("before new ending"). Kept until you delete them. They're included when you commit. |
-| **Open / Restore** | **Ctrl+O** lists the saved file, checkpoints, previous versions, every version in **git history**, and the browser draft. Click Load. Loading can be undone with Ctrl+Z. |
+| **Restore a version** | File ▸ **Restore a version…** lists the saved file, checkpoints, previous versions, every version in **git history** (repo story), and the browser draft. Click Load. Loading can be undone with Ctrl+Z. |
 | **Browser draft** | If the browser closes, your unsaved work is offered back next time you open the editor. |
 | **Import / Export** | File ▸ Import / Export a story JSON, to send one by chat or try someone else's. |
 | **Git** | File ▸ **Commit to git…** commits `story.json`, checkpoints and your `assets/` files (never code) with your message. Tick *Also push* to upload to GitHub. Pushing the **main** branch updates the **public** website, and the dialog warns you about that. |
@@ -228,12 +271,13 @@ Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps).
 
 `Space` play (scroll like the website) / pause · wheel, `↑ ↓`, `PgUp PgDn` scroll while playing · `Esc` stop / deselect · `← →` one frame (Shift: 1 s) · `Home / End` ·
 `, .` previous / next key · `K` add key · `L` lock · `Del` delete · `Ctrl C / X / V` copy / cut / paste ·
-`Ctrl D` duplicate · `Ctrl Z / Y` undo / redo · `Ctrl S` save · `Ctrl Shift S` checkpoint · `Ctrl O` open ·
+`Ctrl D` duplicate · `Ctrl Z / Y` undo / redo · `Ctrl S` save · `Ctrl Shift S` checkpoint · `Ctrl O` open a .tuna ·
 `1 / 2` Scene / Game · `F` fit timeline. Help ▸ Keyboard shortcuts shows them all.
 
 ## What the editor doesn't do (yet)
 
-It edits the story's **timing, camera, captions, parameters and media layers**. It can't add new 3D models, or change
-how the water 50, fish or ocean *look* or behave. Those are code changes: leave a note and ask a developer
+It edits the story's **timing, camera, captions, parameters, media layers, 3D model clips, creature paths and live
+data**. It can't change how the water 50, fish or ocean *look* or behave, and it can't repeat a layer once per item
+of a data list yet (e.g. one card per product). Those are code changes: leave a note and ask a developer
 or Claude. Past the original 1:00, nothing new happens in the scene until you add keys and captions
 there. New *kinds* of beats (a new creature moment, a new effect) need code first.

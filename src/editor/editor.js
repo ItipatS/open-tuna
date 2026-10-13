@@ -1,13 +1,15 @@
 // Open Tuna editor (?edit): a Unity-style shell around the story.
 //   top bar   menus (File / Edit / View / Help) · transport (start, Play/Pause, Stop, speed) · big Scene | Game
 //             switch · time readout · save status · Copy ref · fps · Save
-//   left      outliner: scene objects (hide / solo / focus) and post effects
+//   left      tabs: Scene (outliner: hide / solo / focus objects), Assets (files + model previews), Data (API / CMS
+//             sources for {{bindings}})
 //   centre    viewport: Game (the story camera, captions, aspect frame) or Scene (free camera, camera gizmos);
 //             the frame colour says which (blue Scene, green Game, orange Playing)
 //   right     inspector for the selection
 //   bottom    timeline of story.json in story time (seconds; the story length can be extended)
 // Right-click anything for its options. Locked items (track / key / clip / marker `locked: true`) can't be
-// moved, edited or deleted. Saving, autosave, checkpoints, restore and git live in saves.js.
+// moved, edited or deleted. Saving, autosave, checkpoints, restore and git live in saves.js; .tuna project files
+// in project.js; File > Build site in build.js.
 import * as THREE from 'three/webgpu';
 import { h, btn, icon, download } from './dom.js';
 import { openMenu, dialog } from './menu.js';
@@ -17,6 +19,11 @@ import { SceneGizmos } from './scene-gizmos.js';
 import { Saves } from './saves.js';
 import { LayerTools } from './layer-tools.js';
 import { AssetsPanel } from './assets-panel.js';
+import { DataPanel } from './data-panel.js';
+import { ProjectFiles } from './project.js';
+import { ModelThumbs } from './thumbs.js';
+import { SiteBuilder } from './build.js';
+import { PROJECT } from '../project.js';
 import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime, migrate } from '../timeline.js';
 
@@ -52,12 +59,16 @@ export class Editor {
 
     document.head.append(h('link', { rel: 'stylesheet', href: new URL('./editor.css', import.meta.url).href }));
     this.saves = new Saves(this);
+    this.project = new ProjectFiles(this);
+    this.thumbs = new ModelThumbs(this.app.renderer);
+    this.builder = new SiteBuilder(this);
     this.buildDOM();
     this.inspector = new Inspector(this, this.$right);
     this.timeline = new TimelineView(this, this.$tlwrap);
     this.gizmos = new SceneGizmos(this);
     this.lt = new LayerTools(this);
     this.assets = new AssetsPanel(this, this.$assets);
+    this.dataPanel = new DataPanel(this, this.$data);
     this.buildOutliner();
     this.bindKeys();
     this.setView('game');
@@ -66,7 +77,8 @@ export class Editor {
     this.saves.ping();
     this.saves.checkDraft();
     setInterval(() => this.saves.tick(), 1000);
-    addEventListener('beforeunload', (e) => { if (this.saves.dirty && !this.saves.autosave) { e.preventDefault(); e.returnValue = ''; } });
+    addEventListener('beforeunload', (e) => { if (!this.leaving && this.saves.dirty && !this.saves.autosave) { e.preventDefault(); e.returnValue = ''; } });
+    this.syncTitle();
   }
 
   get sceneView() { return this.view === 'scene' && !this.playing; }
@@ -105,7 +117,7 @@ export class Editor {
     };
 
     const bar = h('header', { id: 'ed-bar' },
-      h('div', { class: 'brand' }, h('b', {}, 'OPEN TUNA')),
+      h('div', { class: 'brand' }, h('b', {}, 'OPEN TUNA'), this.$proj = h('button', { class: 'proj', title: 'Projects — open, switch, new', onclick: () => this.project.recentDialog() })),
       menus,
       h('div', { class: 'sep' }),
       btn('', () => { this.pause(); this.setTime(0); }, { ico: 'start', title: 'Go to start (Home)' }),
@@ -125,13 +137,17 @@ export class Editor {
 
     this.$outliner = h('div');
     this.$assets = h('div', { style: 'display:none' });
-    const tab = (name, el) => h('button', { class: 'ltab', onclick: (e) => {
-      this.$outliner.style.display = name === 'scene' ? '' : 'none';
-      this.$assets.style.display = name === 'assets' ? '' : 'none';
-      e.currentTarget.parentNode.querySelectorAll('.ltab').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
+    this.$data = h('div', { style: 'display:none' });
+    const panes = { scene: this.$outliner, assets: this.$assets, data: this.$data };
+    this.showTab = (name) => {
+      for (const [k, el] of Object.entries(panes)) el.style.display = k === name ? '' : 'none';
+      this.$ltabs.querySelectorAll('.ltab').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
       if (name === 'assets') this.assets?.refresh();
-    } }, el);
-    const left = h('aside', { id: 'ed-left' }, h('div', { class: 'ed-h ltabs' }, tab('scene', 'Scene'), tab('assets', 'Assets')), this.$outliner, this.$assets);
+      if (name === 'data') { this.dataPanel.seen = ''; this.dataPanel.tick(); }
+    };
+    const tab = (name, el) => h('button', { class: 'ltab', 'data-tab': name, onclick: () => this.showTab(name) }, el);
+    this.$ltabs = h('div', { class: 'ed-h ltabs' }, tab('scene', 'Scene'), tab('assets', 'Assets'), tab('data', 'Data'));
+    const left = h('aside', { id: 'ed-left' }, this.$ltabs, this.$outliner, this.$assets, this.$data);
     left.querySelector('.ltab').classList.add('on');
 
     const aspect = h('select', { title: 'Game view frame' }, Object.keys(ASPECTS).map((k) => h('option', { value: k }, k === 'free' ? 'Free aspect' : k)));
@@ -319,11 +335,17 @@ export class Editor {
 
   // ------------------------------------------------------------------ menus
   menuFile() {
-    const s = this.saves, A = s.autosave;
+    const s = this.saves, A = s.autosave, P = this.project;
     return [
-      { label: 'Save', shortcut: `${mod}S`, onClick: () => s.save() },
+      { label: 'New project…', onClick: () => P.newDialog(), disabled: !s.server },
+      { label: 'Open .tuna file…', shortcut: `${mod}O`, onClick: () => P.pickAndOpen(), disabled: !s.server },
+      { label: 'Projects / recent…', onClick: () => P.recentDialog() },
+      P.isFile ? { label: 'Back to the repo story', onClick: async () => { await P.leave(); P.go(''); } } : null,
+      '-',
+      { label: P.isFile ? `Save ${P.fileName}` : 'Save', shortcut: `${mod}S`, onClick: () => s.save() },
+      { label: P.isFile ? 'Save .tuna as…' : 'Save as .tuna file…', onClick: () => P.saveTuna({ as: true }), disabled: !s.server },
       { label: 'Save checkpoint…', shortcut: `${mod}⇧S`, onClick: () => s.checkpointDialog(), disabled: !s.server },
-      { label: 'Open / Restore…', shortcut: `${mod}O`, onClick: () => s.openDialog() },
+      { label: 'Restore a version…', onClick: () => s.openDialog() },
       { label: 'Autosave', items: [0, 30, 60, 300].map((v) => ({ label: v ? (v < 60 ? `Every ${v} s` : `Every ${v / 60} min`) : 'Off', checked: A === v, onClick: () => s.setAutosave(v) })) },
       { label: 'Revert to saved file', onClick: () => s.revert(), disabled: !s.dirty },
       '-',
@@ -332,6 +354,7 @@ export class Editor {
       '-',
       { label: 'Commit to git…', onClick: () => s.gitDialog(), disabled: !s.git },
       '-',
+      { label: 'Build site… (standalone, for any host)', onClick: () => this.builder.dialog() },
       { label: 'Open site at this moment ↗', onClick: () => this.openSite() },
       { label: 'Snapshot (PNG of the viewport)', onClick: () => this.snapshot() },
     ];
@@ -1185,6 +1208,8 @@ export class Editor {
       const st = this.saves.status();
       this.$status.textContent = st.text;
       this.$status.className = st.cls;
+      this.$status.title = st.title ?? 'Save status — File menu for autosave, checkpoints and restore';
+      this.dataPanel?.tick();
       this.inspector.refresh();
     }
   }
@@ -1203,7 +1228,7 @@ export class Editor {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
       const cmd = e.ctrlKey || e.metaKey;
       if (cmd && e.code === 'KeyS') { e.preventDefault(); if (e.shiftKey) this.saves.checkpointDialog(); else this.saves.save(); return; }
-      if (cmd && e.code === 'KeyO') { e.preventDefault(); this.saves.openDialog(); return; }
+      if (cmd && e.code === 'KeyO') { e.preventDefault(); this.project.pickAndOpen(); return; }
       if (typing) return;
       if (cmd) {
         const k = { KeyZ: () => (e.shiftKey ? this.redo() : this.undo()), KeyY: () => this.redo(), KeyD: () => this.duplicate(), KeyC: () => this.copy(), KeyX: () => this.cut(), KeyV: () => this.paste() }[e.code];
@@ -1254,7 +1279,7 @@ export class Editor {
     const tl = this.tl, x = this.time, d = tl.data;
     const lines = [];
     const ch = tl.chapter(x);
-    lines.push(`Open Tuna — story.json @ ${fmtTime(x, 2)} (t=${x.toFixed(2)} s of ${tl.duration} s, p=${(x / tl.duration).toFixed(3)})${ch ? `, chapter "${ch.name}"` : ''}`);
+    lines.push(`Open Tuna — ${this.project.isFile ? `project "${this.project.name}" (projects/${PROJECT}/story.json)` : 'story.json'} @ ${fmtTime(x, 2)} (t=${x.toFixed(2)} s of ${tl.duration} s, p=${(x / tl.duration).toFixed(3)})${ch ? `, chapter "${ch.name}"` : ''}`);
     const active = [];
     for (const t of tl.tracks) {
       if (t.mute) continue;
@@ -1279,6 +1304,8 @@ export class Editor {
     const lay = this.lt.reference(x);
     if (lay) lines.push(lay);
     const notes = d.notes.filter((n) => Math.abs(n.t - x) < 3 && n.text);
+    const srcs = d.sources ?? [];
+    if (srcs.length) lines.push(`data sources: ${srcs.map((q) => `${q.id} (${q.url || 'sample only'}; ${this.app.data.status[q.id]?.state ?? '?'})`).join(' · ')}`);
     if (notes.length) lines.push(`notes nearby: ${notes.map((n) => `t ${n.t}: "${n.text}"`).join(' · ')}`);
     const s = this.sel;
     if (s && s.kind !== 'object') lines.push(`selected: ${s.kind}${s.track ? ` on track "${s.track.label}"` : ''}${s.item?.t !== undefined ? ` at t ${s.item.t}` : ''}${this.isLocked(s) ? ' (locked)' : ''}`);
@@ -1299,7 +1326,14 @@ export class Editor {
     }
   }
 
-  openSite() { window.open(`./?t=${this.time.toFixed(2)}`, '_blank'); }
+  openSite() { window.open(`./?${PROJECT ? `project=${PROJECT}&` : ''}t=${this.time.toFixed(2)}`, '_blank'); }
+
+  // window title + the project button in the top bar
+  syncTitle() {
+    const P = this.project;
+    this.$proj.textContent = P.isFile ? P.fileName : 'Repo story';
+    document.title = `${P.isFile ? P.fileName : 'story.json'} — Open Tuna editor`;
+  }
 
   async snapshot() {
     const blob = await this.app.capture();

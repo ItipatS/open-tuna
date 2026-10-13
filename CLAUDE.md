@@ -7,7 +7,9 @@ and three.js from a CDN.
 The story: an underwater world (a 2000-fish GPU tuna school, sharks, whales, turtles, jellies) → the camera rises
 out of the sea → **tentacles of water** braid up and draw a **"50"** at golden hour while tuna leap → a demo
 chapter, "The Journey" (1:00–2:30). An in-repo, Unity-style **editor (`?edit`)** edits *when* things happen, plus
-camera, captions, media layers, 3D model clips and creature paths. All of that is stored in **`story.json`**.
+camera, captions, media layers, 3D model clips and creature paths. All of that is stored in **`story.json`**:
+either the repo's own story, or a **`.tuna` project file** (a zip, opened into `projects/<slug>/`). *Build site*
+exports a standalone website, and **data sources** bind API / CMS JSON into layers with `{{bindings}}`.
 
 This file is the entry point. Details live in `docs/` — read the one you need:
 
@@ -17,6 +19,7 @@ This file is the entry point. Details live in `docs/` — read the one you need:
 | [docs/story-format.md](docs/story-format.md) | Reading or editing `story.json`: every track type and field, layers, paths, groups / lanes, params / drivers / actors |
 | [docs/architecture.md](docs/architecture.md) | Changing the 3D runtime: main loop, ocean, fish school + leaps, water 50, creatures, layers renderer, post, performance |
 | [docs/editor.md](docs/editor.md) | Changing the editor (`src/editor/`): modules, selection / undo model, timeline rows, gizmos, saves, play modes |
+| [docs/projects-build-data.md](docs/projects-build-data.md) | `.tuna` project files, `?project=` working copies, *Build site*, live data sources and `{{bindings}}` |
 | [docs/dev-server.md](docs/dev-server.md) | The local servers (`tools/serve.py` / `serve.ps1`) and their `/__editor/*` API |
 | [docs/assets.md](docs/assets.md) | GLB models (per-model fixes), `assets/`, the demo placeholder art |
 | [docs/testing.md](docs/testing.md) | Verifying anything: headless Chrome + puppeteer recipes, fps, WebGPU errors, **test hygiene** |
@@ -48,7 +51,7 @@ Use Chrome or Edge (WebGPU). For non-developers there are double-click launchers
 which falls back to `tools/serve.ps1` without Python) and `Open Editor.command` (macOS).
 
 URL flags:
-- `?edit` — the editor.
+- `?edit` — the editor (`&project=<slug>`: an opened .tuna project in `projects/<slug>/`).
 - `?t=42` / `?p=0.7` — open the site at that point (seconds / progress).
 - `?lab` (`&free`) — the old playground.
 - `?noauto` — fixed resolution, for tests.
@@ -68,6 +71,8 @@ src/story.js          Story: story time -> camera / sun / params / school / wate
                       PARAMS, DRIVERS, ACTORS registries; flightTargets()
 src/timeline.js       story.json model + evaluation + migration + serializer
 src/layers.js         media / text / glass / model layers (DOM overlays and GPU shader layers)
+src/project.js        which story is open (repo / ?project=) -> BASE, assetURL(), editorAPI(); build flag
+src/data.js           DataHub: API / CMS sources, {{binding}} resolution
 src/swarm.js          GPU boids + leaps + breaching          src/tentacles.js   the water "50"
 src/ocean.js          ocean, sky, seabed                     src/shared.js      global uniforms U, caustics, sky colour
 src/creatures.js      animated GLB wrapper, SwimPath, Hunter src/particles.js   splashes, marine snow, bubbles
@@ -77,6 +82,7 @@ src/editor/           the editor (only loaded with ?edit) — docs/editor.md
 tools/serve.py|.ps1   dev servers (save system, uploads, ranges) — docs/dev-server.md
 assets/               editor-uploaded media (+ assets/demo placeholder art)     *.glb  creature / prop models
 saves/                checkpoints/ (committed) and auto/ (backups of story.json, gitignored — never delete)
+projects/             working copies of opened .tuna files (gitignored — may be someone's only copy: never delete)
 EDITOR.md  HANDOFF.md  docs/
 ```
 
@@ -85,8 +91,8 @@ EDITOR.md  HANDOFF.md  docs/
 1. **The designer edits `story.json` live** in the editor, with autosave. Before you write it: diff it against git,
    keep their changes, and build on the current file. After you write it, tell them to reload or choose "Load
    theirs" (the save-conflict check will prompt them). Respect `locked: true`. Details: docs/ai-workflows.md.
-2. **Never delete `saves/auto/*`, `saves/checkpoints/*` or files you didn't create.** Those are the designer's
-   backups and assets.
+2. **Never delete `saves/auto/*`, `saves/checkpoints/*`, `projects/*` or files you didn't create.** Those are the
+   designer's backups, projects and assets.
 3. **Test in headless Chrome** (docs/testing.md). Screenshot the story points you changed. Check zero console *and*
    WebGPU errors (attach `uncapturederror`), and check fps when you touch rendering. If an editor test made edits,
    restore them, and never leave an editor tab open with unsaved test edits (it autosaves into `story.json`).

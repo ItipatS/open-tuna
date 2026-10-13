@@ -1,16 +1,14 @@
 # Open Tuna dev server for Windows machines without Python. Same behaviour and endpoints as
 # tools/serve.py (keep them in sync): serves the project with no caching + the editor's save system.
+# Every endpoint works on the repo's story or, with ?project=<slug>, on an opened .tuna in projects/<slug>/.
 #   powershell -ExecutionPolicy Bypass -File tools\serve.ps1 [-Port 8123] [-Open]
 param([int]$Port = 8123, [switch]$Open)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$story = Join-Path $root 'story.json'
-$savesDir = Join-Path $root 'saves'
-$autoDir = Join-Path $savesDir 'auto'
-$checkDir = Join-Path $savesDir 'checkpoints'
-$assetsDir = Join-Path $root 'assets'
-$uploadExt = @('png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb')
+$projectsDir = Join-Path $root 'projects'
+$sep = [IO.Path]::DirectorySeparatorChar
+$uploadExt = @('png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb', 'gltf')
 $keepAuto = 100
 $utf8 = New-Object Text.UTF8Encoding($false)
 $types = @{
@@ -18,7 +16,7 @@ $types = @{
   '.css' = 'text/css; charset=utf-8'; '.json' = 'application/json; charset=utf-8'; '.md' = 'text/plain; charset=utf-8'
   '.glb' = 'model/gltf-binary'; '.gltf' = 'model/gltf+json'; '.bin' = 'application/octet-stream'; '.wasm' = 'application/wasm'
   '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.webp' = 'image/webp'; '.svg' = 'image/svg+xml'
-  '.mp3' = 'audio/mpeg'; '.ogg' = 'audio/ogg'
+  '.mp3' = 'audio/mpeg'; '.ogg' = 'audio/ogg'; '.mp4' = 'video/mp4'; '.webm' = 'video/webm'
 }
 $hasGitExe = [bool](Get-Command git -ErrorAction SilentlyContinue)
 
@@ -56,6 +54,7 @@ function Send($ctx, [int]$code, [byte[]]$bytes, [string]$type) {
 }
 function SendJson($ctx, [int]$code, $obj) { Send $ctx $code $utf8.GetBytes((ConvertTo-Json $obj -Depth 6 -Compress)) 'application/json' }
 function Stamp { (Get-Date).ToString('yyyy-MM-dd_HHmmss') }
+function UnixTime($item) { [int][double]::Parse((Get-Date $item.LastWriteTimeUtc -UFormat %s)) }
 
 function Git([string[]]$gitArgs) {
   $psi = New-Object Diagnostics.ProcessStartInfo
@@ -72,7 +71,20 @@ function Git([string[]]$gitArgs) {
 }
 function HasGit { if (-not $hasGitExe) { return $false }; return (Git @('rev-parse', '--is-inside-work-tree')).code -eq 0 }
 
-function Listing($folder) {
+# the story being edited: the repo root (slug '') or an unpacked .tuna in projects/<slug>/
+function Proj([string]$slug) {
+  $r = $root
+  if ($slug) {
+    if ($slug -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}$') { throw 'bad project name' }
+    $r = Join-Path $projectsDir $slug
+    if (-not (Test-Path -LiteralPath $r -PathType Container)) { throw "no project `"$slug`" (open its .tuna file again)" }
+  }
+  $saves = Join-Path $r 'saves'
+  return @{ slug = $slug; root = $r; story = (Join-Path $r 'story.json'); saves = $saves; auto = (Join-Path $saves 'auto'); check = (Join-Path $saves 'checkpoints'); assets = (Join-Path $r 'assets') }
+}
+function Rel($P, [string]$full) { return ($full.Substring($P.root.Length + 1) -replace '\\', '/') }
+
+function Listing($P, $folder) {
   $items = @()
   if (-not (Test-Path $folder)) { return ,$items }
   Get-ChildItem -Path $folder -Filter *.json | Sort-Object Name -Descending | ForEach-Object {
@@ -81,17 +93,36 @@ function Listing($folder) {
       $time = "$($Matches[1]) $($Matches[2]):$($Matches[3]):$($Matches[4])"
       $name = if ($Matches[5]) { $Matches[5] -replace '-', ' ' } else { $_.BaseName }
     }
-    $rel = $_.FullName.Substring($root.Length + 1) -replace '\\', '/'
-    $items += [ordered]@{ file = $rel; name = $name; time = $time; size = $_.Length }
+    $items += [ordered]@{ file = (Rel $P $_.FullName); name = $name; time = $time; size = $_.Length }
   }
   return ,$items
 }
 
-function SafeFile([string]$rel) {
+function Files($P, $folder) {
+  $items = @()
+  if (-not (Test-Path $folder)) { return ,$items }
+  Get-ChildItem -Path $folder -File -Recurse | Where-Object { $_.Extension -ne '.tmp' } | Sort-Object FullName | ForEach-Object {
+    $items += [ordered]@{ file = (Rel $P $_.FullName); size = $_.Length; mtime = (UnixTime $_) }
+  }
+  return ,$items
+}
+
+function SafeFile($P, [string]$rel) {
   if (-not $rel) { $rel = 'story.json' }
-  $full = [IO.Path]::GetFullPath((Join-Path $root $rel))
-  if ($full -eq $story -or ($full.StartsWith($savesDir + [IO.Path]::DirectorySeparatorChar) -and $full.EndsWith('.json'))) { return $full }
+  $full = [IO.Path]::GetFullPath((Join-Path $P.root $rel))
+  if ($full -eq $P.story -or ($full.StartsWith($P.saves + $sep) -and $full.EndsWith('.json'))) { return $full }
   throw 'file not allowed'
+}
+
+# where a .tuna's files may be written: story.json, manifest.json, thumb.*, assets/**, saves/checkpoints/*.json
+function Putable($P, [string]$rel) {
+  $full = [IO.Path]::GetFullPath((Join-Path $P.root ($rel -replace '/', '\')))
+  if (-not $full.StartsWith($P.root + $sep)) { throw 'path outside the project' }
+  $r = Rel $P $full
+  $ext = [IO.Path]::GetExtension($r).TrimStart('.').ToLower()
+  if ($r -in @('story.json', 'manifest.json', 'thumb.webp', 'thumb.png') -or ($r.StartsWith('assets/') -and $uploadExt -contains $ext) -or
+      ($r.StartsWith('saves/checkpoints/') -and $ext -eq 'json' -and ($r.Split('/').Count -eq 3))) { return $full }
+  throw "$rel can't be part of a project"
 }
 
 function Fnv1a([byte[]]$data) {
@@ -111,10 +142,36 @@ function WriteFile([string]$path, [string]$text) {
   Move-Item -Force "$path.tmp" $path
 }
 
+function ReadBytes($req) {
+  $ms = New-Object IO.MemoryStream
+  $req.InputStream.CopyTo($ms)
+  return ,$ms.ToArray()
+}
+
 function Editor($ctx, [string]$path) {
   $req = $ctx.Request
   $q = $req.QueryString
   $body = ''
+  if ($path -eq '/__editor/project/new') {
+    $slugBase = (("$($q['name'])".ToLower() -replace '[^a-z0-9]+', '-').Trim('-'))
+    if ($slugBase.Length -gt 48) { $slugBase = $slugBase.Substring(0, 48).Trim('-') }
+    if (-not $slugBase) { $slugBase = 'project' }
+    $slug = $slugBase; $n = 1
+    while (Test-Path (Join-Path $projectsDir $slug)) { $n++; $slug = "$slugBase-$n" }
+    New-Item -ItemType Directory -Force (Join-Path $projectsDir $slug) | Out-Null
+    SendJson $ctx 200 @{ ok = $true; project = $slug }; return
+  }
+  $P = Proj $q['project']
+  if ($path -eq '/__editor/put') {
+    if (-not $P.slug) { throw 'put only writes into projects/' }
+    $file = Putable $P $q['file']
+    $bytes = ReadBytes $req
+    if ((Rel $P $file) -eq 'story.json') { ValidStory ($utf8.GetString($bytes)) }
+    New-Item -ItemType Directory -Force (Split-Path -Parent $file) | Out-Null
+    [IO.File]::WriteAllBytes("$file.tmp", $bytes)
+    Move-Item -Force "$file.tmp" $file
+    SendJson $ctx 200 @{ ok = $true; file = (Rel $P $file) }; return
+  }
   if ($path -eq '/__editor/upload') {
     $name = [IO.Path]::GetFileName($q['name'])
     $ext = [IO.Path]::GetExtension($name).TrimStart('.').ToLower()
@@ -122,29 +179,28 @@ function Editor($ctx, [string]$path) {
     $stem = ([IO.Path]::GetFileNameWithoutExtension($name) -replace '[^A-Za-z0-9_-]+', '-').Trim('-')
     if ($stem.Length -gt 60) { $stem = $stem.Substring(0, 60) }
     if (-not $stem) { $stem = 'file' }
-    $ms = New-Object IO.MemoryStream
-    $req.InputStream.CopyTo($ms)
-    $bytes = $ms.ToArray()
-    New-Item -ItemType Directory -Force $assetsDir | Out-Null
-    $file = Join-Path $assetsDir "$stem.$ext"; $n = 1
+    $bytes = ReadBytes $req
+    New-Item -ItemType Directory -Force $P.assets | Out-Null
+    $file = Join-Path $P.assets "$stem.$ext"; $n = 1
     while (Test-Path $file) {
       $old = [IO.File]::ReadAllBytes($file)
       if ($old.Length -eq $bytes.Length -and [Linq.Enumerable]::SequenceEqual([byte[]]$old, [byte[]]$bytes)) { break }
-      $n++; $file = Join-Path $assetsDir "$stem-$n.$ext"
+      $n++; $file = Join-Path $P.assets "$stem-$n.$ext"
     }
     if (-not (Test-Path $file)) { [IO.File]::WriteAllBytes($file, $bytes) }
-    SendJson $ctx 200 @{ ok = $true; file = ($file.Substring($root.Length + 1) -replace '\\', '/') }; return
+    SendJson $ctx 200 @{ ok = $true; file = (Rel $P $file) }; return
   }
   if ($req.HttpMethod -eq 'POST') { $body = (New-Object IO.StreamReader($req.InputStream, $utf8)).ReadToEnd() }
+  if ($P.slug -and $path.StartsWith('/__editor/git/') -and $path -ne '/__editor/git/status') { throw 'a .tuna project is saved as a file, not to git' }
   switch ($path) {
     '/__editor/ping' {
       $g = HasGit
       $br = if ($g) { (Git @('branch', '--show-current')).out } else { '' }
-      SendJson $ctx 200 ([ordered]@{ ok = $true; save = $true; git = $g; branch = $br }); return
+      SendJson $ctx 200 ([ordered]@{ ok = $true; save = $true; git = ($g -and -not $P.slug); branch = $br }); return
     }
     '/__editor/list' {
       $hist = @()
-      if (HasGit) {
+      if (-not $P.slug -and (HasGit)) {
         $r = Git @('log', '-n', '60', '--format=%h|%cI|%an|%s', '--', 'story.json')
         if ($r.code -eq 0 -and $r.out) {
           foreach ($line in ($r.out -split "`n")) {
@@ -153,37 +209,61 @@ function Editor($ctx, [string]$path) {
           }
         }
       }
-      SendJson $ctx 200 ([ordered]@{ checkpoints = (Listing $checkDir); autos = (Listing $autoDir); git = $hist }); return
+      SendJson $ctx 200 ([ordered]@{ checkpoints = (Listing $P $P.check); autos = (Listing $P $P.auto); git = $hist }); return
     }
     '/__editor/load' {
       if ($q['git']) {
-        if ($q['git'] -notmatch '^[0-9a-fA-F]{4,40}$') { throw 'bad commit' }
+        if ($P.slug -or $q['git'] -notmatch '^[0-9a-fA-F]{4,40}$') { throw 'bad commit' }
         $r = Git @('show', "$($q['git']):story.json")
         if ($r.code -ne 0) { throw $r.out }
         Send $ctx 200 $utf8.GetBytes($r.out) 'application/json; charset=utf-8'; return
       }
-      Send $ctx 200 ([IO.File]::ReadAllBytes((SafeFile $q['file']))) 'application/json; charset=utf-8'; return
+      Send $ctx 200 ([IO.File]::ReadAllBytes((SafeFile $P $q['file']))) 'application/json; charset=utf-8'; return
     }
     '/__editor/assets' {
       $list = @()
-      if (Test-Path $assetsDir) {
-        Get-ChildItem -Path $assetsDir -File -Recurse | Sort-Object LastWriteTime -Descending | ForEach-Object {
-          $list += [ordered]@{ file = ($_.FullName.Substring($root.Length + 1) -replace '\\', '/'); size = $_.Length; mtime = [int][double]::Parse((Get-Date $_.LastWriteTimeUtc -UFormat %s)) }
+      if (Test-Path $P.assets) {
+        Get-ChildItem -Path $P.assets -File -Recurse | Where-Object { $_.Extension -ne '.tmp' } | Sort-Object LastWriteTime -Descending | ForEach-Object {
+          $list += [ordered]@{ file = (Rel $P $_.FullName); size = $_.Length; mtime = (UnixTime $_) }
         }
       }
       Get-ChildItem -Path $root -File | Where-Object { $_.Extension -in '.glb', '.gltf' } | Sort-Object Name | ForEach-Object {
-        $list += [ordered]@{ file = $_.Name; size = $_.Length; mtime = [int][double]::Parse((Get-Date $_.LastWriteTimeUtc -UFormat %s)); builtin = $true }
+        $list += [ordered]@{ file = $_.Name; size = $_.Length; mtime = (UnixTime $_); builtin = $true }
       }
       SendJson $ctx 200 @{ assets = $list }; return
     }
+    '/__editor/files' {
+      $list = @()
+      if (Test-Path $P.story) { $it = Get-Item $P.story; $list += [ordered]@{ file = 'story.json'; size = $it.Length; mtime = (UnixTime $it) } }
+      $list += (Files $P $P.assets)
+      $list += (Files $P $P.check)
+      SendJson $ctx 200 @{ files = $list }; return
+    }
+    '/__editor/projects' {
+      $list = @()
+      if (Test-Path $projectsDir) {
+        Get-ChildItem -Path $projectsDir -Directory | ForEach-Object {
+          $d = $_.FullName; $slug = $_.Name
+          $st = Join-Path $d 'story.json'
+          if ($slug -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}$' -or -not (Test-Path $st)) { return }
+          $name = $slug
+          try { $m = [IO.File]::ReadAllText((Join-Path $d 'manifest.json'), $utf8) | ConvertFrom-Json; if ($m.name) { $name = $m.name } } catch { }
+          $thumb = ''
+          foreach ($t in @('thumb.webp', 'thumb.png')) { if (-not $thumb -and (Test-Path (Join-Path $d $t))) { $thumb = "projects/$slug/$t" } }
+          $list += [ordered]@{ project = $slug; name = $name; mtime = (UnixTime (Get-Item $st)); thumb = $thumb }
+        }
+      }
+      $sorted = @($list | Sort-Object { - $_.mtime })
+      SendJson $ctx 200 @{ projects = $sorted }; return
+    }
     '/__editor/asset-delete' {
-      $full = [IO.Path]::GetFullPath((Join-Path $root $q['file']))
-      if (-not $full.StartsWith($assetsDir + [IO.Path]::DirectorySeparatorChar) -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { throw 'not a file in assets/' }
+      $full = [IO.Path]::GetFullPath((Join-Path $P.root $q['file']))
+      if (-not $full.StartsWith($P.assets + $sep) -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { throw 'not a file in assets/' }
       Remove-Item -LiteralPath $full
       SendJson $ctx 200 @{ ok = $true }; return
     }
     '/__editor/git/status' {
-      if (-not (HasGit)) { SendJson $ctx 200 @{ git = $false }; return }
+      if ($P.slug -or -not (HasGit)) { SendJson $ctx 200 @{ git = $false }; return }
       $br = (Git @('branch', '--show-current')).out
       $up = Git @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
       $ch = (Git @('status', '--porcelain', '--', 'story.json', 'saves/checkpoints', 'assets')).out
@@ -193,20 +273,20 @@ function Editor($ctx, [string]$path) {
     }
     '/__editor/save' {
       ValidStory $body
-      if (Test-Path $story) {
-        $oldBytes = [IO.File]::ReadAllBytes($story)
-        $base = $req.Headers['X-Base-Hash']
-        if ($req.Headers['X-Force'] -ne '1' -and $base -ne (Fnv1a $oldBytes)) {
-          $msg = if ($base) { 'story.json changed on disk since the editor loaded it' } else { 'this editor tab is out of date - reload it' }
+      if (Test-Path $P.story) {
+        $oldBytes = [IO.File]::ReadAllBytes($P.story)
+        $baseHash = $req.Headers['X-Base-Hash']
+        if ($req.Headers['X-Force'] -ne '1' -and $baseHash -ne (Fnv1a $oldBytes)) {
+          $msg = if ($baseHash) { 'story.json changed on disk since the editor loaded it' } else { 'this editor tab is out of date - reload it' }
           SendJson $ctx 409 ([ordered]@{ ok = $false; conflict = $true; error = $msg; current = $utf8.GetString($oldBytes) }); return
         }
-        $old = [IO.File]::ReadAllText($story, $utf8)
+        $old = [IO.File]::ReadAllText($P.story, $utf8)
         if ($old -ne $body) {
-          WriteFile (Join-Path $autoDir "$(Stamp).json") $old
-          Listing $autoDir | Select-Object -Skip $keepAuto | ForEach-Object { Remove-Item (Join-Path $root $_.file) }
+          WriteFile (Join-Path $P.auto "$(Stamp).json") $old
+          Listing $P $P.auto | Select-Object -Skip $keepAuto | ForEach-Object { Remove-Item (Join-Path $P.root $_.file) }
         }
       }
-      WriteFile $story $body
+      WriteFile $P.story $body
       SendJson $ctx 200 @{ ok = $true }; return
     }
     '/__editor/checkpoint' {
@@ -214,13 +294,13 @@ function Editor($ctx, [string]$path) {
       $slug = (($q['name'] -replace '[^A-Za-z0-9]+', '-').Trim('-'))
       if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
       if (-not $slug) { $slug = 'checkpoint' }
-      $file = Join-Path $checkDir "$(Stamp)_$slug.json"
+      $file = Join-Path $P.check "$(Stamp)_$slug.json"
       WriteFile $file $body
-      SendJson $ctx 200 @{ ok = $true; file = ($file.Substring($root.Length + 1) -replace '\\', '/') }; return
+      SendJson $ctx 200 @{ ok = $true; file = (Rel $P $file) }; return
     }
     '/__editor/delete' {
-      $full = SafeFile $q['file']
-      if (-not $full.StartsWith($checkDir + [IO.Path]::DirectorySeparatorChar)) { throw 'only checkpoints can be deleted' }
+      $full = SafeFile $P $q['file']
+      if (-not $full.StartsWith($P.check + $sep)) { throw 'only checkpoints can be deleted' }
       Remove-Item $full
       SendJson $ctx 200 @{ ok = $true }; return
     }
@@ -229,8 +309,8 @@ function Editor($ctx, [string]$path) {
       try { $msg = ($body | ConvertFrom-Json).message } catch { }
       if (-not $msg) { $msg = 'Update story' }
       $paths = @('story.json')
-      if ((Test-Path $checkDir) -and (Get-ChildItem $checkDir).Count) { $paths += 'saves/checkpoints' }
-      if ((Test-Path $assetsDir) -and (Get-ChildItem $assetsDir).Count) { $paths += 'assets' }
+      if ((Test-Path $P.check) -and (Get-ChildItem $P.check).Count) { $paths += 'saves/checkpoints' }
+      if ((Test-Path $P.assets) -and (Get-ChildItem $P.assets).Count) { $paths += 'assets' }
       $r = Git (@('add', '--') + $paths)
       if ($r.code -eq 0) { $r = Git (@('commit', '-m', $msg, '--') + $paths) }
       SendJson $ctx $(if ($r.code -eq 0) { 200 } else { 400 }) ([ordered]@{ ok = ($r.code -eq 0); output = $r.out; error = $(if ($r.code -eq 0) { '' } else { $r.out }) }); return

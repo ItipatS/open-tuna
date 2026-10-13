@@ -6,13 +6,17 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 
 | File | Role |
 |---|---|
-| `editor.js` | `Editor`: DOM shell (top bar, left Scene / Assets tabs, viewport, inspector, timeline, resizable panels), menus (`menuFile/Edit/View/Help`), right-click menus (`contextItems(target)`), selection, locks, clipboard, undo, play modes, keyboard, Copy ref (`reference()`), groups / lanes (`addGroup`, `addLane`, `defaultLane`, `removeContainer`, `groupMenu`, `laneMenu`), path waypoints (`addPathKey`) |
+| `editor.js` | `Editor`: DOM shell (top bar + project button, left Scene / Assets / Data tabs (`showTab`), viewport, inspector, timeline, resizable panels), menus (`menuFile/Edit/View/Help`), right-click menus (`contextItems(target)`), selection, locks, clipboard, undo, play modes, keyboard, Copy ref (`reference()`), groups / lanes (`addGroup`, `addLane`, `defaultLane`, `removeContainer`, `groupMenu`, `laneMenu`), path waypoints (`addPathKey`) |
 | `timeline-view.js` | `TimelineView`: one canvas covering the ruler (chapters, notes, playhead, END flag), rows (`layout()`: groups → indented members, lanes with clips packed into sub-rows by `pack()`, collapsed rows → `drawSummary`), the performance lane, hit testing (`hit` → `hitBar` / `hitTrack`), dragging (scrub, keys, clip edges / body incl. moving between lanes, END, markers), snapping, zoom / pan, drops of files / assets |
 | `inspector.js` | `Inspector`: property panels per selection (project, track, group / lane `container`, key, caption, chapter, note, layer + layer key, path + waypoint, object). Field widgets bind getters / setters; `input` = live (`ed.changed()`), `change` / drag end = undo step (`ed.commit()`); read-only when locked |
 | `layer-tools.js` | `LayerTools`: add layers (file / URL / HTML / text / glass / model / asset), `LOOKS` presets, parallax, auto-key (`keyAt`), Game-view picking / dragging / scaling (DOM layers by element, GPU layers by `Layers.rect`), drops on the viewport / timeline (`dropOnTimeline`) |
 | `assets-panel.js` | `AssetsPanel`: grid of `GET /__editor/assets` (assets/ plus the built-in root GLBs), drag source (`application/x-opentuna-asset`), upload, usage count, delete |
 | `scene-gizmos.js` | `SceneGizmos`: camera path line, camera keys (blue) / look targets (orange), path lines + waypoints (lime), shot frustum, `TransformControls` on a proxy: camera key pos / look, path waypoint, 3D layer pos (auto-key), model rotation (`layerMode`) |
-| `saves.js` | `Saves`: save with conflict detection, autosave, checkpoints, Open / Restore dialog, import / export, browser draft, upload, git dialog |
+| `saves.js` | `Saves`: save with conflict detection, autosave, checkpoints, Restore dialog, import / export, browser draft, upload, git dialog. All calls go through `editorAPI()` (adds `&project=`); a manual save in a project then calls `project.saveTuna()` |
+| `project.js` | `ProjectFiles`: .tuna pack / unpack (fflate), open (picker, Ctrl+O, drop), save / save as (File System Access handle in IndexedDB), new (blank / copy), Projects dialog, `busy()` progress — [projects-build-data.md](projects-build-data.md) |
+| `build.js` | `SiteBuilder`: File ▸ Build site — collects the runtime (import crawl from `src/main.js`, no `src/editor/`), models, used assets → zip / folder |
+| `data-panel.js` | `DataPanel`: the left **Data** tab — sources, status, JSON tree, binding menu, sample / headers dialogs |
+| `thumbs.js` | `ModelThumbs`: turntable previews of GLBs rendered on the editor's renderer (24 frames into a webp strip, Cache API), `spin(asset)` element |
 | `menu.js` | context menus / drop-downs (`openMenu`), modal dialogs (`dialog`) |
 | `dom.js` | `h()` element helper, icons, `btn`, `download` |
 | `editor.css` | the dark shell; mode colours via `#ed[data-mode]` (scene / game / playing) |
@@ -51,7 +55,7 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 
 ## Hooks from main.js (the `app` object)
 
-`renderer, scene, camera, controls, story, timeline, layers, tuna, opts, buildPost, onResize, hidden (Set),
+`renderer, scene, camera, controls, story, timeline, layers, data (DataHub), tuna, opts, buildPost, onResize, hidden (Set),
 fpsInfo, setTunaCount, objects (outliner), setTimeScale, capture()`. The editor calls `onResize()` when its viewport
 changes, and `viewSize()` gives the render size.
 

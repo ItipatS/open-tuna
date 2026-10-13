@@ -18,9 +18,12 @@ and the school are simulated, so they converge rather than jump.
   "settings": { "tunaCount": 2000, "params": { "post.exposure": 1.05, … } },  // constants for PARAMS
   "chapters": [ { "t": 0, "name": "Underwater" }, … ],   // labels for people (editor ruler, Copy ref)
   "notes": [ { "t": 60, "text": "…" } ],                  // feedback left at moments — read them when asked
-  "tracks": [ … ]                                           // drawn top to bottom in the editor, see below
+  "tracks": [ … ],                                          // drawn top to bottom in the editor, see below
+  "sources": [ { "id": "products", "url": "https://…", "refresh": 60, "sample": { … } } ]  // live data, see below
 }
 ```
+In a `.tuna` project the file is `projects/<slug>/story.json`, and `assets/…` paths are relative to that folder
+([projects-build-data.md](projects-build-data.md)).
 Version 1 files (positions as progress 0..1) are migrated on load (`migrate()` in timeline.js).
 
 Common track fields:
@@ -133,6 +136,16 @@ parallax preset writes two linear keys (start / end).
 Tracks join a group with `parent`. Layers and paths join a lane with `lane`; a lane draws many clips in one row,
 stacking overlaps. The order of `tracks` is the display order: a group's members appear under its header, and
 lane members can sit anywhere in the array. These have no effect on the story except inherited mute / lock.
+
+## sources (live data) and {{bindings}}
+
+`sources: [{ id, url?, headers?, refresh?, sample? }]`: JSON loaded at runtime (`src/data.js`). A relative `url` is a
+story file (`assets/data.json`); an absolute one must allow CORS. `refresh` = re-fetch every n s. `sample` = a saved
+copy, shown first and kept if the fetch fails. `headers` are public (read-only tokens only).
+
+Text fields can bind to them: `{{id.path}}` or `{{id.path | fallback}}`, with a path of `.key` / `[index]` parts,
+e.g. `{{products.items[0].name | Coming soon}}`. This is resolved in layer `title`, `kicker`, `body`, `html`, `src`
+and caption `title`, `sub`. Details: [projects-build-data.md](projects-build-data.md).
 
 ## The current story (approximate; the file is the truth)
 

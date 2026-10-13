@@ -20,6 +20,8 @@ import { Story, flightTargets } from './story.js';
 import { Timeline } from './timeline.js';
 import { Layers } from './layers.js';
 import { createWaterTentacles } from './tentacles.js';
+import { BASE, IS_BUILD } from './project.js';
+import { DataHub } from './data.js';
 
 // Per-model orientation overrides (flip = the artist's pivot/forward axis points the wrong way).
 const CONFIG = {
@@ -56,8 +58,8 @@ function fail(msg) { loaderEl.classList.add('error'); statusEl.textContent = msg
 
 async function main() {
   const params = new URLSearchParams(location.search);
-  const LAB = params.has('lab'); // playground panel + shot director instead of the scroll story
-  const EDIT = !LAB && params.has('edit'); // timeline editor around the story (src/editor/)
+  const LAB = !IS_BUILD && params.has('lab'); // playground panel + shot director instead of the scroll story
+  const EDIT = !LAB && !IS_BUILD && params.has('edit'); // timeline editor around the story (src/editor/)
   let editor = null;
   document.documentElement.classList.add(LAB ? 'lab' : EDIT ? 'edit' : 'story');
 
@@ -113,11 +115,16 @@ async function main() {
     turtle: 'model_50a_-_hawksbill_sea_turtle.glb', blue: 'blue_whale_-_textured.glb', hump: 'game-ready_humpback_whale.glb',
   };
   // story.json as raw text (the editor fingerprints exactly what's on disk to detect outside changes)
-  const storyText = LAB ? null : fetch('./story.json', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`story.json: HTTP ${r.status}`); return r.text(); });
+  const storyText = LAB ? null : fetch(`./${BASE}story.json`, { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`story.json: HTTP ${r.status}`); return r.text(); });
   const G = Object.fromEntries(await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loader.loadAsync(`./${f}`)])));
   const storyRaw = LAB ? null : await storyText;
   const timeline = LAB ? null : new Timeline(JSON.parse(storyRaw));
   if (timeline) timeline.sourceText = storyRaw;
+  // live data (APIs / CMS) for {{bindings}} in layers and captions; re-synced when the story's sources change
+  const data = new DataHub();
+  let dataVersion = -1;
+  const syncData = () => { if (timeline && timeline.version !== dataVersion) { dataVersion = timeline.version; data.sync(timeline.data.sources ?? []); } };
+  syncData();
   statusEl.textContent = 'Preparing scene…';
   await new Promise((r) => setTimeout(r, 0));
 
@@ -406,8 +413,8 @@ async function main() {
     shark1: { obj: sharks[0].obj, hunter: sharks[0], speed: 9 }, shark2: { obj: sharks[1].obj, hunter: sharks[1], speed: 9 },
     turtle1: { obj: turtles[0].obj, swim: turtles[0].path, speed: 2.2 }, turtle2: { obj: turtles[1].obj, swim: turtles[1].path, speed: 2.2 },
   };
-  const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions'), actors });
-  const layers = story ? new Layers({ timeline, root: $('captions'), scene }) : null; // images / video / HTML / iframes
+  const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions'), actors, data });
+  const layers = story ? new Layers({ timeline, root: $('captions'), scene, data }) : null; // images / video / HTML / iframes
   // page length grows with the story (meta.scrollPerSecond vh per second of story)
   const fitScroll = () => { if (story) $('scrollspace').style.height = `${Math.round(timeline.duration * timeline.meta.scrollPerSecond)}vh`; };
   fitScroll();
@@ -479,12 +486,12 @@ async function main() {
   let timeScale = 1, captureCb = null;
   const fpsInfo = { fps: 60, res: 1 };
 
-  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles, timeline, layers };
+  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles, timeline, layers, data };
 
   if (EDIT) {
     const { Editor } = await import('./editor/editor.js');
     editor = new Editor({
-      renderer, scene, camera, controls, story, timeline, layers, tuna, opts, buildPost, onResize, hidden, fpsInfo, setTunaCount,
+      renderer, scene, camera, controls, story, timeline, layers, data, tuna, opts, buildPost, onResize, hidden, fpsInfo, setTunaCount,
       objects: [
         { group: 'World', name: 'Sky', obj: sky }, { group: 'World', name: 'Ocean surface', obj: ocean }, { group: 'World', name: 'Seabed', obj: seabed },
         { group: 'World', name: 'Corals', obj: corals }, { group: 'World', name: 'Seagrass', obj: seagrass },
@@ -588,6 +595,7 @@ async function main() {
 
     // camera: the story's shot camera, the lab director, or a free orbit / fly camera
     if (editor) editor.preUpdate(rdt);
+    syncData();
     if (story) story.update(dt, t);
     if (story && !editor?.sceneView) {
       camera.position.copy(story.cam.position);

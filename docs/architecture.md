@@ -5,7 +5,9 @@ three.js r180, `WebGPURenderer` + TSL node materials, ES modules from jsDelivr v
 
 ## Boot (`src/main.js`)
 
-1. Mode from the URL: `story` (default), `edit` (`?edit`), or `lab` (`?lab`), set as a class on `<html>`.
+1. Mode from the URL: `story` (default), `edit` (`?edit`), or `lab` (`?lab`), set as a class on `<html>`. A built
+   site (`window.OPEN_TUNA_BUILD`) is always `story`. `src/project.js` picks the story: the repo root, or
+   `projects/<slug>/` for `?project=<slug>` (`BASE`, `assetURL`); see [projects-build-data.md](projects-build-data.md).
 2. WebGPU only: an error panel if there is no adapter or no WebGPU backend.
 3. Scene: sky, ocean, seabed (procedural) → GLBs loaded in parallel with `story.json` (fetched as raw text: the
    editor fingerprints it).
@@ -13,8 +15,8 @@ three.js r180, `WebGPURenderer` + TSL node materials, ES modules from jsDelivr v
    (`createFlexingWhale`, `createAnimated` + `SwimPath`), sharks (`Hunter`), turtles, corals, seagrass, the water 50
    (`createWaterTentacles`), marine snow, bubbles.
 5. Post-processing graph (`buildPost`), controls, the lab UI.
-6. Story mode: `Story` (with `applyParam` setters + `actors`) and `Layers`. Edit mode: dynamically imports the
-   editor.
+6. Story mode: a `DataHub` (`src/data.js`, the story's `sources`), then `Story` (with `applyParam` setters + `actors`)
+   and `Layers`, both resolving `{{bindings}}` through it. Edit mode: dynamically imports the editor.
 7. Warm-up: the water 50 and the GPU layers are made visible during `renderer.compileAsync` so their first
    appearance doesn't hitch.
 
@@ -25,6 +27,7 @@ sim time t += dt·timeScale                     (editor can slow / freeze; rdt =
 lab-only school goal · predators (sharks update → tuna.setPredator, scaled by fish-reaction params × path control)
 humpPath / bluePath / turtles step · animation mixers
 editor.preUpdate(rdt)                          (playhead → story.forceP; site-play scroll / auto-play)
+syncData()                                     (timeline changed → DataHub.sync(sources): refetch what changed)
 story.update(dt, t)                            → camera pose, sun, params, school goal, water 50, leap gates,
                                                  creature paths (override what the creatures did above), captions
 render camera ← story.cam  (unless the editor's Scene view: orbit / fly camera)

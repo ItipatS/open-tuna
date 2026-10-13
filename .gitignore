@@ -4,3 +4,4 @@ Thumbs.db
 *.log
 .claude/settings.local.json
 saves/auto/
+projects/

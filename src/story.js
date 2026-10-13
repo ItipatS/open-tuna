@@ -72,8 +72,8 @@ function gate(w, on, t) {
 export class Story {
   // apply: { sun(elevationDeg, azimuthRad), [param id]: (value) => void } for the PARAMS above
   // actors: { bluewhale: { obj, swim | hunter, speed }, … } — what path tracks can move (ACTORS; the school is built in)
-  constructor({ tuna, tentacles, timeline, apply, captionLayer, actors = {} }) {
-    Object.assign(this, { tuna, tentacles, timeline, apply, captionLayer, actors });
+  constructor({ tuna, tentacles, timeline, apply, captionLayer, actors = {}, data = null }) {
+    Object.assign(this, { tuna, tentacles, timeline, apply, captionLayer, actors, data });
     this.pk = { pos: [0, 0, 0], ahead: [0, 0, 0], w: 0 };
     this.tmpV = new THREE.Vector3();
     this.tmpM = new THREE.Matrix4();
@@ -174,7 +174,7 @@ export class Story {
     cam.updateMatrixWorld();
 
     // captions
-    if (this.capVersion !== tl.version) this.buildCaptions();
+    if (this.capVersion !== tl.version || this.capData !== (this.data?.version ?? 0)) this.buildCaptions();
     tl.captions().forEach((c, i) => {
       const el = this.capEls[i], o = captionOpacity(c, x, tl.duration);
       el.style.opacity = o.toFixed(3);
@@ -235,6 +235,8 @@ export class Story {
 
   buildCaptions() {
     this.capVersion = this.timeline.version;
+    this.capData = this.data?.version ?? 0;
+    const R = (v) => (this.data ? this.data.resolve(v) : v); // {{data bindings}}
     // captions live in their own (unpositioned) wrapper so they stack with the media layers in the overlay
     if (!this.capWrap) { this.capWrap = document.createElement('div'); this.capWrap.className = 'caps'; this.captionLayer.prepend(this.capWrap); }
     this.capWrap.replaceChildren();
@@ -243,9 +245,9 @@ export class Story {
       el.className = `cap cap-${c.size || 'medium'}`;
       el.style.top = `${c.y ?? 42}%`;
       const h = document.createElement(c.size === 'large' ? 'h1' : 'h2');
-      (c.title || '').split('\n').forEach((line, i) => { if (i) h.append(document.createElement('br')); h.append(line); });
+      (R(c.title) || '').split('\n').forEach((line, i) => { if (i) h.append(document.createElement('br')); h.append(line); });
       el.append(h);
-      if (c.sub) { const s = document.createElement('p'); s.textContent = c.sub; el.append(s); }
+      if (c.sub) { const s = document.createElement('p'); s.textContent = R(c.sub); el.append(s); }
       this.capWrap.append(el);
       return el;
     });

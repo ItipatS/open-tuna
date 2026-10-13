@@ -67,6 +67,11 @@ await page.screenshot({ path: 'shot.png' });
 - Delete only files your test created (`assets/<test>.svg`, checkpoints named "test …"). **Never delete
   `saves/auto/*`**: the designer's backups land there too.
 - `localStorage.clear()` in the test tab (drafts, clipboard, panel sizes) — only in the headless profile.
+- Test .tuna / data / build features in a **throwaway project**: `P.unpack(await P.pack(ed.current(), {name:'Test'}))`
+  → load `?edit&project=<slug>`. Then the repo's story.json is never touched. Delete only the `projects/<slug>` you
+  created. To capture downloads (`.tuna` / build zip), `delete window.showSaveFilePicker` (the download fallback)
+  and use CDP `Page.setDownloadBehavior` into your scratch dir. Serve an unzipped build with
+  `python -m http.server` on another port to check it.
 - Restart the dev server after changing `tools/serve.py`. Test `serve.ps1` on another port (`-Port 8140`) with
   curl (use `-H "Content-Length: 0"` for empty POSTs: HTTP.sys rejects them otherwise).
 - Before claiming a visual change works: screenshot the affected moments, and check zero console errors and zero

@@ -85,6 +85,16 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 - **3D model clips**: every `.glb` (the built-in creatures or uploads) is an asset that can be dropped on a lane and
   keyframed (position / rotation / size / opacity, Move + Rotate gizmo), with its animation looping or scrubbed by
   the scroll. Editor side panels are resizable (drag the edges).
+- **The editor is now a document-based tool**:
+  - **`.tuna` project files** (a zip of story + assets + checkpoints + preview) open, save and save-as like a
+    .psd, through the File System Access API and working copies in `projects/<slug>/`. There's a projects dialog
+    with previews, and new projects can be blank or a copy.
+  - **Build site** exports a standalone site (no editor code) as a zip or into a folder.
+  - **Live data sources** (API / CMS JSON, with a saved sample as the fallback) bind into layers and captions with
+    `{{bindings}}` (Data tab).
+  - **Turntable previews** of every 3D model in the Assets tab and the inspector.
+
+  Details: docs/projects-build-data.md.
 - **Docs restructured for AI agents**: CLAUDE.md is now a short index → `docs/` (ai-workflows, story-format,
   architecture, editor, dev-server, assets, testing, gotchas). AGENTS.md points there.
 - **Creature paths have priority**: no sliding / snapping, the school ignores predators + cursor on a path, creatures
@@ -116,7 +126,10 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 7. Loading: ~25 MB of GLBs, loader says "OPEN OCEAN" — rebrand, consider Draco/Meshopt compression.
 8. Mobile / non-WebGPU: error panel only (owner rule: no WebGL fallback).
 9. Later story chapters (TBD with the team) — new chapters = new tracks/drivers + chapters in `story.json`.
-10. Editor next steps (if the designer asks): keyframe more things (tuna counts / school position, tentacle look
+10. Tool next steps: double-clicking a `.tuna` in the OS (a file association that starts the server and opens it),
+    "repeat per item" layers for data lists (product grids from the CMS), a server-side proxy for secret API keys,
+    publishing a build straight to a host.
+11. Editor next steps (if the designer asks): keyframe more things (tuna counts / school position, tentacle look
     params, colour grade), easing curve editor for keys, audio track for music sync, multi-select, placing GLB
     props as world layers, layer masks / blend modes, text layers with brand fonts once brand assets arrive.
 

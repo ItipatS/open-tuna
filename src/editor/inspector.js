@@ -6,6 +6,8 @@ import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime } from '../timeline.js';
 import { isGPU, REVEALS } from '../layers.js';
 import { LOOKS } from './layer-tools.js';
+import { hasBinding } from '../data.js';
+import { assetURL } from '../project.js';
 
 export class Inspector {
   constructor(ed, root) {
@@ -225,6 +227,10 @@ export class Inspector {
     const gpu = isGPU(t);
     this.header(el, t.label || 'Layer', `${KINDS[t.kind] || t.kind} layer · ${world ? 'in the 3D world' : gpu ? 'in the scene (shader)' : 'HTML overlay'} · ${fmtTime(t.a)} → ${fmtTime(t.b)}`);
     el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
+    if (t.kind === 'model' && t.src) {
+      const a = ed.assets.items.find((x) => x.file === t.src) ?? { file: t.src };
+      el.append(h('div', { class: 'ed-preview', title: 'Hover to turn it around' }, ed.thumbs.spin(a)));
+    }
     if (t.kind === 'html') el.append(this.text('HTML', () => t.html, (v) => { t.html = v; }, { area: true, placeholder: '<h2>Title</h2><p>Text</p> — any HTML; style with inline CSS' }));
     else if (t.kind === 'text') {
       el.append(this.text('Small line', () => t.kicker, (v) => { t.kicker = v; }, { placeholder: 'e.g. CHAPTER II' }));
@@ -234,6 +240,12 @@ export class Inspector {
       el.append(this.select('Align', { center: 'Centre', left: 'Left', right: 'Right' }, () => t.align || 'center', (v) => { t.align = v; }));
       el.append(this.text('Colour', () => t.color ?? '#f4fbff', (v) => { t.color = v; }, { placeholder: '#f4fbff' }));
     } else if (t.kind !== 'glass') el.append(this.text(t.kind === 'iframe' ? 'Page URL' : 'File / URL', () => t.src, (v) => { t.src = v; }));
+    // {{data bindings}}: what they say right now (Data tab)
+    const bound = ['title', 'kicker', 'body', 'src', 'html'].filter((f) => hasBinding(t[f]));
+    if (bound.length) {
+      for (const f of bound) el.append(this.readout(`→ ${f}`, () => (ed.app.data.resolve(t[f]) || '(empty — fallback)').slice(0, 80)));
+      el.append(h('div', { class: 'hint' }, 'Live data: {{…}} is filled from the Data tab’s sources (sample until the API answers).'));
+    }
     if (t.kind === 'model') {
       const it = ed.app.layers.item(t.id);
       el.append(this.num('Size (m)', () => t.w ?? 6, (v) => { t.w = v; }, { step: 0.1, min: 0.05, max: 500, dec: 2 }));
@@ -246,7 +258,7 @@ export class Inspector {
     }
     this.buttons(el,
       t.kind === 'image' || t.kind === 'video' || t.kind === 'iframe' || t.kind === 'model' ? btn('Replace file…', () => lt.replace(t)) : null,
-      t.src ? this.free(btn('Open ↗', () => window.open(t.src, '_blank'))) : null,
+      t.src ? this.free(btn('Open ↗', () => window.open(assetURL(ed.app.data.resolve(t.src)), '_blank'))) : null,
     );
     if ((t.kind === 'image' || t.kind === 'video') && !world) {
       el.append(this.select('Render', { gpu: 'In the scene (shader effects)', dom: 'HTML overlay (plain)' }, () => t.render || 'dom', (v) => { t.render = v; if (v === 'gpu') t.depth ??= 8; }));

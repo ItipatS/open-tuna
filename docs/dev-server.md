@@ -10,6 +10,10 @@ is 128 (the page fetches many modules and models at once).
 
 ## Endpoints (`/__editor/…`)
 
+Every endpoint takes an optional **`project=<slug>`**: it then works on `projects/<slug>/` (an opened .tuna, same
+layout: `story.json`, `assets/`, `saves/`) instead of the repo root, and paths in requests / replies are relative
+to that folder. Git endpoints refuse projects. See [projects-build-data.md](projects-build-data.md).
+
 | Method | Path | Does |
 |---|---|---|
 | GET | `ping` | `{ok, save:true, git, branch}`: the editor checks whether in-place saving works |
@@ -21,12 +25,17 @@ is 128 (the page fetches many modules and models at once).
 | POST | `upload?name=` | body = file bytes → `assets/<slug>.<ext>` (whitelisted extensions; never overwrites; an identical re-upload reuses the file) |
 | GET | `assets` | every file under `assets/` + the root `*.glb` models (`builtin: true`), newest first |
 | POST | `asset-delete?file=` | deletes one file under `assets/` (built-ins can't be deleted) |
+| GET | `files` | what a .tuna holds: `story.json`, `assets/**`, `saves/checkpoints/*.json` with size / mtime |
+| GET | `projects` | working copies in `projects/`: `{project, name (manifest), mtime, thumb}`, newest first |
+| POST | `project/new?name=` | creates `projects/<slug>/` (slug from the name, `-2`… if taken) → `{project}` |
+| POST | `put?project=&file=` | body = bytes → one file of a project (only `story.json`, `manifest.json`, `thumb.webp/png`, `assets/**` with an allowed extension, `saves/checkpoints/*.json`); overwrites. Projects only |
 | GET | `git/status` | `{branch, upstream, ahead, changes}` for story.json / saves/checkpoints / assets |
 | POST | `git/commit` | body `{message}`: commits **only** story.json, saves/checkpoints, assets |
 | POST | `git/push` | pushes the current branch (`-u origin HEAD` if no upstream); `GIT_TERMINAL_PROMPT=0` |
 
 **Safety.** Reads and deletes are limited to `story.json`, `saves/**/*.json` and `assets/**`. Nothing else can be
-written except through `save` / `checkpoint` / `upload`.
+written except through `save` / `checkpoint` / `upload` / `put` (projects only, whitelisted paths, no `..`).
+Project slugs must match `[a-z0-9][a-z0-9-]{0,62}`.
 
 **Editing story.json from outside the editor** (Claude, a git pull): an open editor tab's next save gets a 409 and
 asks the designer *Load theirs / Keep mine*. Out-of-date tabs (with no hash header) can't save at all.

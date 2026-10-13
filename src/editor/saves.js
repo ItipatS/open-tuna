@@ -1,11 +1,14 @@
 // Save system: Save (story.json; the server keeps the previous version in saves/auto/), autosave,
 // named checkpoints (saves/checkpoints/), an Open / Restore window (checkpoints, autosaves, git history,
 // browser draft, import), export, and git commit / push. Without the dev server (e.g. GitHub Pages) it
-// falls back to the File System Access API / downloads, and the browser draft.
+// falls back to the File System Access API / downloads, and the browser draft. In a .tuna project (?project=)
+// everything goes to its working copy in projects/<slug>/, and a manual Save also writes the .tuna file
+// (src/editor/project.js).
 import { h, btn, download } from './dom.js';
 import { dialog } from './menu.js';
+import { editorAPI, PROJECT } from '../project.js';
 
-const DRAFT_KEY = 'openTuna.draft.v1';
+const DRAFT_KEY = `openTuna.draft.v1${PROJECT ? `.${PROJECT}` : ''}`; // per project
 const AUTO_KEY = 'openTuna.autosave';
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 // FNV-1a over the UTF-8 bytes (same as tools/serve.py) — fingerprint of the story.json on disk
@@ -17,7 +20,7 @@ export function fnv1a(text) {
 const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 async function api(path, opts) {
-  const r = await fetch(`./__editor/${path}`, { cache: 'no-store', ...opts });
+  const r = await fetch(editorAPI(path), { cache: 'no-store', ...opts });
   const type = r.headers.get('content-type') || '';
   const data = type.includes('json') ? await r.text() : '';
   if (!r.ok) {
@@ -100,13 +103,15 @@ export class Saves {
     try {
       if (this.server !== false) {
         try {
-          const r = await fetch('./__editor/save', { method: 'POST', body: text, headers: { 'Content-Type': 'application/json', 'X-Base-Hash': this.baseHash, ...(force ? { 'X-Force': '1' } : {}) } });
+          const r = await fetch(editorAPI('save'), { method: 'POST', body: text, headers: { 'Content-Type': 'application/json', 'X-Base-Hash': this.baseHash, ...(force ? { 'X-Force': '1' } : {}) } });
           const j = await r.json().catch(() => ({}));
           if (r.status === 409) { this.conflict = true; this.theirs = j.current; this.ed.syncButtons(); return this.conflictDialog(); }
           if (!r.ok) throw new Error(j.error || r.status);
           this.baseHash = fnv1a(text);
           this.conflict = false;
-          return this.done(text, auto ? '' : 'Saved story.json', auto);
+          this.done(text, auto || this.ed.project?.isFile ? '' : 'Saved story.json', auto);
+          if (!auto && this.ed.project?.isFile) await this.ed.project.saveTuna(); // then the .tuna file itself
+          return;
         } catch (e) {
           if (this.server) { this.ed.toast(`Save failed: ${e.message}`, true); return; }
           this.server = false;
@@ -161,6 +166,7 @@ export class Saves {
   status() {
     if (this.conflict) return { text: '⚠ Changed on disk — click Save', cls: 'dirty' };
     if (this.dirty) return { text: this.autosave && this.server ? 'Unsaved · autosave on' : 'Unsaved changes', cls: 'dirty' };
+    if (this.ed.project?.tunaDirty) return { text: `${this.savedAt ? `${this.auto ? 'Autosaved' : 'Saved'} ${clock(this.savedAt)} · ` : ''}.tuna not saved`, cls: 'warn', title: `Changes are kept in the project’s working copy. Save (Ctrl+S) also writes ${this.ed.project.fileName}.` };
     if (this.savedAt) return { text: `${this.auto ? 'Autosaved' : 'Saved'} ${clock(this.savedAt)}`, cls: 'ok' };
     return { text: this.server === false ? 'No editor server (Save downloads)' : 'Saved', cls: '' };
   }
@@ -169,7 +175,7 @@ export class Saves {
   // copy a dropped / picked file into the project's assets/ folder; returns its path (e.g. "assets/logo.png")
   async upload(file) {
     if (!this.server) throw new Error('Adding files needs the editor server — start the editor with “Open Editor”');
-    const r = await fetch(`./__editor/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+    const r = await fetch(editorAPI(`upload?name=${encodeURIComponent(file.name)}`), { method: 'POST', body: file });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || r.status);
     return j.file;

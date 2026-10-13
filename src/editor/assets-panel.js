@@ -1,9 +1,11 @@
 // Assets tab (left panel): every file in the project's assets/ folder, with thumbnails. Drag one onto the
 // timeline (into a lane, at the drop time) or onto the viewport; double-click adds it at the playhead.
-// Upload adds files from your computer; right-click for more (where it's used, copy path, delete).
+// Upload adds files from your computer; right-click for more (where it's used, copy path, delete). 3D models show
+// a turntable preview (thumbs.js) that spins on hover. A .tuna dropped here opens as a project.
 import { h, btn } from './dom.js';
 import { dialog } from './menu.js';
 import { kindOf, MEDIA_EXT } from '../layers.js';
+import { assetURL, editorAPI } from '../project.js';
 
 const ACCEPT = Object.values(MEDIA_EXT).flat().map((e) => `.${e}`).join(',');
 const kb = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -28,6 +30,8 @@ export class AssetsPanel {
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
       root.classList.remove('drop');
+      const tuna = [...e.dataTransfer.files].find((f) => /\.tuna$/i.test(f.name));
+      if (tuna) return this.ed.project.openTuna(tuna);
       for (const f of e.dataTransfer.files) await this.uploadOne(f);
       this.refresh();
     });
@@ -35,7 +39,7 @@ export class AssetsPanel {
 
   async refresh() {
     try {
-      const r = await fetch('./__editor/assets', { cache: 'no-store' });
+      const r = await fetch(editorAPI('assets'), { cache: 'no-store' });
       if (!r.ok) throw new Error(r.status);
       this.items = (await r.json()).assets;
       this.error = null;
@@ -58,9 +62,11 @@ export class AssetsPanel {
     this.$list.replaceChildren(...items.map((a) => {
       const kind = kindOf(a.file);
       const used = this.usage(a.file).length;
-      const thumb = kind === 'image' ? h('img', { src: a.file, loading: 'lazy', draggable: false })
-        : kind === 'video' ? h('video', { src: `${a.file}#t=0.5`, muted: true, preload: 'metadata' })
-          : h('div', { class: 'ico' }, kind === 'iframe' ? 'HTML' : kind === 'model' ? '3D MODEL' : (a.file.split('.').pop() || '?').toUpperCase());
+      const url = assetURL(a.file);
+      const thumb = kind === 'image' ? h('img', { src: url, loading: 'lazy', draggable: false })
+        : kind === 'video' ? h('video', { src: `${url}#t=0.5`, muted: true, preload: 'metadata' })
+          : kind === 'model' ? this.ed.thumbs.spin(a) // turntable preview, spins on hover
+            : h('div', { class: 'ico' }, kind === 'iframe' ? 'HTML' : (a.file.split('.').pop() || '?').toUpperCase());
       const el = h('div', { class: 'ed-asset', draggable: true, title: `${a.file}\n${kb(a.size)}${used ? ` · used by ${used} layer(s)` : ''}` },
         h('div', { class: 'th' }, thumb, used ? h('span', { class: 'used' }, String(used)) : null,
           a.builtin ? h('span', { class: 'bi' }, 'built-in') : null, kind === 'model' ? h('span', { class: 'sz' }, kb(a.size)) : null),
@@ -78,7 +84,7 @@ export class AssetsPanel {
           kind !== 'iframe' && kind !== 'model' ? { label: 'Add in the 3D world', onClick: () => this.ed.lt.addAsset(a.file, { space: 'world' }) } : null,
           { label: used ? `Used by ${used} layer(s) — select the first` : 'Not used yet', disabled: !used, onClick: () => { const t = this.usage(a.file)[0]; this.ed.select({ kind: 'track', track: t }); this.ed.setTime(t.a); } },
           { label: 'Copy path', onClick: () => navigator.clipboard?.writeText(a.file) },
-          { label: 'Open ↗', onClick: () => window.open(a.file, '_blank') },
+          { label: 'Open ↗', onClick: () => window.open(assetURL(a.file), '_blank') },
           '-',
           { label: a.builtin ? 'Built-in model (used by the scene) — can’t be deleted here' : 'Delete file…', danger: !a.builtin, disabled: !!a.builtin, onClick: () => this.remove(a, used) },
         ]);
@@ -88,7 +94,7 @@ export class AssetsPanel {
   }
 
   async uploadOne(f) {
-    if (!kindOf(f.name)) { this.ed.toast(`Skipped ${f.name} — images, videos or .html only`, true); return; }
+    if (!kindOf(f.name)) { this.ed.toast(`Skipped ${f.name} — images, videos, .glb models or .html only`, true); return; }
     try { await this.ed.saves.upload(f); } catch (e) { this.ed.toast(e.message, true); }
   }
 
@@ -113,7 +119,7 @@ export class AssetsPanel {
         h('p', { class: 'muted' }, 'Deleted files can be recovered from git history only if they were committed.')],
       buttons: [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: async () => {
         try {
-          const r = await fetch(`./__editor/asset-delete?file=${encodeURIComponent(a.file)}`, { method: 'POST', body: '' });
+          const r = await fetch(editorAPI(`asset-delete?file=${encodeURIComponent(a.file)}`), { method: 'POST', body: '' });
           if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
           this.ed.toast(`Deleted ${a.file}`);
           this.refresh();

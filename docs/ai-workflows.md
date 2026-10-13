@@ -27,6 +27,11 @@ The owner and the designer work in the editor (`?edit`) and talk to you in three
 
 ## Editing story.json safely
 
+**Which story?** A Copy ref starting `Open Tuna — project "Name" (projects/<slug>/story.json)` is a .tuna project:
+edit that file (its assets are in `projects/<slug>/assets/`). The designer must then press Ctrl+S to write it into
+their .tuna file. If they send a `.tuna` itself, it's a zip: unzip it, edit `story.json`, zip it back (keep
+`manifest.json`). Otherwise it's the repo's `story.json`. See [projects-build-data.md](projects-build-data.md).
+
 The designer may have the editor open, and it **autosaves story.json about every minute**.
 
 1. `git diff -- story.json` first. Uncommitted changes there are the designer's work. Keep them.

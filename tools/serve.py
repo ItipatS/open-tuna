@@ -5,23 +5,32 @@
     python3 tools/serve.py --open     -> also opens http://localhost:8123/?edit  (the editor)
     python3 tools/serve.py 8200       -> another port
 
-Editor endpoints (src/editor/saves.js). Only listens on 127.0.0.1. Stdlib only.
+Editor endpoints (src/editor/saves.js, src/editor/project.js). Only listens on 127.0.0.1. Stdlib only.
 tools/serve.ps1 is the same server for Windows machines without Python - keep them in sync.
+
+Every endpoint works on the repo's own story (story.json, assets/, saves/ at the root) or, with ?project=<slug>, on
+an opened .tuna project unpacked in projects/<slug>/ (same layout). Paths in requests / replies are relative to that
+project root; the built-in *.glb models always live at the repo root.
     GET  /__editor/ping                  {ok, save, git, branch}
     POST /__editor/save                  body = story.json; the previous story.json is kept in saves/auto/.
                                          Header X-Base-Hash = FNV-1a of the story.json the editor loaded; if the file
                                          changed on disk since (Claude / another tab), 409 {conflict, current} unless
                                          X-Force: 1. Saves without the header (old editor tabs) are refused.
     POST /__editor/checkpoint?name=...   body = story.json -> saves/checkpoints/<stamp>_<name>.json
-    GET  /__editor/list                  checkpoints, autosaves, git history of story.json
+    GET  /__editor/list                  checkpoints, autosaves, git history of story.json (repo only)
     GET  /__editor/load?file=<path>      story.json or a file in saves/  |  ?git=<commit>  (story.json at that commit)
     POST /__editor/delete?file=<path>    delete a checkpoint
-    GET  /__editor/git/status            {branch, upstream, changes}
     POST /__editor/upload?name=file.png  body = file bytes -> assets/<name> (never overwrites) -> {file}
     GET  /__editor/assets                every file under assets/ {file, size, mtime} + the root *.glb models (builtin)
     POST /__editor/asset-delete?file=    delete one file under assets/
-    POST /__editor/git/commit            body {message} -> commits story.json + saves/checkpoints + assets
-    POST /__editor/git/push              pushes the current branch
+    GET  /__editor/files                 what a .tuna holds: story.json, assets/**, saves/checkpoints/*.json
+    GET  /__editor/projects              unpacked .tuna projects in projects/ {project, name, mtime, thumb}
+    POST /__editor/project/new?name=     make projects/<slug>/ -> {project}
+    POST /__editor/put?project=&file=    body = bytes -> one file of a project (story.json, manifest.json, thumb.*,
+                                         assets/**, saves/checkpoints/*.json); overwrites. Projects only.
+    GET  /__editor/git/status            {branch, upstream, changes}                       (repo only)
+    POST /__editor/git/commit            body {message} -> commits story.json + saves/checkpoints + assets  (repo only)
+    POST /__editor/git/push              pushes the current branch                         (repo only)
 """
 import datetime
 import http.server
@@ -36,11 +45,9 @@ import urllib.parse
 import webbrowser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STORY = os.path.join(ROOT, 'story.json')
-AUTO = os.path.join(ROOT, 'saves', 'auto')
-CHECK = os.path.join(ROOT, 'saves', 'checkpoints')
-ASSETS = os.path.join(ROOT, 'assets')
-UPLOAD_EXT = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb'}
+PROJECTS = os.path.join(ROOT, 'projects')
+UPLOAD_EXT = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb', 'gltf'}
+SLUG = re.compile(r'[a-z0-9][a-z0-9-]{0,62}')
 KEEP_AUTO = 100
 TYPES = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -90,31 +97,83 @@ def write(path, body):
     os.replace(tmp, path)
 
 
-def listing(folder):
-    if not os.path.isdir(folder):
-        return []
-    out = []
-    for f in sorted(os.listdir(folder), reverse=True):
-        if not f.endswith('.json'):
-            continue
-        p = os.path.join(folder, f)
-        m = re.match(r'(\d{4}-\d\d-\d\d)_(\d\d)(\d\d)(\d\d)_?(.*)\.json$', f)
-        out.append({
-            'file': os.path.relpath(p, ROOT).replace(os.sep, '/'),
-            'name': (m.group(5).replace('-', ' ') if m and m.group(5) else '') or f[:-5],
-            'time': f'{m.group(1)} {m.group(2)}:{m.group(3)}:{m.group(4)}' if m else '',
-            'size': os.path.getsize(p),
-        })
-    return out
+class Proj:
+    """The story being edited: the repo root (slug '') or an unpacked .tuna in projects/<slug>/."""
 
+    def __init__(self, slug=''):
+        if slug:
+            if not SLUG.fullmatch(slug):
+                raise ValueError('bad project name')
+            self.root = os.path.join(PROJECTS, slug)
+            if not os.path.isdir(self.root):
+                raise ValueError(f'no project "{slug}" (open its .tuna file again)')
+        else:
+            self.root = ROOT
+        self.slug = slug
+        self.story = os.path.join(self.root, 'story.json')
+        self.saves = os.path.join(self.root, 'saves')
+        self.auto = os.path.join(self.saves, 'auto')
+        self.check = os.path.join(self.saves, 'checkpoints')
+        self.assets = os.path.join(self.root, 'assets')
 
-def safe_file(rel):
-    """story.json or a .json inside saves/ - nothing else can be read or deleted."""
-    p = os.path.normpath(os.path.join(ROOT, rel or ''))
-    saves = os.path.join(ROOT, 'saves') + os.sep
-    if p == STORY or (p.startswith(saves) and p.endswith('.json')):
+    def rel(self, p):
+        return os.path.relpath(p, self.root).replace(os.sep, '/')
+
+    def inside(self, rel):
+        p = os.path.normpath(os.path.join(self.root, rel or ''))
+        if not p.startswith(self.root + os.sep):
+            raise ValueError('path outside the project')
         return p
-    raise ValueError('file not allowed')
+
+    def safe_file(self, rel):
+        """story.json or a .json inside saves/ - nothing else can be read or deleted."""
+        p = os.path.normpath(os.path.join(self.root, rel or 'story.json'))
+        if p == self.story or (p.startswith(self.saves + os.sep) and p.endswith('.json')):
+            return p
+        raise ValueError('file not allowed')
+
+    def listing(self, folder):
+        if not os.path.isdir(folder):
+            return []
+        out = []
+        for f in sorted(os.listdir(folder), reverse=True):
+            if not f.endswith('.json'):
+                continue
+            p = os.path.join(folder, f)
+            m = re.match(r'(\d{4}-\d\d-\d\d)_(\d\d)(\d\d)(\d\d)_?(.*)\.json$', f)
+            out.append({
+                'file': self.rel(p),
+                'name': (m.group(5).replace('-', ' ') if m and m.group(5) else '') or f[:-5],
+                'time': f'{m.group(1)} {m.group(2)}:{m.group(3)}:{m.group(4)}' if m else '',
+                'size': os.path.getsize(p),
+            })
+        return out
+
+    def files(self, folder):
+        out = []
+        for dirpath, _, names in os.walk(folder):
+            for n in sorted(names):
+                if n.endswith('.tmp'):
+                    continue
+                full = os.path.join(dirpath, n)
+                out.append({'file': self.rel(full), 'size': os.path.getsize(full), 'mtime': int(os.path.getmtime(full))})
+        return out
+
+    def putable(self, rel):
+        """Where a .tuna's files may be written: story.json, manifest.json, thumb.*, assets/**, saves/checkpoints/*.json."""
+        rel = (rel or '').replace('\\', '/')
+        p = self.inside(rel)
+        r = self.rel(p)
+        ext = r.rsplit('.', 1)[-1].lower() if '.' in r else ''
+        if r in ('story.json', 'manifest.json', 'thumb.webp', 'thumb.png') \
+                or (r.startswith('assets/') and ext in UPLOAD_EXT) \
+                or (r.startswith('saves/checkpoints/') and ext == 'json' and r.count('/') == 2):
+            return p
+        raise ValueError(f'{rel} can\'t be part of a project')
+
+
+def slugify(name):
+    return re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')[:48] or 'project'
 
 
 class Server(http.server.ThreadingHTTPServer):
@@ -199,43 +258,61 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return None
             return super().do_GET()
         try:
+            P = Proj(q.get('project', ''))
             if path == '/__editor/ping':
                 g = has_git()
-                return self.reply(200, {'ok': True, 'save': True, 'git': g, 'branch': git('branch', '--show-current')[1] if g else ''})
+                return self.reply(200, {'ok': True, 'save': True, 'git': g and not P.slug, 'branch': git('branch', '--show-current')[1] if g else ''})
             if path == '/__editor/list':
                 hist = []
-                if has_git():
+                if not P.slug and has_git():
                     code, out = git('log', '-n', '60', '--format=%h|%cI|%an|%s', '--', 'story.json')
                     if code == 0:
                         for line in out.splitlines():
                             h, d, a, s = (line.split('|', 3) + ['', '', ''])[:4]
                             hist.append({'hash': h, 'time': d[:19].replace('T', ' '), 'author': a, 'subject': s})
-                return self.reply(200, {'checkpoints': listing(CHECK), 'autos': listing(AUTO), 'git': hist})
+                return self.reply(200, {'checkpoints': P.listing(P.check), 'autos': P.listing(P.auto), 'git': hist})
             if path == '/__editor/load':
                 if 'git' in q:
-                    if not re.fullmatch(r'[0-9a-fA-F]{4,40}', q['git']):
+                    if P.slug or not re.fullmatch(r'[0-9a-fA-F]{4,40}', q['git']):
                         raise ValueError('bad commit')
                     code, out = git('show', f"{q['git']}:story.json")
                     if code:
                         raise ValueError(out)
                     return self.raw(out.encode('utf-8'))
-                with open(safe_file(q.get('file', 'story.json')), 'rb') as f:
+                with open(P.safe_file(q.get('file', 'story.json')), 'rb') as f:
                     return self.raw(f.read())
             if path == '/__editor/assets':
-                out = []
-                for dirpath, _, names in os.walk(ASSETS):
-                    for n in sorted(names):
-                        full = os.path.join(dirpath, n)
-                        out.append({'file': os.path.relpath(full, ROOT).replace(os.sep, '/'), 'size': os.path.getsize(full), 'mtime': int(os.path.getmtime(full))})
-                out.sort(key=lambda a: -a['mtime'])
+                out = sorted(P.files(P.assets), key=lambda a: -a['mtime'])
                 # the project's own creature / reef models (repo root) are assets too, but can't be deleted
                 for n in sorted(os.listdir(ROOT)):
                     if n.lower().endswith(('.glb', '.gltf')):
                         full = os.path.join(ROOT, n)
                         out.append({'file': n, 'size': os.path.getsize(full), 'mtime': int(os.path.getmtime(full)), 'builtin': True})
                 return self.reply(200, {'assets': out})
+            if path == '/__editor/files':
+                out = P.files(P.assets) + P.files(P.check)
+                if os.path.isfile(P.story):
+                    out.insert(0, {'file': 'story.json', 'size': os.path.getsize(P.story), 'mtime': int(os.path.getmtime(P.story))})
+                return self.reply(200, {'files': out})
+            if path == '/__editor/projects':
+                out = []
+                if os.path.isdir(PROJECTS):
+                    for slug in os.listdir(PROJECTS):
+                        d = os.path.join(PROJECTS, slug)
+                        if not SLUG.fullmatch(slug) or not os.path.isfile(os.path.join(d, 'story.json')):
+                            continue
+                        name = slug
+                        try:
+                            with open(os.path.join(d, 'manifest.json'), encoding='utf-8') as f:
+                                name = json.load(f).get('name') or slug
+                        except (OSError, ValueError):
+                            pass
+                        thumb = next((f'projects/{slug}/{t}' for t in ('thumb.webp', 'thumb.png') if os.path.isfile(os.path.join(d, t))), '')
+                        out.append({'project': slug, 'name': name, 'mtime': int(os.path.getmtime(os.path.join(d, 'story.json'))), 'thumb': thumb})
+                out.sort(key=lambda p: -p['mtime'])
+                return self.reply(200, {'projects': out})
             if path == '/__editor/git/status':
-                if not has_git():
+                if P.slug or not has_git():
                     return self.reply(200, {'git': False})
                 br = git('branch', '--show-current')[1]
                 up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
@@ -250,28 +327,46 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path, q = self.route()
         try:
             with LOCK:
+                if path == '/__editor/project/new':
+                    base = slugify(q.get('name', ''))
+                    slug, n = base, 1
+                    while os.path.exists(os.path.join(PROJECTS, slug)):
+                        n += 1
+                        slug = f'{base}-{n}'
+                    os.makedirs(os.path.join(PROJECTS, slug))
+                    return self.reply(200, {'ok': True, 'project': slug})
+                P = Proj(q.get('project', ''))
+                if path == '/__editor/put':
+                    if not P.slug:
+                        raise ValueError('put only writes into projects/')
+                    p = P.putable(q.get('file', ''))
+                    body = self.body()
+                    if P.rel(p) == 'story.json':
+                        valid_story(body)
+                    write(p, body)
+                    return self.reply(200, {'ok': True, 'file': P.rel(p)})
                 if path == '/__editor/save':
                     body = self.body()
                     valid_story(body)
-                    if os.path.exists(STORY):
-                        with open(STORY, 'rb') as f:
+                    if os.path.exists(P.story):
+                        with open(P.story, 'rb') as f:
                             old = f.read()
                         base = self.headers.get('X-Base-Hash')
                         if self.headers.get('X-Force') != '1' and base != fnv1a(old):
                             return self.reply(409, {'ok': False, 'conflict': True, 'error': 'story.json changed on disk since the editor loaded it' if base else 'this editor tab is out of date - reload it', 'current': old.decode('utf-8', 'replace')})
                         if old != body:  # keep the previous version
-                            write(os.path.join(AUTO, f'{stamp()}.json'), old)
-                            for f in listing(AUTO)[KEEP_AUTO:]:
-                                os.remove(os.path.join(ROOT, f['file']))
-                    write(STORY, body)
+                            write(os.path.join(P.auto, f'{stamp()}.json'), old)
+                            for f in P.listing(P.auto)[KEEP_AUTO:]:
+                                os.remove(os.path.join(P.root, f['file']))
+                    write(P.story, body)
                     return self.reply(200, {'ok': True})
                 if path == '/__editor/checkpoint':
                     body = self.body()
                     valid_story(body)
                     slug = re.sub(r'[^A-Za-z0-9]+', '-', q.get('name', '')).strip('-')[:60] or 'checkpoint'
-                    p = os.path.join(CHECK, f'{stamp()}_{slug}.json')
+                    p = os.path.join(P.check, f'{stamp()}_{slug}.json')
                     write(p, body)
-                    return self.reply(200, {'ok': True, 'file': os.path.relpath(p, ROOT).replace(os.sep, '/')})
+                    return self.reply(200, {'ok': True, 'file': P.rel(p)})
                 if path == '/__editor/upload':
                     name = os.path.basename(q.get('name', 'file'))
                     stem, ext = os.path.splitext(name)
@@ -279,32 +374,34 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if ext not in UPLOAD_EXT:
                         raise ValueError(f'.{ext} files are not allowed')
                     stem = re.sub(r'[^A-Za-z0-9_-]+', '-', stem).strip('-')[:60] or 'file'
-                    p, n = os.path.join(ASSETS, f'{stem}.{ext}'), 1
+                    p, n = os.path.join(P.assets, f'{stem}.{ext}'), 1
                     body = self.body()
                     while os.path.exists(p):
                         with open(p, 'rb') as f:
                             if f.read() == body:  # same file uploaded again: reuse it
                                 break
                         n += 1
-                        p = os.path.join(ASSETS, f'{stem}-{n}.{ext}')
+                        p = os.path.join(P.assets, f'{stem}-{n}.{ext}')
                     else:
                         write(p, body)
-                    return self.reply(200, {'ok': True, 'file': os.path.relpath(p, ROOT).replace(os.sep, '/')})
+                    return self.reply(200, {'ok': True, 'file': P.rel(p)})
                 if path == '/__editor/asset-delete':
-                    p = os.path.normpath(os.path.join(ROOT, q.get('file', '')))
-                    if not p.startswith(ASSETS + os.sep) or not os.path.isfile(p):
+                    p = os.path.normpath(os.path.join(P.root, q.get('file', '')))
+                    if not p.startswith(P.assets + os.sep) or not os.path.isfile(p):
                         raise ValueError('not a file in assets/')
                     os.remove(p)
                     return self.reply(200, {'ok': True})
                 if path == '/__editor/delete':
-                    p = safe_file(q.get('file'))
-                    if not p.startswith(CHECK + os.sep):
+                    p = P.safe_file(q.get('file'))
+                    if not p.startswith(P.check + os.sep):
                         raise ValueError('only checkpoints can be deleted')
                     os.remove(p)
                     return self.reply(200, {'ok': True})
+                if path in ('/__editor/git/commit', '/__editor/git/push') and P.slug:
+                    raise ValueError('a .tuna project is saved as a file, not to git')
                 if path == '/__editor/git/commit':
                     msg = (json.loads(self.body() or b'{}').get('message') or '').strip() or 'Update story'
-                    paths = ['story.json'] + [d for d, full in (('saves/checkpoints', CHECK), ('assets', ASSETS)) if os.path.isdir(full) and os.listdir(full)]
+                    paths = ['story.json'] + [d for d, full in (('saves/checkpoints', P.check), ('assets', P.assets)) if os.path.isdir(full) and os.listdir(full)]
                     code, out = git('add', '--', *paths)
                     if code == 0:
                         code, out = git('commit', '-m', msg, '--', *paths)
