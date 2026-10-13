@@ -17,6 +17,7 @@ import { createJellyBloom } from './jellies.js';
 import { createSeagrass } from './vegetation.js';
 import { Director } from './director.js';
 import { Story, flightTargets } from './story.js';
+import { Timeline } from './timeline.js';
 import { createWaterTentacles } from './tentacles.js';
 
 // Per-model orientation overrides (flip = the artist's pivot/forward axis points the wrong way).
@@ -32,6 +33,22 @@ const CONFIG = {
 // radius (m) of the play area around the reef; everything is kept inside it
 const STAGE = 42;
 
+// three r180 bug: a viewport (refraction) copy texture used inside a render target is a clone that
+// shares its `image` with the original, so after a resize one of them sees the new size already set,
+// never flags an update, and keeps its old GPU texture. Once the canvas is wider/taller than at load
+// the copy is out of bounds and every frame is dropped (black screen after a resize or fullscreen,
+// and in the editor viewport). Track each copy texture's size ourselves and force a reallocation.
+const vtUpdateBefore = THREE.ViewportTextureNode.prototype.updateBefore;
+const vtSize = new THREE.Vector2(), vtAllocated = new WeakMap();
+THREE.ViewportTextureNode.prototype.updateBefore = function (frame) {
+  const rt = frame.renderer.getRenderTarget();
+  if (rt) vtSize.set(rt.width, rt.height); else frame.renderer.getDrawingBufferSize(vtSize);
+  const tex = this.getTextureForReference(rt), key = `${vtSize.x}x${vtSize.y}`;
+  if (vtAllocated.has(tex) && vtAllocated.get(tex) !== key) tex.needsUpdate = true;
+  vtAllocated.set(tex, key);
+  return vtUpdateBefore.call(this, frame);
+};
+
 const $ = (id) => document.getElementById(id);
 const loaderEl = $('loader'), statusEl = $('status'), barEl = $('bar');
 function fail(msg) { loaderEl.classList.add('error'); statusEl.textContent = msg; throw new Error(msg); }
@@ -39,7 +56,9 @@ function fail(msg) { loaderEl.classList.add('error'); statusEl.textContent = msg
 async function main() {
   const params = new URLSearchParams(location.search);
   const LAB = params.has('lab'); // playground panel + shot director instead of the scroll story
-  if (!LAB) document.documentElement.classList.add('story');
+  const EDIT = !LAB && params.has('edit'); // timeline editor around the story (src/editor/)
+  let editor = null;
+  document.documentElement.classList.add(LAB ? 'lab' : EDIT ? 'edit' : 'story');
 
   // ------------------------------------------------------------------ WebGPU only
   if (!navigator.gpu) fail('WebGPU is not available in this browser.\nUse a current Chrome / Edge (or Safari 26+, Firefox 141+ on Windows).');
@@ -81,9 +100,8 @@ async function main() {
   scene.add(hemi);
 
   // ------------------------------------------------------------------ procedural world
-  scene.add(createSky());
-  scene.add(createOcean());
-  scene.add(createSeabed());
+  const sky = createSky(), ocean = createOcean(), seabed = createSeabed();
+  scene.add(sky, ocean, seabed);
 
   // ------------------------------------------------------------------ assets
   const manager = new THREE.LoadingManager();
@@ -93,7 +111,9 @@ async function main() {
     tuna: 'tuna_fish.glb', reef: 'coral_fish.glb', coral: 'coral_piece.glb', shark: 'model_54a_-_caribbean_reef_shark.glb',
     turtle: 'model_50a_-_hawksbill_sea_turtle.glb', blue: 'blue_whale_-_textured.glb', hump: 'game-ready_humpback_whale.glb',
   };
+  const storyData = LAB ? null : fetch('./story.json', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`story.json: HTTP ${r.status}`); return r.json(); });
   const G = Object.fromEntries(await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loader.loadAsync(`./${f}`)])));
+  const timeline = LAB ? null : new Timeline(await storyData);
   statusEl.textContent = 'Preparing scene…';
   await new Promise((r) => setTimeout(r, 0));
 
@@ -185,10 +205,11 @@ async function main() {
   const animated = [blue, ...sharks.map((s) => s.obj), ...turtles.map((t) => t.obj)];
 
   // --- decoration: instanced coral, seagrass meadows, the photogrammetry soft coral
-  scene.add(scatterInstanced(G.coral, {
+  const corals = scatterInstanced(G.coral, {
     count: 160, size: [2, 6],
     placer: (p) => { const a = Math.random() * Math.PI * 2, r = 14 + Math.random() * 70; p.set(Math.cos(a) * r, 0, Math.sin(a) * r); p.y = seabedHeight(p.x, p.z) - 0.3; },
-  }));
+  });
+  scene.add(corals);
   const seagrass = createSeagrass({ count: LAB ? 30000 : 14000, heightAt: seabedHeight });
   scene.add(seagrass);
 
@@ -287,6 +308,7 @@ async function main() {
   });
 
   const opts = { godRays: true, bloom: true };
+  let bloomNode = null, bloomStrength = 0.28;
   function buildPost() {
     const wob = vec2(sin(screenUV.y.mul(38).add(U.time.mul(2.1))), cos(screenUV.x.mul(31).add(U.time.mul(1.6)))).mul(0.0009).mul(U.under);
     const dc = screenUV.sub(0.5);
@@ -294,7 +316,8 @@ async function main() {
     const suv = screenUV.add(wob);
     let col = vec3(sceneColor.sample(suv.add(dc.mul(caK))).r, sceneColor.sample(suv).g, sceneColor.sample(suv.sub(dc.mul(caK))).b);
     if (opts.godRays) col = col.add(godRays()).add(skyRays());
-    if (opts.bloom) col = col.add(bloom(vec4(col, 1), 0.28, 0.45, 0.9).rgb);
+    bloomNode = opts.bloom ? bloom(vec4(col, 1), bloomStrength, 0.45, 0.9) : null;
+    if (bloomNode) col = col.add(bloomNode.rgb);
     const mapped = renderOutput(vec4(col, 1));
     const aa = fxaa(vec4(grade(mapped.rgb), 1));
     const grain = hash(uint(screenCoordinate.x).add(uint(screenCoordinate.y).mul(uint(4099))).add(uint(fract(U.time.mul(0.37)).mul(99991)))).sub(0.5).mul(0.018);
@@ -312,12 +335,17 @@ async function main() {
   controls.target.set(0, schoolY, 0);
 
   const keys = new Set();
-  addEventListener('keydown', (e) => { if (e.target.tagName !== 'INPUT') { keys.add(e.code); if (/Key[WASDQE]/.test(e.code)) director.stop(); } });
+  const typing = (e) => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  addEventListener('keydown', (e) => { if (!typing(e) && !e.ctrlKey && !e.metaKey) { keys.add(e.code); if (/Key[WASDQE]/.test(e.code)) director.stop(); } });
   addEventListener('keyup', (e) => keys.delete(e.code));
 
   const pointer = new THREE.Vector2(9, 9);
   let pointerIn = false;
-  addEventListener('pointermove', (e) => { pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); pointerIn = true; });
+  addEventListener('pointermove', (e) => {
+    const r = renderer.domElement.getBoundingClientRect();
+    pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    pointerIn = !EDIT || e.target === renderer.domElement; // editor: only over the viewport
+  });
   document.addEventListener('pointerleave', () => { pointerIn = false; });
   renderer.domElement.addEventListener('pointerdown', () => director.stop());
   renderer.domElement.addEventListener('wheel', () => director.stop(), { passive: true });
@@ -354,7 +382,18 @@ async function main() {
     onChange: (on) => { $('cine').classList.toggle('on', on); $('cine').textContent = on ? 'Cinematic ● ON' : 'Cinematic'; },
   });
 
-  const story = LAB ? null : new Story({ camera, tuna, tentacles, G: tentacles.userData, setSun: (d, a) => setSun(d, a), captions: document.querySelectorAll('.cap') });
+  // story parameters a timeline curve can animate (see PARAMS in story.js)
+  const applyParam = {
+    sun: (deg, az) => setSun(deg, az),
+    'post.exposure': (v) => { renderer.toneMappingExposure = v; },
+    'post.bloom': (v) => { bloomStrength = v; if (bloomNode) bloomNode.strength.value = v; },
+    'post.skyRays': (v) => { uSkyRayK.value = v; },
+    'post.underRays': (v) => { uGodK.value = v; },
+    'sea.state': (v) => { oceanU.amp.value = v; oceanU.chopAmp.value = Math.min(v, 1.1); },
+    'water.clarity': (v) => { U.fogDensity.value = THREE.MathUtils.lerp(0.03, 0.006, v); },
+  };
+  const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions') });
+  if (story) $('scrollspace').style.height = `${timeline.meta.scrollLength ?? 900}vh`;
 
   let camTween = null;
   const presets = {
@@ -391,6 +430,8 @@ async function main() {
   // toggling castShadow at runtime invalidates the shadow node; fade + freeze the map instead
   $('shadows').addEventListener('change', (e) => { sun.shadow.intensity = e.target.checked ? 1 : 0; sun.shadow.autoUpdate = e.target.checked; sun.shadow.needsUpdate = true; });
   $('panelHead').addEventListener('click', () => $('panel').classList.toggle('collapsed'));
+  const setTunaCount = (n) => { tuna.setCount(n); fitSchool(n); };
+  if (timeline?.data.settings.tunaCount) setTunaCount(timeline.data.settings.tunaCount);
 
   function setSun(deg, az = 0.9) {
     const el = THREE.MathUtils.degToRad(deg);
@@ -405,15 +446,43 @@ async function main() {
     jellies.userData.glow.value = THREE.MathUtils.lerp(2.2, 1, U.sunIntensity.value);
   }
 
+  // render size = the window, or the editor's viewport
   function onResize() {
-    camera.aspect = innerWidth / innerHeight;
+    const { w, h } = editor ? editor.viewSize() : { w: innerWidth, h: innerHeight };
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    if (story) { story.cam.aspect = w / h; story.cam.updateProjectionMatrix(); }
     renderer.setPixelRatio(MAX_PR * renderScale * autoScale);
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setSize(w, h);
   }
   addEventListener('resize', onResize);
 
-  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles };
+  // editor hooks: hidden objects (outliner), simulation speed, one-shot frame capture
+  const hidden = new Set();
+  let timeScale = 1, captureCb = null;
+  const fpsInfo = { fps: 60, res: 1 };
+
+  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles, timeline };
+
+  if (EDIT) {
+    const { Editor } = await import('./editor/editor.js');
+    editor = new Editor({
+      renderer, scene, camera, controls, story, timeline, tuna, opts, buildPost, onResize, hidden, fpsInfo, setTunaCount,
+      objects: [
+        { group: 'World', name: 'Sky', obj: sky }, { group: 'World', name: 'Ocean surface', obj: ocean }, { group: 'World', name: 'Seabed', obj: seabed },
+        { group: 'World', name: 'Corals', obj: corals }, { group: 'World', name: 'Seagrass', obj: seagrass },
+        { group: 'Life', name: 'Tuna school', obj: tuna.mesh }, { group: 'Life', name: 'Reef fish', obj: reef.mesh },
+        { group: 'Life', name: 'Sharks', obj: sharks.map((s) => s.obj) }, { group: 'Life', name: 'Turtles', obj: turtles.map((tt) => tt.obj) },
+        { group: 'Life', name: 'Blue whale', obj: blue }, { group: 'Life', name: 'Humpback', obj: hump }, { group: 'Life', name: 'Jellyfish', obj: jellies },
+        { group: 'Water 50', name: 'Water tentacles', obj: tentacles },
+        { group: 'Particles', name: 'Splashes', obj: splash.mesh }, { group: 'Particles', name: 'Marine snow', obj: snow }, { group: 'Particles', name: 'Bubbles', obj: bubbles },
+      ],
+      setTimeScale: (v) => { timeScale = v; },
+      capture: () => new Promise((res) => { captureCb = res; }),
+    });
+    window.__ocean.editor = editor;
+    onResize();
+  }
 
   // ?debug: velocity arrows (true travel direction) to verify each model faces forward
   const debug = params.has('debug');
@@ -450,6 +519,12 @@ async function main() {
   tentacles.visible = false;
   loaderEl.classList.add('hidden');
   if (LAB && !params.has('free')) director.start();
+  // ?p=0.62 opens the story at that point (the editor's "Open site" button links here)
+  if (story && !EDIT && params.has('p')) {
+    const p0 = THREE.MathUtils.clamp(+params.get('p') || 0, 0, 1);
+    story.p = p0;
+    scrollTo(0, p0 * (document.documentElement.scrollHeight - innerHeight));
+  }
 
   // dynamic resolution: drop 15% after ~1 s under 45 fps, creep back up after ~3 s above 58 fps
   let slow = 0, fast = 0, samples = 0;
@@ -467,7 +542,8 @@ async function main() {
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
-    const dt = Math.min((now - last) / 1000, 0.05);
+    const rdt = Math.min((now - last) / 1000, 0.05); // real frame time
+    const dt = rdt * timeScale; // simulation time (the editor can slow / freeze it)
     last = now;
     t += dt;
     U.time.value = t;
@@ -488,9 +564,14 @@ async function main() {
     turtles.forEach((tt) => tt.path.step(tt.obj, dt));
     for (const a of animated) a.userData.mixer.update(dt);
 
-    // camera
+    // camera: the story's shot camera, the lab director, or a free orbit / fly camera
+    if (editor) editor.preUpdate(rdt);
     if (story) story.update(dt, t);
-    else if (director.active) director.update(dt, t);
+    if (story && !editor?.sceneView) {
+      camera.position.copy(story.cam.position);
+      camera.quaternion.copy(story.cam.quaternion);
+      if (camera.fov !== story.cam.fov) { camera.fov = story.cam.fov; camera.updateProjectionMatrix(); }
+    } else if (!story && director.active) director.update(dt, t);
     else {
       if (camTween) {
         camTween.k = Math.min(1, camTween.k + dt / 2.2);
@@ -507,7 +588,7 @@ async function main() {
         if (keys.has('KeyW')) tmpV.add(fwdV); if (keys.has('KeyS')) tmpV.sub(fwdV);
         if (keys.has('KeyD')) tmpV.add(rightV); if (keys.has('KeyA')) tmpV.sub(rightV);
         if (keys.has('KeyE')) tmpV.y += 1; if (keys.has('KeyQ')) tmpV.y -= 1;
-        tmpV.multiplyScalar(sp);
+        tmpV.multiplyScalar(EDIT ? (keys.has('ShiftLeft') ? 40 : 12) * rdt : sp); // editor flies at real speed even when time is slowed
         camera.position.add(tmpV); controls.target.add(tmpV);
       }
       controls.update();
@@ -539,6 +620,8 @@ async function main() {
 
     // above the sea the school is only glimpsed through the surface: draw the first 800 (all leapers are < 256)
     tuna.mesh.count = story && U.under.value < 0.5 ? Math.min(tuna.count, 800) : tuna.count;
+    if (editor) editor.postUpdate(rdt);
+    for (const o of hidden) o.visible = false; // editor outliner
     tuna.update(renderer, dt);
     splash.step(renderer, dt);
     if (reef.mesh.visible) reef.update(renderer, dt);
@@ -554,11 +637,13 @@ async function main() {
     uSunVis.value = facing > 0 ? THREE.MathUtils.smoothstep(facing, 0.2, 0.6) * (1 - THREE.MathUtils.smoothstep(Math.hypot(sunNdc.x, sunNdc.y), 1.2, 2.2)) : 0;
 
     post.render();
+    if (captureCb) { const cb = captureCb; captureCb = null; renderer.domElement.toBlob(cb, 'image/png'); }
 
-    fpsFrames++; fpsTime += dt;
+    fpsFrames++; fpsTime += rdt;
     if (fpsTime > 0.5) {
       const fps = fpsFrames / fpsTime;
       adaptResolution(fps);
+      fpsInfo.fps = fps; fpsInfo.res = MAX_PR * renderScale * autoScale;
       $('fps').textContent = `${Math.round(fps)} fps · ${tuna.count} tuna · ${Math.round(MAX_PR * renderScale * autoScale * 100)}% res`;
       fpsFrames = 0; fpsTime = 0;
     }

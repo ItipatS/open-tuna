@@ -1,10 +1,32 @@
-// Scroll-driven story: one progress value (0..1, smoothed) drives the camera, the school, the
-// water "50" and the tuna stunts. Everything is a function of progress, so scrolling back rewinds.
+// Scroll-driven story: one progress value (0..1, smoothed) drives the camera, sun, school, the water
+// "50", the tuna stunts and the captions. *When* things happen lives in story.json (see timeline.js),
+// edited with the timeline editor (?edit); *what* happens is code here and in the systems.
+// Everything is a function of progress, so scrolling back rewinds.
 import * as THREE from 'three/webgpu';
+import { captionOpacity } from './timeline.js';
 
-const { clamp, lerp, smoothstep } = THREE.MathUtils;
-const ease = (k) => k * k * (3 - 2 * k);
-const range = (p, a, b) => clamp((p - a) / (b - a), 0, 1);
+const { clamp, lerp } = THREE.MathUtils;
+
+// Scalar parameters a `curve` track can animate (constant default in story.json settings.params).
+export const PARAMS = {
+  'sun.elevation': { label: 'Sun elevation (°)', def: 55, min: -5, max: 90, step: 0.5 },
+  'sun.azimuth': { label: 'Sun azimuth (°)', def: 51.6, min: -180, max: 180, step: 1 },
+  'post.exposure': { label: 'Exposure', def: 1.05, min: 0.2, max: 3, step: 0.01 },
+  'post.bloom': { label: 'Bloom', def: 0.28, min: 0, max: 2, step: 0.01 },
+  'post.skyRays': { label: 'Sky god rays', def: 0.6, min: 0, max: 3, step: 0.01 },
+  'post.underRays': { label: 'Underwater god rays', def: 0.34, min: 0, max: 2, step: 0.01 },
+  'sea.state': { label: 'Sea state', def: 0.45, min: 0, max: 2, step: 0.01 },
+  'water.clarity': { label: 'Water clarity', def: 0.7, min: 0, max: 1, step: 0.01 },
+};
+
+// Story beats a `clip` track can drive (0..1 ramp across the clip, or a 0/1 gate).
+export const DRIVERS = {
+  'school.gather': 'School gathers in front of the 50 (ramp)',
+  'tentacles.fade': 'Water 50 fades in (ramp)',
+  'tentacles.form': 'Water 50: braid → unfurl → draw → settle (ramp)',
+  'tuna.free': 'Tuna leap across / over the camera (gate)',
+  'tuna.hoop': 'Tuna leap through the 0 (gate)',
+};
 
 // Per-fish leap targets for FishSwarm (see its `targets` contract). A few tuna leap through the hole
 // of the "0" (hoop); most leap across / toward / over the camera in the band between it and the 50.
@@ -35,12 +57,15 @@ export function flightTargets(G, max, { hoop = 14, free = 70 } = {}) {
 }
 
 export class Story {
-  constructor({ camera, tuna, tentacles, G, setSun, captions }) {
-    Object.assign(this, { camera, tuna, tentacles, G, setSun });
-    this.captions = [...captions].map((el) => ({ el, a: +el.dataset.in, b: +el.dataset.out }));
+  // apply: { sun(elevationDeg, azimuthRad), [param id]: (value) => void } for the PARAMS above
+  constructor({ tuna, tentacles, timeline, apply, captionLayer }) {
+    Object.assign(this, { tuna, tentacles, timeline, apply, captionLayer });
+    this.cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.2, 9000); // the shot camera
+    this.look = new THREE.Vector3(); // where the shot camera looks
+    this.k = { pos: [0, 0, 0], look: [0, 0, 0], follow: 0, fov: 50, drift: 1 };
     this.p = 0;
-    this.look = new THREE.Vector3();
-    this.forceP = null; // tests / debugging: pin progress
+    this.forceP = null; // editor / tests: pin progress (no smoothing)
+    this.capVersion = -1;
   }
 
   target() {
@@ -52,55 +77,68 @@ export class Story {
   update(dt, t) {
     const pt = this.target();
     this.p = this.forceP !== null ? pt : this.p + (pt - this.p) * (1 - Math.exp(-dt * 2.4));
-    const p = this.p;
-    const { camera, tuna, look, G } = this;
+    this.evaluate(this.p, t);
+  }
+
+  evaluate(p, t) {
+    const { tuna, timeline: tl, apply, cam, look, k } = this;
     const tu = this.tentacles.userData;
 
-    // midday light underwater -> golden hour behind the 50 once we surface
-    const gh = ease(range(p, 0.4, 0.66));
-    this.setSun(lerp(55, 7, gh), lerp(0.9, 0.42 - Math.PI, gh)); // swings behind the camera, never across the frame
+    // sun + post / sea parameters (curves or constants)
+    apply.sun(tl.param('sun.elevation', p, PARAMS['sun.elevation'].def), THREE.MathUtils.degToRad(tl.param('sun.azimuth', p, PARAMS['sun.azimuth'].def)));
+    for (const id in PARAMS) if (apply[id]) apply[id](tl.param(id, p, PARAMS[id].def));
 
-    // --- water tentacles braid up out of the sea, unfurl and draw the 50 (see tentacles.js)
-    tu.u.visible.value = smoothstep(p, 0.43, 0.46);
-    this.tentacles.visible = p > 0.43;
-    if (this.tentacles.visible) tu.update(range(p, 0.44, 0.92), t);
+    // water tentacles braid up out of the sea, unfurl and draw the 50 (see tentacles.js)
+    const fade = tl.clip('tentacles.fade', p);
+    tu.u.visible.value = fade;
+    this.tentacles.visible = fade > 0;
+    if (this.tentacles.visible) tu.update(tl.clip('tentacles.form', p), t);
 
-    // --- school: wander at depth, then gather under the glyph
-    const gather = smoothstep(p, 0.22, 0.46);
+    // school: wander at depth, then gather under the leap band in front of the 50
+    const gather = tl.clip('school.gather', p);
     tuna.u.goal.value.set(
       Math.cos(t * 0.045) * 10 * (1 - gather),
       lerp(-9 + Math.sin(t * 0.11) * 1.5, -4.5, gather),
       Math.sin(t * 0.063) * 8 * (1 - gather) + 18 * gather,
     );
-    tuna.u.free.value = p > 0.5 ? 1 : 0;
-    tuna.u.hoop.value = p > 0.84 ? 1 : 0;
+    tuna.u.free.value = tl.clip('tuna.free', p);
+    tuna.u.hoop.value = tl.clip('tuna.hoop', p);
 
-    // --- camera
-    const R = 26, C = G.center;
-    if (p < 0.3) {
-      // I: underwater, slow arc around the school
-      const a = lerp(-1.1, 0, ease(p / 0.3));
-      camera.position.set(Math.sin(a) * R, -9 + Math.sin(t * 0.25) * 0.5, Math.cos(a) * R);
-      look.copy(tuna.u.goal.value);
-    } else if (p < 0.5) {
-      // II: ascend and break the surface, tilting up toward where the 50 will rise
-      const k = ease(range(p, 0.3, 0.5));
-      camera.position.set(0, lerp(-9, 5, k), lerp(R, 50, k));
-      look.lerpVectors(tuna.u.goal.value, new THREE.Vector3(C.x, C.y * 0.6, C.z), ease(range(p, 0.34, 0.5)));
-    } else {
-      // III/IV: above the sea, slow arc + push-in while the tentacles draw the 50
-      const k = ease(range(p, 0.5, 1));
-      const a = -0.3 * k + Math.sin(t * 0.15) * 0.015;
-      const r = lerp(50, 42, k);
-      camera.position.set(Math.sin(a) * r, lerp(5, 6.5, k) + Math.sin(t * 0.4) * 0.15, Math.cos(a) * r);
-      look.set(C.x, lerp(4, C.y - 0.5, ease(range(p, 0.52, 0.84))), C.z);
+    // camera: keyframed path + slow hand-held drift; `follow` blends the look-at toward the school
+    if (tl.camera(p, k)) {
+      cam.position.fromArray(k.pos);
+      cam.position.x += Math.sin(t * 0.15) * 0.6 * k.drift;
+      cam.position.y += Math.sin(t * 0.25) * 0.4 * k.drift;
+      cam.position.z += Math.cos(t * 0.19) * 0.3 * k.drift;
+      look.fromArray(k.look).lerp(tuna.u.goal.value, k.follow);
+      cam.lookAt(look);
+      if (cam.fov !== k.fov) { cam.fov = k.fov; cam.updateProjectionMatrix(); }
     }
-    camera.lookAt(look);
+    cam.updateMatrixWorld();
 
-    for (const c of this.captions) {
-      const o = Math.min(smoothstep(p, c.a, c.a + 0.04), 1 - smoothstep(p, c.b - 0.04, c.b));
-      c.el.style.opacity = o.toFixed(3);
-      c.el.style.transform = `translateY(${((1 - o) * 14).toFixed(1)}px)`;
-    }
+    // captions
+    if (this.capVersion !== tl.version) this.buildCaptions();
+    tl.captions().forEach((c, i) => {
+      const el = this.capEls[i], o = captionOpacity(c, p);
+      el.style.opacity = o.toFixed(3);
+      el.style.visibility = o > 0.001 ? 'visible' : 'hidden';
+      el.style.transform = `translateY(${((1 - o) * 14).toFixed(1)}px)`;
+    });
+  }
+
+  buildCaptions() {
+    this.capVersion = this.timeline.version;
+    this.captionLayer.replaceChildren();
+    this.capEls = this.timeline.captions().map((c) => {
+      const el = document.createElement('div');
+      el.className = `cap cap-${c.size || 'medium'}`;
+      el.style.top = `${c.y ?? 42}%`;
+      const h = document.createElement(c.size === 'large' ? 'h1' : 'h2');
+      (c.title || '').split('\n').forEach((line, i) => { if (i) h.append(document.createElement('br')); h.append(line); });
+      el.append(h);
+      if (c.sub) { const s = document.createElement('p'); s.textContent = c.sub; el.append(s); }
+      this.captionLayer.append(el);
+      return el;
+    });
   }
 }

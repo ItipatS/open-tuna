@@ -1,6 +1,6 @@
 # Handoff — Open Tuna / Thai Union 50th anniversary pitch
 
-Last updated: 2026-10-01. Technical reference lives in `CLAUDE.md`; this file is the *why*, the
+Last updated: 2026-10-13. Technical reference lives in `CLAUDE.md`; this file is the *why*, the
 current state, decisions made, and what to do next.
 
 ## The goal
@@ -41,6 +41,10 @@ are expected but not defined yet — ask the owner.
 - ✅ Scroll-scrubbed and fully reversible (a pitch audience scrolls back and forth).
 - ✅ Dropped the 56 MB photogrammetry reef + 32 MB starfish.
 - ✅ Default 2000 tuna.
+- ✅ **Timeline editor instead of switching engines** (2026-10-13). The team considered Babylon Editor to get a
+  timeline. Decision: stay on three.js (the custom TSL shaders, GPU boids and water would be a rewrite) and build
+  an in-repo, Unity-style editor (`?edit`) over a data file (`story.json`). A graphic designer clones the repo,
+  double-clicks `Open Editor`, edits, and plays. "Copy ref" + notes are how designers point Claude at exact moments.
 - Caption copy ("Fifty years of the open ocean", "It all begins beneath the surface", "Rising, together") is
   **placeholder** written by Claude — replace with real copy. No end caption now; the 50 is the finale.
 - Brand assets (logo, colours) not provided yet — generic styling (Cormorant Garamond + Inter, gold end title).
@@ -48,7 +52,13 @@ are expected but not defined yet — ask the owner.
 ## Current state
 
 Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps underwater in headless tests:
-- Story mode default; 900vh scroll; captions fade by progress window.
+- Story mode default; 900vh scroll; captions fade by progress window. **All timing lives in `story.json`.**
+- **Editor (`?edit`)**: toolbar Play / Pause / Stop, Game view (aspect frames) + Scene view (free camera, camera path,
+  draggable key gizmos), outliner (hide objects), inspector, timeline (camera keys, captions, sun curves, beat
+  clips, chapters, notes, per-moment fps lane), undo/redo, save to disk via the local server, drafts, Copy ref,
+  snapshot, Open site at `?p=`. Designer guide: `EDITOR.md`.
+- Fixed a **black-screen bug** on the live site: resizing the window wider than at load (or going fullscreen
+  on a wider screen) dropped every frame — a three r180 bug, patched in `main.js` (see CLAUDE.md → Gotchas).
 - Underwater act: school, sharks, whales, jellies, particles, god rays; stylised Snell's window shows the sky.
 - Ascent through a stylised sea; sun swings from midday to a low golden sun left of the 50 (never crossing the frame).
 - Water tentacles: six translucent blue tubes with glowing rims braid up out of the foaming sea, unfurl,
@@ -70,15 +80,19 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 5. Sky god rays above water are subtle; could add a few light-shaft cards behind the 50 (cheap).
 7. Loading: ~25 MB of GLBs, loader says "OPEN OCEAN" — rebrand, consider Draco/Meshopt compression.
 8. Mobile / non-WebGPU: error panel only (owner rule: no WebGL fallback).
-9. Later story chapters (TBD with the team).
+9. Later story chapters (TBD with the team) — new chapters = new tracks/drivers + chapters in `story.json`.
+10. Editor next steps (if the designer asks): keyframe more things (tuna counts / school position, tentacle look
+    params, colour grade), easing curve editor for keys, audio track for music sync, multi-select, and placing
+    GLB props from the editor (would need a scene-objects section in `story.json`).
 
 ## Tuning knobs (where to change things)
 
-- Timeline windows: `src/story.js` → `Story.update` (all `range(p, a, b)` calls) + `data-in/out` on `.cap` in `index.html`.
+- Timeline windows, camera path, captions, sun: **`story.json`** (or the editor, `?edit`). New beats: `DRIVERS` /
+  `PARAMS` in `story.js` (see CLAUDE.md → Story data & editor).
 - Water 50: `tentacleDefs()` control points (digit shapes, stem roots, decor tentacles); in `update()` — braid
   radius/pitch, `m`/`g`/`settle` timing, sway, radius profile; tube shading + gold thread mask in `tentacles.js`.
 - Tuna leaps: `flightTargets(G, max, { hoop, free })` + the three free-leap types in `story.js`; `leapPeriod` in `swarm.js`.
-- Sun path: `setSun(elevation, azimuth)` call in `Story.update`.
+- Sun path: the `sun-elevation` / `sun-azimuth` curve tracks in `story.json`.
 - Ocean look: above/below branches of the colour node in `ocean.js`.
 - Perf: `MAX_PR`, `adaptResolution` thresholds, story-mode counts, tuna `simplifyGeometry` ratio (0.35) — all in `main.js`.
 
@@ -86,7 +100,8 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 
 ```sh
 git clone https://github.com/ItipatS/open-tuna && cd open-tuna
-python3 -m http.server 8123   # open http://127.0.0.1:8123 in Chrome/Edge and scroll
+python3 tools/serve.py --open   # editor at http://localhost:8123/?edit, site at http://localhost:8123
 ```
+Or double-click `Open Editor.bat` (Windows) / `Open Editor.command` (macOS).
 Pushing to `main` redeploys GitHub Pages publicly (https://itipats.github.io/open-tuna/) — use a branch
 if the pitch shouldn't be public yet. Testing approach (headless persistent Chrome + puppeteer) is in `CLAUDE.md`.

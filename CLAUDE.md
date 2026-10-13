@@ -40,12 +40,17 @@ No build step, no npm dependencies. ES modules + import map (three from jsDelivr
 needs internet).
 
 ```sh
-python3 -m http.server 8123      # must be served over HTTP; file:// cannot fetch the .glb files
-# open http://127.0.0.1:8123 and scroll
+python3 tools/serve.py           # dev server (no caching, editor save endpoint); file:// cannot fetch the .glb files
+# site: http://localhost:8123   editor: http://localhost:8123/?edit
 ```
+Double-click launchers for non-developers: `Open Editor.bat` (Windows; falls back to `tools/serve.ps1` when
+Python is missing) and `Open Editor.command` (macOS). Designer guide: `EDITOR.md`. Any static server works for
+the site itself; only the editor's in-place Save needs `tools/serve.py` / `serve.ps1`.
 
 Modes / URL flags:
-- default — **story mode**: page scrolls (900vh spacer), canvas fixed, captions overlaid, no UI panel.
+- default — **story mode**: page scrolls (`meta.scrollLength` vh spacer), canvas fixed, captions overlaid, no UI panel.
+- `?p=0.62` — story mode opened at that progress (the editor's "Open site" button).
+- `?edit` — **timeline editor** around the story (see "Story data & editor" below).
 - `?lab` — the old playground: slider panel, orbit camera, looping shot director.
 - `?lab&free` — lab without the director (free orbit camera).
 - `?noauto` — disable dynamic resolution (use for screenshots/perf comparisons).
@@ -56,9 +61,15 @@ Browser: current Chrome/Edge (WebGPU). The page shows an error panel if WebGPU i
 ## Files
 
 ```
-index.html          story captions (.cap, data-in/data-out = progress window), scroll spacer, lab panel, import map, fonts
+index.html          #captions layer (filled from story.json), scroll spacer, lab panel, import map, fonts
+story.json          THE STORY DATA: camera keys, captions, sun curves, beat timings, chapters, notes, settings (edited by ?edit)
+src/timeline.js     Timeline: story.json model + evaluation (Hermite camera, eased curves, clips/gates, captions) + serializer
+src/editor/         ?edit only: editor.js (shell, play mode, undo, save, drafts, Copy ref), timeline-view.js (canvas
+                    timeline), inspector.js, scene-gizmos.js (camera path, key balls, TransformControls), editor.css, dom.js
+tools/serve.py      dev server: no-store caching, POST /__editor/save writes story.json (tools/serve.ps1 = same, PowerShell)
 src/main.js         bootstrap, asset loading/placement, post-processing (underwater + sky god rays), UI, main loop
-src/story.js        Story: scroll progress -> camera, sun, school, tentacles, tuna leap gates, captions; flightTargets()
+src/story.js        Story: progress -> evaluates the timeline into camera, sun, params, school, tentacles, tuna gates,
+                    captions; PARAMS (curve-bindable) + DRIVERS (clip-bindable) registries; flightTargets()
 src/tentacles.js    createWaterTentacles: the water 50 — CPU-built tentacle paths -> float texture -> instanced water tubes,
                     gold thread helices, root foam; also exports the 0's hole for the hoop tuna
 src/shared.js       global uniforms U, palette, baked caustic texture, sky, underwater colour, fog, IBL env
@@ -73,9 +84,10 @@ src/director.js     lab-mode cinematic camera: shot list, fade cuts, letterbox, 
 *.glb               assets (Sketchfab exports) — see Assets
 ```
 
-## Story timeline (`story.js`, progress p = smoothed scroll 0..1)
+## Story timeline (progress p = smoothed scroll 0..1)
 
-All state is a pure function of p (plus time for idle motion), so scrolling back rewinds exactly.
+**Timings live in `story.json`, not in code** — edit them there or in the editor; the table below is the
+current content. All state is a pure function of p (plus time for idle motion), so scrolling back rewinds exactly.
 `story.forceP = x` pins progress (used by tests). Smoothing: `p += (target - p)·(1 - e^(-2.4·dt))`.
 
 | p | What happens |
@@ -107,6 +119,30 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
   rx 7.6, ry 10.8. Stems root at z −10..−14 (behind the letters). Side tentacles at x ±28. Tuna leap band: z 10–64.
 
 ## Architecture
+
+### Story data & editor (`story.json`, `timeline.js`, `story.js`, `src/editor/`)
+- **Split of responsibilities:** `story.json` says *when* (keys, clips, captions, constants); `story.js` says
+  *what* a beat does. To add a new story beat: add an entry to `DRIVERS` (clip, 0..1 ramp or `gate`) or
+  `PARAMS` (curve, scalar with default/range) in `story.js`, read it in `Story.evaluate` via
+  `tl.clip(id, p)` / `tl.param(id, p, def)` (params also need a setter in `applyParam` in `main.js`), then add
+  the track to `story.json` (or let the designer add it with "+ Track…"). Missing/muted tracks evaluate to 0 /
+  the constant in `settings.params`, so code must tolerate that.
+- Track types: `camera` (keys `{p,pos,look,follow,fov}`, Hermite in p, flat ends; `drift` = hand-held sway;
+  `follow` blends the look-at to the school goal), `curve` (`{p,v,ease}`; ease shapes the segment *after* the
+  key), `clip` (`a,b,ease`; `gate` = on inside), `captions` (`{a,b,title,sub,size,y,fade}`; a caption with
+  a ≤ 0 is visible at load). Plus `chapters` and `notes` (people only — **read `notes` when asked to act on
+  designer feedback**). `Timeline.serialize()` writes one key/clip per line, numbers rounded to 4 dp.
+- `Story` owns a separate shot camera `story.cam` (+ `story.look`); `main.js` copies it into the render camera
+  unless the editor's Scene view is active. Captions are DOM nodes rebuilt when `timeline.version` changes.
+- Editor (`?edit`, dynamically imported so the site doesn't load it): pins `story.forceP` to its playhead;
+  Play advances p at 1/`meta.playDuration` per second (no smoothing). Edits mutate `timeline.data` directly →
+  `editor.changed()` (live) / `editor.commit()` (undo snapshot = serialized JSON, localStorage draft).
+  Save: `POST ./__editor/save` → else File System Access picker → else download. Selection is held by
+  object reference and re-resolved by index after undo. The Performance lane records fps per p bucket (400).
+  Hooks it uses from `main.js`: `hidden` set (outliner), `setTimeScale` (sim speed / freeze), `capture()`
+  (PNG of the next frame), `fpsInfo`, `onResize` (render size = `editor.viewSize()`), `setTunaCount`.
+- "Copy ref" (`editor.reference()`) produces a text block like `p=0.620 (chapter "The 50") … active:
+  tentacles.form 37% … camera: key #6 → #7 …`. When a user pastes one, map it to the tracks in `story.json`.
 
 ### Global uniforms (`shared.js` → `U`)
 `time, under (camera below water 0/1), sunDir, sunColor, sunIntensity, camDepth, deep/mid/shallow`
@@ -217,7 +253,13 @@ Orientation rule: if a creature swims backwards/sideways, fix it with `CONFIG` i
 - Keep the camera away from exactly `y = wave height` (clamped to ±0.35 m).
 - `main.js` has a `G` (loaded GLTFs) — don't shadow it.
 - The HDR sun disk is ~40× the sky; anything screen-space that samples it must clamp or it whites out the frame.
-- Python's http.server occasionally resets a connection mid-load (`ERR_CONNECTION_RESET`) — just retry.
+- Plain `python -m http.server` refuses/resets connections under the page's parallel module + GLB burst (listen
+  backlog 5). `tools/serve.py` raises it to 128; use that.
+- **three r180 viewport-texture resize bug** (patched at the top of `main.js`): a `viewportTexture` copy used
+  inside a render target is a clone sharing its `image` with the original, so after the canvas grows it never
+  reallocates its GPU texture → out-of-bounds copy → every frame dropped (**black screen** after resize /
+  fullscreen / in the editor viewport). The patch tracks each copy's size and sets `needsUpdate`. Keep it until
+  three is upgraded and the bug is verified fixed (test: load at 1600×900, resize to 2000×860).
 - In story mode the canvas has `pointer-events:none` (so the page scrolls); pointer listeners are on `window`.
 
 ## Ocean look (`ocean.js`, stylised)
@@ -243,11 +285,12 @@ Biggest remaining cost: drawing 2000 tuna underwater (vertex-bound). Next lever:
 ## Testing
 
 No test suite. Verify in a real browser. **Don't pop up browser windows on the owner's screen**: run ONE
-persistent headless Chrome and reuse it (headless WebGPU works on macOS/Metal):
+persistent headless Chrome and reuse it (headless WebGPU works on macOS/Metal and Windows/D3D12):
 
 ```sh
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --enable-unsafe-webgpu \
   --remote-debugging-port=9333 --user-data-dir=<scratch>/chrome-profile --window-size=1360,780 about:blank
+# Windows: "/c/Program Files/Google/Chrome/Application/chrome.exe" with the same flags
 ```
 
 Then a puppeteer-core script (`puppeteer-core@19` works with Node 16) does
@@ -256,7 +299,12 @@ Then a puppeteer-core script (`puppeteer-core@19` works with Node 16) does
 `window.__ocean` + loader hidden, sets `__ocean.story.forceP = p` for each progress point, waits ~2.5 s,
 screenshots, collects console errors, then navigates the tab to `about:blank` and disconnects.
 Lab shots: `__ocean.director.shotIndex = n - 1; __ocean.director.next()`.
-`window.__ocean` exposes camera, controls, tuna, reef, sharks, turtles, director, story, tentacles, opts, buildPost,
-renderer, scene and systems.
+`window.__ocean` exposes camera, controls, tuna, reef, sharks, turtles, director, story, tentacles, timeline, opts,
+buildPost, renderer, scene, systems, and in `?edit` the `editor` (`editor.setP(p)`, `setView('scene'|'game')`,
+`select({kind:'key', track, item})`, `addKey()`, `undo()`, `save()`, `reference()`, `perf`).
+Editor checks: drive it with real mouse/keyboard events (scrub the ruler canvas, K, Ctrl+Z, drag a clip, Space)
+and back up `story.json` first if a test saves. Also test a resize to a wider aspect (black-frame regression).
+WebGPU validation errors don't reach the console — attach `renderer.backend.device.addEventListener('uncapturederror', …)`
+when a frame renders black.
 
 Before claiming a visual change works: screenshot the affected progress points and check zero console errors.
