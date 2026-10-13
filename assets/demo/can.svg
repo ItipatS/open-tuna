@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <defs>
+    <linearGradient id="metal" x1="0" x2="1"><stop offset="0" stop-color="#8d99a6"/><stop offset=".25" stop-color="#eef3f7"/><stop offset=".55" stop-color="#b9c4ce"/><stop offset="1" stop-color="#6c7884"/></linearGradient>
+    <linearGradient id="label" x1="0" x2="1"><stop offset="0" stop-color="#0a5a78"/><stop offset=".4" stop-color="#1491b8"/><stop offset="1" stop-color="#074157"/></linearGradient>
+    <linearGradient id="gold" x1="0" x2="1"><stop offset="0" stop-color="#f6d58a"/><stop offset="1" stop-color="#c8902e"/></linearGradient>
+  </defs>
+  <ellipse cx="200" cy="244" rx="150" ry="34" fill="#000" opacity=".25"/>
+  <path d="M50 92v130c0 22 67 40 150 40s150-18 150-40V92z" fill="url(#metal)"/>
+  <path d="M50 112v90c0 22 67 40 150 40s150-18 150-40v-90c0 22-67 40-150 40S50 134 50 112z" fill="url(#label)"/>
+  <path d="M50 112c0 22 67 40 150 40s150-18 150-40" fill="none" stroke="url(#gold)" stroke-width="4"/>
+  <ellipse cx="200" cy="92" rx="150" ry="40" fill="url(#metal)"/>
+  <ellipse cx="200" cy="92" rx="132" ry="31" fill="none" stroke="#7d8894" stroke-width="3"/>
+  <ellipse cx="200" cy="92" rx="112" ry="24" fill="none" stroke="#a9b4be" stroke-width="2"/>
+  <path d="M128 188c26-22 70-26 108-6l22-14-4 22 4 22-22-14c-38 20-82 16-108-6z" fill="#f6d58a" opacity=".95"/>
+  <text x="200" y="232" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" letter-spacing="5" fill="#ffffff">PRODUCT NAME</text>
+</svg>

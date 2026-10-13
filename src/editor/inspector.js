@@ -2,7 +2,7 @@
 // Fields write straight into the timeline data: `input` applies live, `change` / drag-end commits an
 // undo step. Times are in seconds (shown as m:ss next to the field). Locked items are read-only.
 import { h, btn } from './dom.js';
-import { PARAMS, DRIVERS } from '../story.js';
+import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime } from '../timeline.js';
 
 export class Inspector {
@@ -36,10 +36,15 @@ export class Inspector {
         btn('Unlock', () => (own?.locked ? ed.toggleLock() : ed.select({ kind: 'track', track: s.track })), { title: own?.locked ? 'L' : 'Select the track to unlock it' })));
     }
     if (!s) this.project(el);
-    else if (s.kind === 'track') s.track.type === 'layer' ? this.layer(el, s.track) : this.track(el, s.track);
+    else if (s.kind === 'track') {
+      if (s.track.type === 'layer') this.layer(el, s.track);
+      else if (s.track.type === 'path') this.path(el, s.track);
+      else this.track(el, s.track);
+    }
     else if (s.kind === 'key') {
       if (s.track.type === 'camera') this.cameraKey(el, s.track, s.item);
       else if (s.track.type === 'layer') this.layerKey(el, s.track, s.item);
+      else if (s.track.type === 'path') this.pathKey(el, s.track, s.item);
       else this.curveKey(el, s.track, s.item);
     }
     else if (s.kind === 'clip') this.caption(el, s.track, s.item);
@@ -269,6 +274,39 @@ export class Inspector {
       : 'Drag it in the Game view to move it, drag the corner handle to scale. With one key it just moves; with 2+ keys, dragging at a new moment adds a key there (auto-key).'));
     this.sec(el, 'Layer');
     this.buttons(el, this.free(btn('Duplicate', () => lt.duplicate(t))), btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete layer', () => ed.deleteSelection(), { cls: 'danger' }));
+  }
+
+  path(el, t) {
+    const { ed } = this;
+    this.header(el, t.label || 'Path', `path · ${ACTORS[t.bind] || t.bind} · ${fmtTime(t.a)} → ${fmtTime(t.b)}`);
+    el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
+    el.append(this.select('Moves', ACTORS, () => t.bind, (v) => { t.bind = v; }));
+    el.append(this.check('Lock', () => t.locked, (v) => { if (v) t.locked = true; else delete t.locked; }, { free: true }));
+    el.append(this.check('Mute', () => t.mute, (v) => { if (v) t.mute = true; else delete t.mute; }));
+    this.sec(el, 'Timing');
+    el.append(this.time('Start', () => t.a, (v) => { t.a = Math.min(v, t.b - 0.1); }));
+    el.append(this.time('End', () => t.b, (v) => { t.b = Math.max(v, t.a + 0.1); }));
+    el.append(this.num('Blend (s)', () => t.blend ?? 2, (v) => { t.blend = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
+    el.append(h('div', { class: 'hint' }, `Between start and end the ${(ACTORS[t.bind] || 'creature').toLowerCase()} follows the waypoints (easing in / out over Blend); outside it does its own thing. ${t.bind === 'school' ? 'The school follows a moving goal, so it trails the waypoints a little — like a real school.' : 'It faces along the path.'}`));
+    this.sec(el, `Waypoints (${t.keys.length})`);
+    this.list(el, t.keys, (k, i) => [`${k.locked ? '🔒 ' : ''}#${i + 1}  ${fmtTime(k.t)}`, `[${k.pos.map((v) => +v.toFixed(1)).join(', ')}]`], (k) => { ed.select({ kind: 'key', track: t, item: k }); ed.setTime(k.t); });
+    this.buttons(el, btn('Waypoint at playhead', () => ed.addPathKey(t), { ico: 'plus', title: 'K — in the Scene view it goes where the camera looks' }));
+    el.append(h('div', { class: 'hint' }, 'In the Scene view (1) the path is the green line; click a green ball and drag the arrows to move a waypoint. Keep fish under water (y below 0) unless you want them to fly.'));
+    this.sec(el, 'Path');
+    this.buttons(el, btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete path', () => ed.deleteSelection(), { cls: 'danger' }));
+  }
+
+  pathKey(el, t, k) {
+    const { ed } = this, i = t.keys.indexOf(k);
+    this.header(el, `${t.label} — waypoint #${i + 1}`, `waypoint · ${fmtTime(k.t)}`);
+    el.append(this.time('Time (s)', () => k.t, (v) => { k.t = v; }));
+    el.append(this.vec('Position xyz', () => k.pos));
+    el.append(h('div', { class: 'hint' }, 'y is height: the sea surface is at 0, the seabed around −20. Drag the green ball’s arrows in the Scene view to place it.'));
+    this.buttons(el,
+      btn('Set to Scene view target', () => { if (!ed.sceneView) return ed.toast('Switch to the Scene view (1) first'); k.pos = ed.app.controls.target.toArray().map((v) => +v.toFixed(2)); ed.commit(); }, { ico: 'camera' }),
+      this.free(btn('Go to', () => ed.setTime(k.t))),
+    );
+    this.buttons(el, this.free(btn('Path', () => ed.select({ kind: 'track', track: t }))), btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
   }
 
   layerKey(el, t, k) {

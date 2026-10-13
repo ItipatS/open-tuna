@@ -68,8 +68,15 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 - Fixed: the Scene camera "sticking" at the water surface; the sea from above is now see-through (seabed,
   coral and fish visible) and its ripples / foam no longer tile visibly; the dev servers now support byte
   ranges (videos couldn't seek).
-- story.json still carries the owner's first editor test: 12 "New chapter" markers and a Bloom curve key, all
-  at 1:00 (they hit the old 0..1 wall). Owner to clean up (right-click ▸ Delete) or keep.
+- **Demo chapter "The Journey" (1:00–2:30)**, placeholder content: camera dives and rides with the tuna school
+  along a route (path track), blue whale passes, humpback at the surface, parallax cards + bubbles, 3D medallion /
+  product billboards on the route, clickable HTML panel + iframe product page at the end. Shows the designer what
+  paths / layers / GUI can do; art in `assets/demo/`. (The owner's 12 stacked "New chapter" test markers at 1:00
+  were replaced by this chapter's markers.)
+- Editor Play now behaves like the website (scroll to move, GUI clickable); Auto-play is separate.
+- Fixed: tuna leaps teleporting into the sky (fish now swim to the launch point and only leap in cycles that
+  started while leaps were on); jellyfish cut off by the sea surface / poking out of the water / sliced by the
+  camera; story.json save conflicts between the editor and outside edits (Claude, git) are now detected.
 - Fixed a **black-screen bug** on the live site: resizing the window wider than at load (or going fullscreen
   on a wider screen) dropped every frame — a three r180 bug, patched in `main.js` (see CLAUDE.md → Gotchas).
 - Underwater act: school, sharks, whales, jellies, particles, god rays; stylised Snell's window shows the sky.

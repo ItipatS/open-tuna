@@ -193,3 +193,8 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 #captions .layer.ed-sel { outline: 2px solid #f78fb3; outline-offset: 2px; }
 .ed-handle { position: absolute; right: -9px; bottom: -9px; width: 14px; height: 14px; border-radius: 3px; background: #f78fb3; border: 2px solid #1b1e23; cursor: nwse-resize; pointer-events: auto; z-index: 2; }
 #ed-wrap.drop::after { content: "Drop to add as a layer"; position: absolute; inset: 10px; display: grid; place-items: center; border: 2px dashed #f78fb3; border-radius: 12px; background: rgba(247, 143, 179, .12); color: #fff; font-size: 16px; font-weight: 600; letter-spacing: .06em; pointer-events: none; z-index: 20; }
+
+/* ---- site play: a browser-like scrollbar on the right of the Game view */
+#ed-scrollbar { position: absolute; top: 0; right: 0; bottom: 0; width: 12px; z-index: 6; background: rgba(0,0,0,.18); cursor: pointer; }
+#ed-scrollbar i { position: absolute; left: 2px; right: 2px; height: 46px; margin-top: -23px; border-radius: 6px; background: rgba(255,255,255,.55); pointer-events: none; }
+#ed-scrollbar:hover i { background: rgba(255,255,255,.8); }

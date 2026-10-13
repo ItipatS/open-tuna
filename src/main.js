@@ -112,9 +112,12 @@ async function main() {
     tuna: 'tuna_fish.glb', reef: 'coral_fish.glb', coral: 'coral_piece.glb', shark: 'model_54a_-_caribbean_reef_shark.glb',
     turtle: 'model_50a_-_hawksbill_sea_turtle.glb', blue: 'blue_whale_-_textured.glb', hump: 'game-ready_humpback_whale.glb',
   };
-  const storyData = LAB ? null : fetch('./story.json', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`story.json: HTTP ${r.status}`); return r.json(); });
+  // story.json as raw text (the editor fingerprints exactly what's on disk to detect outside changes)
+  const storyText = LAB ? null : fetch('./story.json', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`story.json: HTTP ${r.status}`); return r.text(); });
   const G = Object.fromEntries(await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loader.loadAsync(`./${f}`)])));
-  const timeline = LAB ? null : new Timeline(await storyData);
+  const storyRaw = LAB ? null : await storyText;
+  const timeline = LAB ? null : new Timeline(JSON.parse(storyRaw));
+  if (timeline) timeline.sourceText = storyRaw;
   statusEl.textContent = 'Preparing scene…';
   await new Promise((r) => setTimeout(r, 0));
 
@@ -393,7 +396,8 @@ async function main() {
     'sea.state': (v) => { oceanU.amp.value = v; oceanU.chopAmp.value = Math.min(v, 1.1); },
     'water.clarity': (v) => { U.fogDensity.value = THREE.MathUtils.lerp(0.03, 0.006, v); },
   };
-  const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions') });
+  const actors = { bluewhale: blue, humpback: hump, shark1: sharks[0].obj, shark2: sharks[1].obj, turtle1: turtles[0].obj, turtle2: turtles[1].obj };
+  const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions'), actors });
   const layers = story ? new Layers({ timeline, root: $('captions'), scene }) : null; // images / video / HTML / iframes
   // page length grows with the story (meta.scrollPerSecond vh per second of story)
   const fitScroll = () => { if (story) $('scrollspace').style.height = `${Math.round(timeline.duration * timeline.meta.scrollPerSecond)}vh`; };

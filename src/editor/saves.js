@@ -8,6 +8,12 @@ import { dialog } from './menu.js';
 const DRAFT_KEY = 'openTuna.draft.v1';
 const AUTO_KEY = 'openTuna.autosave';
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
+// FNV-1a over the UTF-8 bytes (same as tools/serve.py) — fingerprint of the story.json on disk
+export function fnv1a(text) {
+  let hsh = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(text)) hsh = Math.imul(hsh ^ b, 0x01000193) >>> 0;
+  return hsh.toString(16).padStart(8, '0');
+}
 const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 async function api(path, opts) {
@@ -30,7 +36,9 @@ export class Saves {
     this.server = null; // null = unknown, then true / false
     this.git = false;
     this.branch = '';
-    this.saved = ed.tl.serialize(); // text of what's on disk
+    this.saved = ed.tl.serialize(); // what's on disk, as the editor would write it (for "dirty")
+    this.baseHash = fnv1a(ed.tl.sourceText ?? this.saved); // fingerprint of the exact file on disk
+    this.conflict = false;
     this.savedAt = null;
     this.lastEdit = 0;
     this.lastAuto = performance.now();
@@ -70,7 +78,7 @@ export class Saves {
   // called about once a second: autosave when there are changes and the user paused editing for 2 s
   tick() {
     const now = performance.now();
-    if (!this.autosave || !this.server || this.busy || !this.dirty) return;
+    if (!this.autosave || !this.server || this.busy || this.conflict || !this.dirty) return;
     if (now - this.lastAuto < this.autosave * 1000 || now - this.lastEdit < 2000) return;
     this.lastAuto = now;
     this.save({ auto: true });
@@ -85,13 +93,19 @@ export class Saves {
     if (msg) this.ed.toast(msg);
   }
 
-  async save({ auto = false } = {}) {
+  async save({ auto = false, force = false } = {}) {
     const text = this.ed.current();
+    if (this.conflict && !force) return this.conflictDialog();
     this.busy = true;
     try {
       if (this.server !== false) {
         try {
-          await post('save', text);
+          const r = await fetch('./__editor/save', { method: 'POST', body: text, headers: { 'Content-Type': 'application/json', 'X-Base-Hash': this.baseHash, ...(force ? { 'X-Force': '1' } : {}) } });
+          const j = await r.json().catch(() => ({}));
+          if (r.status === 409) { this.conflict = true; this.theirs = j.current; this.ed.syncButtons(); return this.conflictDialog(); }
+          if (!r.ok) throw new Error(j.error || r.status);
+          this.baseHash = fnv1a(text);
+          this.conflict = false;
           return this.done(text, auto ? '' : 'Saved story.json', auto);
         } catch (e) {
           if (this.server) { this.ed.toast(`Save failed: ${e.message}`, true); return; }
@@ -113,7 +127,39 @@ export class Saves {
     } finally { this.busy = false; }
   }
 
+  // story.json was changed outside this editor (Claude, a git pull, another tab) since it was loaded
+  conflictDialog() {
+    if (document.querySelector('.ed-modal')) return;
+    dialog({
+      title: 'story.json changed outside the editor',
+      body: [
+        h('p', {}, 'Someone (Claude, a git pull, or another editor tab) saved a newer story.json since you opened it. Autosave is paused so nothing gets overwritten.'),
+        h('p', {}, h('b', {}, 'Load theirs'), ' — open the version on disk (your changes are kept in undo: Ctrl+Z goes back to them). ',
+          h('b', {}, 'Keep mine'), ' — overwrite the file with what you see (the other version is kept in File ▸ Open / Restore ▸ previous versions).'),
+      ],
+      buttons: [
+        { label: 'Decide later' },
+        { label: 'Keep mine', danger: true, onClick: () => this.save({ force: true }) },
+        { label: 'Load theirs', primary: true, onClick: () => this.loadTheirs() },
+      ],
+    });
+  }
+
+  async loadTheirs() {
+    try {
+      const raw = this.theirs ?? await api('load?file=story.json');
+      this.theirs = null;
+      this.ed.loadText(raw, 'the newer story.json from disk');
+      this.saved = this.ed.current();
+      this.baseHash = fnv1a(raw);
+      this.conflict = false;
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
+      this.ed.syncButtons();
+    } catch (e) { this.ed.toast(`Couldn’t load: ${e.message}`, true); }
+  }
+
   status() {
+    if (this.conflict) return { text: '⚠ Changed on disk — click Save', cls: 'dirty' };
     if (this.dirty) return { text: this.autosave && this.server ? 'Unsaved · autosave on' : 'Unsaved changes', cls: 'dirty' };
     if (this.savedAt) return { text: `${this.auto ? 'Autosaved' : 'Saved'} ${clock(this.savedAt)}`, cls: 'ok' };
     return { text: this.server === false ? 'No editor server (Save downloads)' : 'Saved', cls: '' };
@@ -225,6 +271,7 @@ export class Saves {
       const text = this.server ? await api('load?file=story.json') : this.saved;
       this.ed.loadText(text, 'the saved story.json');
       this.saved = this.ed.current();
+      if (this.server) { this.baseHash = fnv1a(text); this.conflict = false; }
       this.ed.syncButtons();
     } catch (e) { this.ed.toast(`Couldn’t revert: ${e.message}`, true); }
   }

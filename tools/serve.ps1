@@ -94,6 +94,12 @@ function SafeFile([string]$rel) {
   throw 'file not allowed'
 }
 
+function Fnv1a([byte[]]$data) {
+  [uint64]$h = 2166136261
+  foreach ($b in $data) { $h = (($h -bxor $b) * 16777619) % 4294967296 }
+  return '{0:x8}' -f $h
+}
+
 function ValidStory([string]$body) {
   $data = $body | ConvertFrom-Json
   if ($null -eq $data.tracks) { throw 'not a story.json (no "tracks" list)' }
@@ -170,6 +176,12 @@ function Editor($ctx, [string]$path) {
     '/__editor/save' {
       ValidStory $body
       if (Test-Path $story) {
+        $oldBytes = [IO.File]::ReadAllBytes($story)
+        $base = $req.Headers['X-Base-Hash']
+        if ($req.Headers['X-Force'] -ne '1' -and $base -ne (Fnv1a $oldBytes)) {
+          $msg = if ($base) { 'story.json changed on disk since the editor loaded it' } else { 'this editor tab is out of date - reload it' }
+          SendJson $ctx 409 ([ordered]@{ ok = $false; conflict = $true; error = $msg; current = $utf8.GetString($oldBytes) }); return
+        }
         $old = [IO.File]::ReadAllText($story, $utf8)
         if ($old -ne $body) {
           WriteFile (Join-Path $autoDir "$(Stamp).json") $old

@@ -20,11 +20,21 @@ installed, otherwise a built-in PowerShell server, so there's nothing to install
 
 | Area | What it is |
 |---|---|
-| **Top bar** | File / Edit / View / Help menus · ⏮ ▶ ⏹ and play speed · the big **SCENE / GAME** switch · time · save status · Copy ref · Save |
+| **Top bar** | File / Edit / View / Help menus · ⏮ start · ▶ **Play** · ⏹ Stop · ▶▶ **Auto-play** + speed · the big **SCENE / GAME** switch · time · save status · Copy ref · Save |
 | **Scene** (left) | Every part of the world. Click the eye to hide something while you work (not saved). Right-click for *Show only this* / *Show all*. |
 | **Viewport** (middle) | The coloured frame tells you where you are: **blue = SCENE** (free camera, for placing camera keys), **green = GAME** (exactly what a visitor sees), **orange = PLAYING**. Press **1** / **2** to switch. |
 | **Inspector** (right) | Settings of whatever you selected. With nothing selected, it shows the project and scene settings. |
 | **Timeline** (bottom) | The whole story in real time (m:ss). The orange line is the playhead; the pink **END** flag is the end of the story. |
+
+## Play vs Auto-play
+
+- **▶ Play (Space)** works like the real website. Nothing moves until you scroll: use the mouse wheel over
+  the viewport, the arrow keys / Page Up / Page Down, drag the page, or drag the scrollbar on the right. The
+  scroll has the same smoothing as the website. Clickable layers (buttons, links, web pages) work as they
+  do for a visitor.
+- **▶▶ Auto-play** runs the story by itself at the chosen speed (¼× to 8×), which is handy for watching a
+  long story.
+- **⏹ Stop (Esc)** goes back to where you pressed Play. Pause (Space again) stays where you are.
 
 ## Time and story length
 
@@ -86,6 +96,24 @@ should grow smoothly"). Notes are saved in `story.json`, so a developer or Claud
 want. The reference says exactly where you are (time, chapter, which beats are active, camera keys,
 caption on screen, fps), so Claude knows which part of the code or which keys to edit.
 
+## Creature paths: steer the school, whales, sharks, turtles
+
+Normally the creatures swim by themselves. A **path** track makes one of them follow your route for a while:
+**+ Track… ▸ Move a creature along a path** (tuna school, blue whale, humpback, shark 1 / 2, turtle 1 / 2).
+
+- The teal bar is *when* it follows the path. Outside the bar it does its own thing, and *Blend* is how many
+  seconds it takes to ease in and out.
+- **Waypoints** are the diamonds. In the **Scene** view the path is the bright green line. Click a green
+  ball and drag the arrows to move a waypoint, or look somewhere and press **K** to drop a waypoint where the
+  Scene camera is looking.
+- Heights: the sea surface is at 0 and the seabed is around −20. Whales just below 0 swim *at* the surface.
+- The tuna school follows its path as a school: it tightens up and trails the waypoints a little.
+- Combine a path with camera keys that have **Follow school** = 1 to make the camera track the school.
+
+The demo chapter **The Journey (1:00–2:30)** uses all of this: a school route, a blue whale passing, a humpback
+at the surface, parallax cards, 3D medallions and products along the route, and clickable panels at the end.
+Everything in it is placeholder art (`assets/demo/`). Change it or delete it freely.
+
 ## Layers: images, video, HTML, web pages, parallax
 
 Add pictures, videos, text / buttons (HTML) or whole web pages on top of the scene, or put pictures and
@@ -117,6 +145,7 @@ videos *into* the 3D world.
 | What | How |
 |---|---|
 | **Save** | **Ctrl+S** (or Save). Writes `story.json`. The top bar says *Saved 3:15 PM* or *Unsaved changes*. |
+| **Changed elsewhere** | If `story.json` changed on disk since you opened the editor (Claude edited it, a git pull, another tab), saving is paused and you're asked: **Load theirs** (your version stays in undo) or **Keep mine**. Nothing gets overwritten silently. |
 | **Autosave** | On by default (every minute, after you stop editing for 2 s). Change it in File ▸ Autosave. |
 | **Previous versions** | Every save keeps the version it replaced (last 100) in `saves/auto/`. |
 | **Checkpoints** | **Ctrl+Shift+S** saves a *named* copy ("before new ending"). Kept until you delete them. They're included when you commit. |
@@ -129,7 +158,7 @@ Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps).
 
 ## Shortcuts
 
-`Space` play/pause · `Esc` stop / deselect · `← →` one frame (Shift: 1 s) · `Home / End` ·
+`Space` play (scroll like the website) / pause · wheel, `↑ ↓`, `PgUp PgDn` scroll while playing · `Esc` stop / deselect · `← →` one frame (Shift: 1 s) · `Home / End` ·
 `, .` previous / next key · `K` add key · `L` lock · `Del` delete · `Ctrl C / X / V` copy / cut / paste ·
 `Ctrl D` duplicate · `Ctrl Z / Y` undo / redo · `Ctrl S` save · `Ctrl Shift S` checkpoint · `Ctrl O` open ·
 `1 / 2` Scene / Game · `F` fit timeline. Help ▸ Keyboard shortcuts shows them all.

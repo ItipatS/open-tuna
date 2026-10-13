@@ -73,6 +73,14 @@ export class Layers {
       m.src = t.src || 'about:blank';
       m.setAttribute('allow', 'autoplay; fullscreen');
       m.setAttribute('loading', 'lazy');
+      // a click inside the page moves keyboard focus into it: pass Esc back out (same-origin pages, e.g. assets/)
+      m.addEventListener('load', () => {
+        try {
+          m.contentWindow.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }));
+          });
+        } catch { /* cross-origin page: can't listen */ }
+      });
     } else {
       m = document.createElement('div');
       m.className = 'html';

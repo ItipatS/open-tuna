@@ -18,6 +18,9 @@
 //     layer     one media layer (see layers.js): { kind image|video|html|iframe, src, html, space screen|world,
 //               a, b, fade, z, w, h, fit, interactive, loop, scrub, rate, billboard,
 //               keys: [{ t, ease, x, y, s, r, o }] (screen: x / y in % of the view) or [{ t, ease, pos[3], s, r, o }] (world, m) }
+//     path      a creature follows keyed waypoints while the clip [a, b] is on: { bind (actor: school, bluewhale,
+//               humpback, shark1, shark2, turtle1, turtle2), a, b, blend (s to ease in / out), keys: [{ t, pos[3] }] }
+//               (Hermite through the waypoints; the creature faces along the path)
 //   Any track / key / clip / chapter / note may carry `locked: true` (editor won't change it);
 //   a track may carry `mute: true` (ignored by the story).
 
@@ -64,7 +67,7 @@ export function segment(keys, x) {
 }
 
 // cubic Hermite through the keys, parametrised by t (finite-difference tangents, flat at both ends)
-function hermite(keys, x, field, out) {
+export function hermite(keys, x, field, out) {
   const [i, j, s] = segment(keys, x);
   const A = keys[i][field], B = keys[j][field];
   if (i === j) { for (let c = 0; c < out.length; c++) out[c] = A[c]; return out; }
@@ -168,7 +171,7 @@ export class Timeline {
     for (const t of d.tracks) {
       if (t.keys) for (const k of t.keys) e = Math.max(e, k.t);
       if (t.clips) for (const c of t.clips) e = Math.max(e, Math.min(c.b, c.a + 0.5));
-      if (t.type === 'clip' || t.type === 'layer') e = Math.max(e, Math.min(t.b, t.a + 0.5));
+      if (t.type === 'clip' || t.type === 'layer' || t.type === 'path') e = Math.max(e, Math.min(t.b, t.a + 0.5));
     }
     return e;
   }
@@ -202,6 +205,16 @@ export class Timeline {
 
   captions() { return this.ofType('captions')?.clips ?? []; }
   layers() { return this.data.tracks.filter((t) => t.type === 'layer'); }
+  paths() { return this.data.tracks.filter((t) => t.type === 'path' && !t.mute && t.keys?.length); }
+
+  // a path track at x: weight (0 outside the clip, easing in / out over `blend` s) + position + heading
+  path(t, x, out) {
+    const bl = Math.max(0.01, t.blend ?? 2), sm = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
+    out.w = Math.min(sm((x - t.a) / bl), 1 - sm((x - (t.b - bl)) / bl)) * (x >= t.a && x <= t.b ? 1 : 0);
+    hermite(t.keys, x, 'pos', out.pos);
+    hermite(t.keys, x + 0.25, 'pos', out.ahead);
+    return out;
+  }
 
   chapter(x) {
     let c = null;

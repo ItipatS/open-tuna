@@ -3,7 +3,7 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, uniform, uint, float, vec3, attribute, instanceIndex, hash, sin, cos, pow, mix, smoothstep, exp, abs,
-  normalize, dot, length, saturate, atan, normalLocal, normalWorld, positionWorld, cameraPosition, max, select, vec2,
+  normalize, dot, length, saturate, atan, normalLocal, normalWorld, positionWorld, cameraPosition, max, min, select, vec2,
 } from 'three/tsl';
 import { U, WATER_Y } from './shared.js';
 
@@ -98,8 +98,10 @@ export function createJellyBloom({ count = 420, clusters }) {
   const phi = U.time.mul(freq).add(h(7).mul(60));
   const contract = pow(sin(phi).mul(0.5).add(0.5), 2.0);
   const t = U.time;
-  const basePos = center.xyz.add(off.mul(vec3(center.w, 4.0, center.w)))
+  const drift = center.xyz.add(off.mul(vec3(center.w, 4.0, center.w)))
     .add(vec3(sin(t.mul(0.05).add(h(8).mul(40))).mul(3), sin(phi.sub(1.2)).mul(0.25).add(sin(t.mul(0.07).add(h(9).mul(30))).mul(2)), cos(t.mul(0.04).add(h(10).mul(40))).mul(3)));
+  // never breach: keep the whole bell at least 2 m under the surface
+  const basePos = vec3(drift.x, min(drift.y, float(WATER_Y - 2).sub(scale.mul(0.5))), drift.z);
   const yaw = h(11).mul(6.283), tilt = h(12).sub(0.5).mul(0.5);
 
   const posNode = Fn(() => {
@@ -148,7 +150,8 @@ export function createJellyBloom({ count = 420, clusters }) {
     const arm = select(part.equal(1), float(0.35).add(sparkle.mul(0.6)), float(0.28).add(sparkle.mul(1.4)).mul(float(1).sub(along.mul(0.7))));
     const k = select(part.equal(0), bell, arm);
     const depthK = mix(0.75, 1.3, smoothstep(2.0, 18.0, float(WATER_Y).sub(positionWorld.y)));
-    const vis = exp(dist.mul(U.fogDensity).mul(-1.15));
+    // fog, and fade out right in front of the camera (no near-plane slicing when the camera swims through)
+    const vis = exp(dist.mul(U.fogDensity).mul(-1.15)).mul(smoothstep(0.8, 4.0, dist));
     const hue = mix(col, vec3(1, 1, 1), rimBand.mul(0.35).add(pulseWave.mul(0.25)));
     return hue.mul(k).mul(depthK).mul(vis).mul(glow).mul(contract.mul(0.35).add(0.75));
   })();
@@ -156,7 +159,7 @@ export function createJellyBloom({ count = 420, clusters }) {
 
   const mesh = new THREE.InstancedMesh(geometry, mat, count);
   mesh.frustumCulled = false;
-  mesh.renderOrder = 6;
+  mesh.renderOrder = 11; // after the sea surface (10): it writes depth, the additive jellies don't
   mesh.userData.glow = glow;
   mesh.userData.clusters = cl;
   return mesh;

@@ -279,6 +279,7 @@ export class LayerTools {
   update() {
     const ed = this.ed, pick = ed.view === 'game' && !ed.playing;
     this.layers.pickable = pick;
+    this.layers.editing = !ed.playing; // while playing, clickable layers work like on the website
     this.root.classList.toggle('ed-pick', pick);
     const t = this.selected(), it = t && !t.space?.startsWith('w') ? this.layers.item(t.id) : null;
     for (const x of this.layers.items.values()) x.el?.classList.toggle('ed-sel', x === it && pick);

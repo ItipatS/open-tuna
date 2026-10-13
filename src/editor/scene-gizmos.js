@@ -29,6 +29,10 @@ export class SceneGizmos {
     this.matLook = over(new THREE.MeshBasicNodeMaterial({ color: 0xffb35c, opacity: 0.8 }));
     this.matSel = over(new THREE.MeshBasicNodeMaterial({ color: 0xffffff }));
     this.matLocked = over(new THREE.MeshBasicNodeMaterial({ color: 0x7d8a99, opacity: 0.8 }));
+    this.matPath = over(new THREE.MeshBasicNodeMaterial({ color: 0xb4ff5a }));
+    // creature paths: one line per path track (pooled), waypoint balls share the marker pool
+    this.pathLineMat = over(new THREE.LineBasicNodeMaterial({ color: 0xb4ff5a, opacity: 0.95 }));
+    this.pathLines = [];
     this.markers = [];
 
     // a short stand-in for the shot camera (its real far plane is 9 km)
@@ -57,6 +61,7 @@ export class SceneGizmos {
     tc.addEventListener('objectChange', () => {
       const tg = this.target(), p = this.proxy.position.toArray().map((v) => +v.toFixed(3));
       if (tg?.cam) (this.mode === 'look' ? tg.key.look : tg.key.pos).splice(0, 3, ...p);
+      else if (tg?.path) tg.key.pos = p;
       else if (tg?.layer && this.dragKey) this.dragKey.pos = p;
       else return;
       ed.changed();
@@ -83,7 +88,7 @@ export class SceneGizmos {
         else ed.select({ kind: 'track', track: lt });
         return;
       }
-      const { key, look } = hit.object.userData, track = ed.tl.ofType('camera');
+      const { key, look, pathTrack } = hit.object.userData, track = pathTrack ?? ed.tl.ofType('camera');
       this.mode = look ? 'look' : 'pos';
       if (e.button === 2) ed.contextMenu(e.clientX, e.clientY, { kind: 'key', track, item: key });
       else ed.select({ kind: 'key', track, item: key });
@@ -95,10 +100,11 @@ export class SceneGizmos {
     return s?.kind === 'key' && s.track.type === 'camera' ? s.item : null;
   }
 
-  // what the move gizmo edits: a camera key, or a 3D layer (a specific key, or its key at the playhead)
+  // what the move gizmo edits: a camera key, a path waypoint, or a 3D layer (a specific key, or its key at the playhead)
   target() {
     const s = this.ed.sel;
     if (s?.kind === 'key' && s.track.type === 'camera') return { cam: true, key: s.item };
+    if (s?.kind === 'key' && s.track.type === 'path') return { path: true, key: s.item };
     if (s?.track?.type === 'layer' && s.track.space === 'world') return { layer: s.track, key: s.kind === 'key' ? s.item : null };
     return null;
   }
@@ -117,8 +123,29 @@ export class SceneGizmos {
     const segs = new Float32Array(keys.length * 6);
     keys.forEach((key, i) => { segs.set(key.pos, i * 6); segs.set(key.look, i * 6 + 3); });
     this.lookGeo.setAttribute('position', new THREE.BufferAttribute(segs, 3));
-    // markers (pooled)
-    while (this.markers.length < keys.length * 2) {
+    // path lines
+    const paths = tl.paths();
+    while (this.pathLines.length < paths.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+      const l = new THREE.Line(g, this.pathLineMat);
+      l.frustumCulled = false;
+      l.renderOrder = 60;
+      this.group.add(l);
+      this.pathLines.push(l);
+    }
+    const pk = { pos: [0, 0, 0], ahead: [0, 0, 0] };
+    this.pathLines.forEach((l, i) => {
+      const pt = paths[i];
+      l.visible = !!pt;
+      if (!pt) return;
+      const a = l.geometry.attributes.position, t0 = pt.keys[0].t, t1 = pt.keys.at(-1).t;
+      for (let j = 0; j < N; j++) { tl.path(pt, t0 + ((t1 - t0) * j) / (N - 1), pk); a.setXYZ(j, ...pk.pos); }
+      a.needsUpdate = true;
+    });
+    const pathKeys = paths.flatMap((pt) => pt.keys.map((key) => ({ key, pt })));
+    // markers (pooled): camera keys (pos + look) then path waypoints
+    while (this.markers.length < keys.length * 2 + pathKeys.length) {
       const m = new THREE.Mesh(this.ball, this.matKey);
       m.renderOrder = 62;
       m.frustumCulled = false;
@@ -126,6 +153,14 @@ export class SceneGizmos {
       this.markers.push(m);
     }
     this.markers.forEach((m, i) => {
+      if (i >= keys.length * 2) {
+        const pk2 = pathKeys[i - keys.length * 2];
+        m.visible = !!pk2;
+        if (!pk2) return;
+        m.userData = { key: pk2.key, pathTrack: pk2.pt };
+        m.position.fromArray(pk2.key.pos);
+        return;
+      }
       const key = keys[i >> 1], look = i % 2 === 1;
       m.visible = !!key;
       if (!key) return;
@@ -143,8 +178,10 @@ export class SceneGizmos {
     for (const m of this.markers) {
       if (!m.visible) continue;
       const s = m.userData.key === sel;
-      const lk = m.userData.key.locked || ed.tl.ofType('camera')?.locked;
-      m.material = s && (m.userData.look ? this.mode === 'look' : this.mode === 'pos') ? this.matSel : lk ? this.matLocked : m.userData.look ? this.matLook : this.matKey;
+      const pt = m.userData.pathTrack;
+      const lk = m.userData.key.locked || (pt ? pt.locked : ed.tl.ofType('camera')?.locked);
+      const selP = pt && ed.sel?.item === m.userData.key;
+      m.material = selP || (s && (m.userData.look ? this.mode === 'look' : this.mode === 'pos')) ? this.matSel : lk ? this.matLocked : pt ? this.matPath : m.userData.look ? this.matLook : this.matKey;
       // keep balls a constant size on screen
       const d = m.position.distanceTo(ed.app.camera.position);
       m.scale.setScalar(Math.max(0.15, d * 0.012) * (m.userData.look ? 0.7 : 1) * (s ? 1.3 : 1));
@@ -157,7 +194,7 @@ export class SceneGizmos {
     if (tg && !ed.isLocked(ed.sel)) {
       if (!this.tc.dragging) {
         this.proxy.position.fromArray(tg.cam ? (this.mode === 'look' ? tg.key.look : tg.key.pos)
-          : tg.key?.pos ?? ed.app.layers.state(tg.layer, ed.time).pos);
+          : tg.path ? tg.key.pos : tg.key?.pos ?? ed.app.layers.state(tg.layer, ed.time).pos);
       }
       if (this.tc.object !== this.proxy) this.tc.attach(this.proxy);
       this.tcHelper.visible = true;

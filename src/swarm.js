@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu';
 import {
   Fn, If, Loop, uniform, uint, float, vec3, vec4, instancedArray, instanceIndex, hash, attribute,
   normalLocal, normalize, cross, dot, length, max, clamp, pow, sin, cos, mix, smoothstep, select,
-  inverseSqrt, abs, sign, floor, fract, sqrt,
+  inverseSqrt, abs, sign, floor, fract, sqrt, min,
 } from 'three/tsl';
 import { U, WATER_Y } from './shared.js';
 
@@ -24,8 +24,10 @@ export class FishSwarm {
     this.state = instancedArray(Math.max(jumpers, 1), 'vec4'); // mode, crossX, crossZ, crossTime
     // scripted leaps: targets = { launch, land } Float32Array(maxCount*4) each.
     // launch = (x, y, z, w): w < 0 -> plain schooling; 10 <= w < 11 -> "hoop" group; 20 <= w < 21 -> "free"
-    // group; fract(w) = loop phase. land = (x, y, z, apexY). Each fish loops: school, then a ballistic
-    // leap launch -> land (apexY high) on its own period, easing in from wherever it was schooling.
+    // group; fract(w) = loop phase. land = (x, y, z, apexY). Each fish loops on its own period: school,
+    // then swim (underwater) from where it was schooling to the launch point, then a ballistic leap
+    // launch -> land (apexY high). A leap cycle only runs if its group was switched on when the cycle
+    // began (hoopWin / freeWin = sim time switched on, switched off), so nothing pops into the air.
     this.formation = !!targets;
     if (targets) {
       this.launch = instancedArray(targets.launch, 'vec4');
@@ -61,6 +63,7 @@ export class FishSwarm {
       jumpRadius: uniform(14), // only fish near the school centre breach (keeps the action framed)
       // formation (scroll-scrubbed): form 0 = all schooling, 1 = every fish holding its target
       hoop: uniform(0), free: uniform(0), leapPeriod: uniform(14), // group gates (0/1) + mean loop period (s)
+      hoopWin: uniform(new THREE.Vector2(1e9, 1e9)), freeWin: uniform(new THREE.Vector2(1e9, 1e9)), // (on since, off since) sim time
     };
     this.frame = 0;
     this._buildCompute(seed);
@@ -108,16 +111,26 @@ export class FishSwarm {
         Vi.assign(vec4(dir.mul(u.maxSpeed), u.maxSpeed));
       };
 
-      // ballistic leap launch -> land, apex at land.w; eases in from the schooling position
+      // ballistic leap launch -> land, apex at land.w
       const leap = (A, B, s) => {
-        const O = OR.element(idx).xyz;
         const y0 = mix(A.y, B.y, s);
         const hgt = B.w.sub(max(A.y, B.y)).mul(4);
         const arc = vec3(mix(A.x, B.x, s), y0.add(hgt.mul(s).mul(float(1).sub(s))), mix(A.z, B.z, s));
         const dArc = vec3(B.x.sub(A.x), B.y.sub(A.y).add(hgt.mul(float(1).sub(s.mul(2)))), B.z.sub(A.z));
-        const blend = smoothstep(0, 0.2, s);
-        const dir = normalize(mix(arc.sub(O).add(vec3(0, 0.0001, 0)), dArc, blend).add(vec3(0.0001, 0, 0)));
-        finish(mix(O, arc, blend), dir);
+        finish(arc, normalize(dArc.add(vec3(0.0001, 0, 0))));
+      };
+
+      // underwater run-up: a curve from where the fish was schooling (origin) to the launch point, arriving
+      // low and heading along the leap, so the leap starts from a fish that is already there and moving
+      const approach = (A, B, s, start) => {
+        OR.element(idx).w.assign(start); // committed to this cycle (see `held` below)
+        const O = OR.element(idx).xyz;
+        const h = normalize(vec3(B.x.sub(A.x), 0, B.z.sub(A.z)).add(vec3(0.0001, 0, 0)));
+        const C = vec3(A.x, min(A.y.sub(2.5), -1.5), A.z).sub(h.mul(6));
+        const u1 = float(1).sub(s);
+        const pos = O.mul(u1.mul(u1)).add(C.mul(s.mul(u1).mul(2))).add(A.xyz.mul(s.mul(s)));
+        const d = C.sub(O).mul(u1.mul(2)).add(A.xyz.sub(C).mul(s.mul(2)));
+        finish(vec3(pos.x, min(pos.y, float(WATER_Y).sub(0.4)), pos.z), normalize(d.add(vec3(0.0001, 0, 0))));
       };
 
       const simulate = () => {
@@ -256,13 +269,25 @@ export class FishSwarm {
         if (!FORM) return simulate();
         const A = LA.element(idx), B = LD.element(idx);
         const grp = floor(A.w.div(10));
-        const on = grp.equal(1).and(u.hoop.greaterThan(0.5)).or(grp.equal(2).and(u.free.greaterThan(0.5)));
-        // flight time of a real ballistic arc to that apex (+20% for the ease-in), per-fish period
-        const air = sqrt(max(B.w.sub(max(A.y, B.y)), 0.5).mul(8 / 9.81)).mul(1.2);
-        const period = u.leapPeriod.mul(hash(idx.add(uint(seed + 4099))).mul(0.9).add(0.6));
+        // flight time of a real ballistic arc to that apex; a fixed per-fish run-up (it must not depend on the
+        // origin, which moves again once the fish has landed)
+        const air = sqrt(max(B.w.sub(max(A.y, B.y)), 0.5).mul(8 / 9.81));
+        const run = hash(idx.add(uint(seed + 6151))).add(4.5);
+        const period = u.leapPeriod.mul(hash(idx.add(uint(seed + 4099))).mul(0.85).add(0.75)); // 10.5 .. 22 s > run + air
         const tl = fract(U.time.div(period).add(fract(A.w))).mul(period);
-        If(A.w.greaterThanEqual(10).and(on).and(tl.lessThan(air)), () => {
-          leap(A, B, tl.div(air));
+        // the cycle must have started while the group was on (a fish already leaping finishes its leap)
+        const win = select(grp.equal(1), u.hoopWin, u.freeWin);
+        const start = U.time.sub(tl);
+        const go = A.w.greaterThanEqual(10).and(start.greaterThanEqual(win.x)).and(start.lessThan(win.y));
+        // a fish commits at the very start of a cycle, and only if it is within 32 m of its launch point
+        // (no frantic sprints); origin.w remembers the committed cycle so nothing joins halfway
+        const O4 = OR.element(idx);
+        const held = abs(O4.w.sub(start)).lessThan(0.5);
+        const begin = tl.lessThan(0.25).and(length(A.xyz.sub(O4.xyz)).lessThan(32));
+        If(go.and(tl.lessThan(run)).and(held.or(begin)), () => {
+          approach(A, B, tl.div(run), start);
+        }).ElseIf(go.and(held).and(tl.lessThan(run.add(air))), () => {
+          leap(A, B, tl.sub(run).div(air));
         }).Else(simulate);
       });
     })().compute(this.maxCount);

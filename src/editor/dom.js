@@ -29,6 +29,7 @@ const P = {
   link: 'M9 2h5v5l-1.8-1.8-4 4-1.4-1.4 4-4zM2 4h5v1.5H3.5v7h7V9H12v5H2z',
   save: 'M2 2h9.5L14 4.5V14H2zM4 3.5v3h6v-3zM4.5 9v3.5h7V9z',
   plus: 'M7 2h2v5h5v2H9v5H7V9H2V7h5z',
+  auto: 'M1.5 3v10l6.5-5zM8 3v10l6.5-5z',
 };
 export const icon = (name) => {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

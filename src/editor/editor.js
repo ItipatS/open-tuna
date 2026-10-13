@@ -16,7 +16,7 @@ import { TimelineView } from './timeline-view.js';
 import { SceneGizmos } from './scene-gizmos.js';
 import { Saves } from './saves.js';
 import { LayerTools } from './layer-tools.js';
-import { PARAMS, DRIVERS } from '../story.js';
+import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime, migrate } from '../timeline.js';
 
 const ASPECTS = { '16:9': 16 / 9, '16:10': 16 / 10, '21:9': 21 / 9, '4:3': 4 / 3, '9:19.5': 9 / 19.5, free: 0 };
@@ -34,7 +34,9 @@ export class Editor {
     this.time = 0; // playhead (s)
     this.playing = false;
     this.playFrom = 0;
-    this.speed = 1; // play speed
+    this.speed = 1; // auto-play speed
+    this.playMode = 'site'; // 'site' = scroll it like the website, 'auto' = runs by itself
+    this.scrollT = 0; // site play: where the (virtual) scroll wants the story to be
     this.view = 'game';
     this.aspect = '16:9';
     this.maxOnPlay = false;
@@ -72,12 +74,13 @@ export class Editor {
   // ------------------------------------------------------------------ layout
   buildDOM() {
     const { renderer } = this.app;
-    this.$play = btn('', () => (this.playing ? this.pause() : this.play()), { ico: 'play', title: 'Play / Pause (Space)', id: 'ed-play' });
+    this.$play = btn('', () => (this.playing ? this.pause() : this.play('site')), { ico: 'play', title: 'Play — use it like the website: scroll / arrow keys move through the story, buttons and pages are clickable (Space)', id: 'ed-play' });
+    this.$auto = btn('', () => (this.playing && this.playMode === 'auto' ? this.pause() : this.play('auto')), { ico: 'auto', title: 'Auto-play — the story runs by itself at the chosen speed' });
     this.$readout = h('div', { id: 'ed-readout' });
     this.$fps = h('div', { id: 'ed-fps' });
     this.$status = h('div', { id: 'ed-status', title: 'Save status — File menu for autosave, checkpoints and restore' });
     this.$save = btn('Save', () => this.saves.save(), { ico: 'save', title: `Save story.json (${mod}S)`, cls: 'primary' });
-    this.$speed = h('select', { title: 'Play speed (for long stories)' }, ['0.25', '0.5', '1', '2', '4', '8'].map((v) => h('option', { value: v }, `${v}×`)));
+    this.$speed = h('select', { title: 'Auto-play speed' }, ['0.25', '0.5', '1', '2', '4', '8'].map((v) => h('option', { value: v }, `${v}×`)));
     this.$speed.value = '1';
     this.$speed.addEventListener('change', () => { this.speed = +this.$speed.value; this.$speed.blur(); });
 
@@ -106,6 +109,7 @@ export class Editor {
       btn('', () => { this.pause(); this.setTime(0); }, { ico: 'start', title: 'Go to start (Home)' }),
       this.$play,
       btn('', () => this.stop(), { ico: 'stop', title: 'Stop — back to where Play started (Esc)' }),
+      this.$auto,
       this.$speed,
       h('div', { class: 'sep' }),
       h('div', { id: 'ed-mode' }, this.$mode.scene, this.$mode.game),
@@ -135,7 +139,9 @@ export class Editor {
     this.$toast = h('div', { id: 'ed-toast' });
     this.$wrap = h('div', { id: 'ed-wrap' }, this.$stage);
     const view = h('main', { id: 'ed-view' }, tabs, this.$wrap, this.$toast);
-    this.$stage.append(renderer.domElement, document.getElementById('captions'), this.$badge);
+    this.$scrollbar = h('div', { id: 'ed-scrollbar', title: 'Drag to scroll (like the browser scrollbar)' }, h('i'));
+    this.$stage.append(renderer.domElement, document.getElementById('captions'), this.$badge, this.$scrollbar);
+    this.bindSitePlay();
 
     this.$right = h('aside', { id: 'ed-right' });
 
@@ -214,12 +220,50 @@ export class Editor {
     this.layoutStage();
   }
 
+  // ------------------------------------------------------------------ site play: scroll like the website
+  // px of wheel -> seconds of story: the site's page scrolls (duration · scrollPerSecond − 100) vh in total
+  scrollBy(px) {
+    const D = this.duration, vh = innerHeight / 100;
+    const range = Math.max(1, (D * this.tl.meta.scrollPerSecond - 100) * vh);
+    this.scrollT = Math.min(D, Math.max(0, this.scrollT + (px / range) * D));
+  }
+
+  bindSitePlay() {
+    const site = () => this.playing && this.playMode === 'site';
+    this.$stage.addEventListener('wheel', (e) => {
+      if (!site()) return;
+      e.preventDefault();
+      this.scrollBy(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1));
+    }, { passive: false });
+    // drag the page (touch-style) on the canvas
+    const cv = this.app.renderer.domElement;
+    cv.addEventListener('pointerdown', (e) => {
+      if (!site() || e.button !== 0) return;
+      let y = e.clientY;
+      const mv = (ev) => { this.scrollBy(y - ev.clientY); y = ev.clientY; };
+      const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); };
+      addEventListener('pointermove', mv);
+      addEventListener('pointerup', up);
+    });
+    // the scrollbar thumb
+    const bar = this.$scrollbar;
+    bar.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const set = (ev) => { const r = bar.getBoundingClientRect(); this.scrollT = Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height)) * this.duration; };
+      set(e);
+      const up = () => { removeEventListener('pointermove', set); removeEventListener('pointerup', up); };
+      addEventListener('pointermove', set);
+      addEventListener('pointerup', up);
+    });
+  }
+
   syncMode() {
     const mode = this.playing ? 'playing' : this.view;
     for (const [k, b] of Object.entries(this.$mode)) b.classList.toggle('on', k === this.view);
     this.$root.dataset.mode = mode;
     this.$stage.classList.toggle('scene', this.view === 'scene' && !this.playing);
-    this.$badge.textContent = this.playing ? '▶  PLAYING' : this.view === 'scene' ? 'SCENE · free camera' : 'GAME · visitor view';
+    this.$badge.textContent = this.playing ? (this.playMode === 'site' ? '▶  PLAYING · scroll like the website' : `▶▶  AUTO-PLAY ${this.speed}×`) : this.view === 'scene' ? 'SCENE · free camera' : 'GAME · visitor view';
+    this.$scrollbar.style.display = this.playing && this.playMode === 'site' ? '' : 'none';
   }
 
   alignToShot(keepView) {
@@ -308,6 +352,8 @@ export class Editor {
       ...Object.entries(PARAMS).map(([k, v]) => ({ label: `Curve: ${v.label}`, disabled: used.has(k), onClick: () => this.addTrack(`curve:${k}`) })),
       '-',
       ...Object.entries(DRIVERS).map(([k, v]) => ({ label: `Clip: ${v}`, disabled: used.has(k), onClick: () => this.addTrack(`clip:${k}`) })),
+      '-',
+      ...Object.entries(ACTORS).map(([k, v]) => ({ label: `Path: move the ${v.toLowerCase()}`, onClick: () => this.addTrack(`path:${k}`) })),
       ...(this.tl.tracks.some((t) => t.type === 'camera') ? [] : ['-', { label: 'Camera', onClick: () => this.addTrack('camera:') }]),
       ...(this.tl.tracks.some((t) => t.type === 'captions') ? [] : [{ label: 'Captions', onClick: () => this.addTrack('captions:') }]),
     ];
@@ -395,6 +441,19 @@ export class Editor {
       case 'layer': {
         this.select({ kind: 'track', track: tg.track });
         return this.lt.contextItems(tg.track);
+      }
+      case 'path': {
+        const t = tg.track, L = !!t.locked;
+        this.select({ kind: 'track', track: t });
+        return [
+          { label: `Go to start (${fmtTime(t.a)})`, onClick: () => this.setTime(t.a) },
+          { label: `Add waypoint at playhead (${fmtTime(this.time)})`, shortcut: 'K', disabled: L, onClick: () => this.addPathKey(t) },
+          { label: 'Show in Scene view', onClick: () => { this.setView('scene'); const p = new THREE.Vector3().fromArray(this.actorPos(t.bind)); const { camera, controls } = this.app; const d = camera.position.clone().sub(controls.target); controls.target.copy(p); camera.position.copy(p).add(d.setLength(Math.min(d.length(), 45))); } },
+          { label: 'Set start to playhead', disabled: L || this.time >= t.b, onClick: () => { t.a = r4(this.time); this.commit(); } },
+          { label: 'Set end to playhead', disabled: L || this.time <= t.a, onClick: () => { t.b = r4(this.time); this.commit(); } },
+          '-', ...this.trackMenuTail(t),
+          { label: 'Delete path', danger: true, disabled: L, onClick: () => this.deleteSelection() },
+        ];
       }
       case 'chapter': case 'note': {
         const s = { kind: tg.kind, item: tg.item }; sel(s);
@@ -667,12 +726,13 @@ export class Editor {
   // the track K / "+ Key" adds to: the selected camera / curve track, else the camera
   keyTrack() {
     const t = this.sel?.track;
-    return t && (t.type === 'camera' || t.type === 'curve' || t.type === 'layer') ? t : this.tl.tracks.find((x) => x.type === 'camera');
+    return t && (t.type === 'camera' || t.type === 'curve' || t.type === 'layer' || t.type === 'path') ? t : this.tl.tracks.find((x) => x.type === 'camera');
   }
 
   addKey(track = this.keyTrack()) {
     if (!track) return this.toast('Select a camera or curve track first');
     if (track.type === 'layer') return this.lt.addKey(track);
+    if (track.type === 'path') return this.addPathKey(track);
     if (track.locked) return this.toast(`“${track.label}” is locked`, true);
     const t = r4(this.time);
     let key = track.keys.find((k) => Math.abs(k.t - t) < 1e-3);
@@ -758,6 +818,7 @@ export class Editor {
       h('option', { value: '' }, '+ Track…'),
       h('optgroup', { label: 'Animate a parameter (curve)' }, Object.entries(PARAMS).map(([k, v]) => opt(`curve:${k}`, v.label))),
       h('optgroup', { label: 'Drive a story beat (clip)' }, Object.entries(DRIVERS).map(([k, v]) => opt(`clip:${k}`, v))),
+      h('optgroup', { label: 'Move a creature along a path' }, Object.entries(ACTORS).map(([k, v]) => h('option', { value: `path:${k}` }, `${v} path`))),
       ...(this.tl.tracks.some((t) => t.type === 'camera') ? [] : [h('option', { value: 'camera:' }, 'Camera')]),
       ...(this.tl.tracks.some((t) => t.type === 'captions') ? [] : [h('option', { value: 'captions:' }, 'Captions')]),
     );
@@ -772,6 +833,12 @@ export class Editor {
       t = { id: bind.replace('.', '-'), type, label: P.label.replace(/ \(.*\)/, ''), bind, keys: [{ t: t0, v: r4(this.tl.param(bind, t0, P.def)), ease: 'smooth' }] };
     } else if (type === 'clip') {
       t = { id: bind.replace('.', '-'), type, label: DRIVERS[bind].replace(/ \(.*\)/, ''), bind, a: t0, b: r4(Math.min(this.duration, t0 + 6)), ease: bind.startsWith('tuna.') ? 'gate' : 'smooth' };
+    } else if (type === 'path') {
+      const p = this.actorPos(bind), f = this.actorFwd(bind);
+      const t1 = r4(Math.min(this.duration, t0 + 10));
+      t = { id: `path-${bind}-${Date.now().toString(36)}`, type, label: `${ACTORS[bind]} path`, bind, a: t0, b: r4(Math.min(this.duration, t0 + 20)), blend: 2,
+        keys: [{ t: t0, pos: p.map((v) => +v.toFixed(2)) }, { t: t1, pos: p.map((v, i) => +(v + f[i] * 25).toFixed(2)) }] };
+      this.toast(`${ACTORS[bind]} path added — move its waypoints in the Scene view (1), or press K there to add one where you look`);
     } else if (type === 'captions') {
       t = this.captionsTrack();
       this.commit();
@@ -782,6 +849,36 @@ export class Editor {
     this.tl.tracks.push(t);
     this.commit();
     this.select({ kind: 'track', track: t });
+  }
+
+  // where a path actor is now (after any path blending), and which way it faces
+  actorPos(bind) {
+    if (bind === 'school') return this.app.tuna.u.goal.value.toArray();
+    return this.story.actors[bind]?.position.toArray() ?? [0, -6, 0];
+  }
+
+  actorFwd(bind) {
+    const o = this.story.actors[bind];
+    if (!o) return [1, 0, 0];
+    const d = o.getWorldDirection(new THREE.Vector3()); // +Z = forward for the creatures
+    d.y = 0;
+    return (d.lengthSq() < 1e-6 ? new THREE.Vector3(1, 0, 0) : d.normalize()).toArray();
+  }
+
+  // a waypoint at the playhead: where the Scene camera looks, or (Game view) where the creature is now
+  addPathKey(track) {
+    if (track.locked) return this.toast(`“${track.label}” is locked`, true);
+    const t = r4(this.time);
+    const p = this.sceneView ? this.app.controls.target.toArray() : this.actorPos(track.bind);
+    let key = track.keys.find((k) => Math.abs(k.t - t) < 1e-3);
+    if (key?.locked) return this.toast('That waypoint is locked', true);
+    if (!key) { key = { t }; track.keys.push(key); }
+    key.pos = p.map((v) => +v.toFixed(2));
+    if (t < track.a) track.a = t;
+    if (t > track.b) track.b = t;
+    this.commit();
+    this.select({ kind: 'key', track, item: key });
+    this.toast(`Waypoint at ${fmtTime(t)}${this.sceneView ? ' (where the Scene camera looks)' : ''}`);
   }
 
   moveTrack(t, dir) {
@@ -832,7 +929,7 @@ export class Editor {
     const c = this.clipboard;
     if (!c) return;
     const x = r4(this.time), it = structuredClone(c.item);
-    const fits = (t) => t && t.type === c.type && (c.type !== 'curve' || t.bind === c.bind) && (c.type !== 'layer' || (t.space ?? 'screen') === (c.space ?? 'screen'));
+    const fits = (t) => t && t.type === c.type && (c.type !== 'curve' || t.bind === c.bind) && (c.type !== 'path' || t.bind === c.bind) && (c.type !== 'layer' || (t.space ?? 'screen') === (c.space ?? 'screen'));
     if (c.kind === 'key') {
       const t = [into, this.sel?.track].find(fits) ?? this.tl.tracks.find(fits);
       if (!t) return this.toast(`No ${c.type === 'curve' ? `“${c.bind}”` : c.type === 'layer' ? 'matching layer (select one)' : c.type} track to paste into`, true);
@@ -883,10 +980,13 @@ export class Editor {
   }
 
   // ------------------------------------------------------------------ play mode
-  play() {
-    if (this.time >= this.duration - 1e-3) this.setTime(0);
+  play(mode = 'site') {
+    if (this.playing) this.pause();
+    this.playMode = mode;
+    if (mode === 'auto' && this.time >= this.duration - 1e-3) this.setTime(0);
     this.playing = true;
     this.playFrom = this.time;
+    this.scrollT = this.time;
     const { camera, controls } = this.app;
     if (this.view === 'scene') this.sceneCam = { pos: camera.position.clone(), target: controls.target.clone() };
     if (this.maxOnPlay) this.$root.classList.add('max');
@@ -915,9 +1015,17 @@ export class Editor {
   // ------------------------------------------------------------------ per frame
   preUpdate(rdt) {
     if (this.playing) {
-      this.setTime(this.time + rdt * this.speed);
-      if (this.time >= this.duration) this.pause();
+      if (this.playMode === 'auto') {
+        this.setTime(this.time + rdt * this.speed);
+        if (this.time >= this.duration) this.pause();
+      } else {
+        // the website's scroll smoothing (story.js): p += (target − p)·(1 − e^(−2.4·dt))
+        const d = this.scrollT - this.time;
+        this.setTime(Math.abs(d) < 1e-4 ? this.scrollT : this.time + d * (1 - Math.exp(-rdt * 2.4)));
+      }
       this.timeline.follow();
+      const th = this.$scrollbar.firstChild;
+      th.style.top = `${(this.time / this.duration) * 100}%`;
     }
     this.story.forceP = this.time / this.duration;
     // performance lane: fps at this moment of the story (after a warm-up)
@@ -967,9 +1075,15 @@ export class Editor {
         if (k) { e.preventDefault(); k(); }
         return;
       }
+      if (this.playing && this.playMode === 'site') {
+        const px = { ArrowDown: 40, ArrowUp: -40, PageDown: innerHeight * 0.9, PageUp: -innerHeight * 0.9 }[e.code];
+        if (px) { e.preventDefault(); this.scrollBy(px); return; }
+        if (e.code === 'Home') { this.scrollT = 0; return; }
+        if (e.code === 'End') { this.scrollT = this.duration; return; }
+      }
       const frame = e.shiftKey ? 1 : 1 / 30;
       switch (e.code) {
-        case 'Space': e.preventDefault(); this.playing ? this.pause() : this.play(); break;
+        case 'Space': e.preventDefault(); this.playing ? this.pause() : this.play('site'); break;
         case 'Escape': if (this.playing) this.stop(); else this.select(null); break;
         case 'Home': this.pause(); this.setTime(0); break;
         case 'End': this.pause(); this.setTime(this.duration); break;
@@ -990,7 +1104,7 @@ export class Editor {
 
   shortcutsDialog() {
     const rows = [
-      ['Space', 'Play / Pause'], ['Esc', 'Stop (back to start of play) / deselect'], ['← →', 'Step 1 frame (Shift: 1 s)'], ['Home / End', 'Start / end of story'],
+      ['Space', 'Play (scroll like the website) / Pause'], ['▶▶', 'Auto-play at the chosen speed'], ['Wheel / ↑↓ / PgUp PgDn', 'Scroll while playing'], ['Esc', 'Stop (back to start of play) / deselect'], ['← →', 'Step 1 frame (Shift: 1 s)'], ['Home / End', 'Start / end of story'],
       [', .', 'Previous / next key'], ['K', 'Add key here (Scene view: from your view)'], ['L', 'Lock / unlock selection'], ['Del', 'Delete'],
       [`${mod}C / X / V`, 'Copy / cut / paste at playhead'], [`${mod}D`, 'Duplicate at playhead'], [`${mod}Z / Y`, 'Undo / redo'],
       [`${mod}S`, 'Save'], [`${mod}⇧S`, 'Save checkpoint'], [`${mod}O`, 'Open / restore'], ['1 / 2', 'Scene / Game view'], ['F', 'Fit timeline'],
@@ -1025,6 +1139,8 @@ export class Editor {
     }
     const caps = tl.captions().filter((c) => x >= c.a && x <= c.b).map((c) => `"${c.title.replace(/\n/g, ' ')}"`);
     if (caps.length) lines.push(`caption on screen: ${caps.join(', ')}`);
+    const paths = tl.paths().map((pt) => ({ pt, w: tl.path(pt, x, { pos: [0, 0, 0], ahead: [0, 0, 0] }).w })).filter((q) => q.w > 0);
+    if (paths.length) lines.push(`paths active: ${paths.map(({ pt, w }) => `${pt.bind} "${pt.label}" (${Math.round(w * 100)}%, ${pt.a}–${pt.b} s, ${pt.keys.length} waypoints)`).join(' · ')}`);
     const lay = this.lt.reference(x);
     if (lay) lines.push(lay);
     const notes = d.notes.filter((n) => Math.abs(n.t - x) < 3 && n.text);

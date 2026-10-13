@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "meta": { "title": "Thai Union · 50 years", "duration": 60, "scrollPerSecond": 15 },
+  "meta": { "title": "Thai Union · 50 years", "duration": 150, "scrollPerSecond": 15 },
   "settings": {
     "tunaCount": 2000,
     "params": { "post.exposure": 1.05, "post.bloom": 0.28, "post.skyRays": 0.6, "post.underRays": 0.34, "sea.state": 0.45, "water.clarity": 0.7 }
@@ -11,20 +11,16 @@
     { "t": 25.8, "name": "Surface" },
     { "t": 30, "name": "The 50" },
     { "t": 50.4, "name": "Finale" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" },
-    { "t": 60, "name": "New chapter" }
+    { "t": 60, "name": "The Journey (demo)" },
+    { "t": 74, "name": "Along the route" },
+    { "t": 122, "name": "Back to the surface" }
   ],
-  "notes": [],
+  "notes": [
+    {
+      "t": 60,
+      "text": "DEMO chapter added by Claude: creature paths, parallax screen layers, 3D layers along the route and clickable GUI on the surface. All copy and art are placeholders (assets/demo/) — replace, restyle or delete freely."
+    }
+  ],
   "tracks": [
     {
       "id": "camera",
@@ -39,7 +35,18 @@
         { "t": 27, "pos": [0, 2.81, 46.25], "look": [0, 6.5, 0], "follow": 0.23, "fov": 50 },
         { "t": 30, "pos": [0, 5, 50], "look": [0, 7, 0], "follow": 0, "fov": 50 },
         { "t": 45, "pos": [-6.87, 5.75, 45.48], "look": [0, 10.86, 0], "follow": 0, "fov": 50 },
-        { "t": 60, "pos": [-12.41, 6.5, 40.12], "look": [0, 12.5, 0], "follow": 0, "fov": 50 }
+        { "t": 60, "pos": [-12.41, 6.5, 40.12], "look": [0, 12.5, 0], "follow": 0, "fov": 50 },
+        { "t": 66, "pos": [14, 8, 46], "look": [24, -1, 18], "follow": 0, "fov": 50 },
+        { "t": 71, "pos": [34, 1.2, 26], "look": [30, -6, 6], "follow": 0, "fov": 50 },
+        { "t": 74, "pos": [40, -3, 16], "look": [30, -6, 2], "follow": 0.5, "fov": 52 },
+        { "t": 80, "pos": [42, -6, -2], "look": [28, -6, -6], "follow": 1, "fov": 55 },
+        { "t": 90, "pos": [31, -6, -34], "look": [20, -7, -24], "follow": 1, "fov": 55 },
+        { "t": 100, "pos": [-7, -6, -45], "look": [-4, -7, -32], "follow": 1, "fov": 55 },
+        { "t": 110, "pos": [-40, -6, -18], "look": [-28, -6, -14], "follow": 1, "fov": 55 },
+        { "t": 118, "pos": [-38, -4.5, 14], "look": [-26, -4, 12], "follow": 1, "fov": 54 },
+        { "t": 124, "pos": [-36, 1.6, 30], "look": [-20, 0, 12], "follow": 0.3, "fov": 52 },
+        { "t": 132, "pos": [-34, 4.5, 40], "look": [-12, 2, 14], "follow": 0, "fov": 50 },
+        { "t": 150, "pos": [-22, 7, 50], "look": [-2, 9, 2], "follow": 0, "fov": 50 }
       ]
     },
     {
@@ -49,7 +56,255 @@
       "clips": [
         { "a": 0, "b": 7.2, "size": "large", "y": 34, "title": "Fifty years\nof the open ocean", "sub": "Scroll" },
         { "a": 8.4, "b": 16.8, "size": "medium", "y": 42, "title": "It all begins beneath the surface", "sub": "" },
-        { "a": 19.2, "b": 28.2, "size": "medium", "y": 42, "title": "Rising, together", "sub": "" }
+        { "a": 19.2, "b": 28.2, "size": "medium", "y": 42, "title": "Rising, together", "sub": "" },
+        { "a": 61, "b": 69, "size": "medium", "y": 42, "title": "The journey continues", "sub": "Placeholder", "fade": 1.5 }
+      ]
+    },
+    {
+      "id": "demo-school-path",
+      "type": "path",
+      "label": "School route (demo)",
+      "bind": "school",
+      "a": 70,
+      "b": 122,
+      "blend": 4,
+      "keys": [
+        { "t": 72, "pos": [30, -6, 4] },
+        { "t": 84, "pos": [24, -7, -22] },
+        { "t": 96, "pos": [-4, -7, -32] },
+        { "t": 108, "pos": [-28, -6, -14] },
+        { "t": 120, "pos": [-26, -4, 14] }
+      ]
+    },
+    {
+      "id": "demo-bluewhale-path",
+      "type": "path",
+      "label": "Blue whale passes (demo)",
+      "bind": "bluewhale",
+      "a": 82,
+      "b": 120,
+      "blend": 5,
+      "keys": [
+        { "t": 84, "pos": [45, -16, -38] },
+        { "t": 102, "pos": [0, -18, -56] },
+        { "t": 120, "pos": [-48, -15, -30] }
+      ]
+    },
+    {
+      "id": "demo-humpback-path",
+      "type": "path",
+      "label": "Humpback at the surface (demo)",
+      "bind": "humpback",
+      "a": 122,
+      "b": 150,
+      "blend": 4,
+      "keys": [
+        { "t": 124, "pos": [-52, -2.6, 4] },
+        { "t": 137, "pos": [-28, -2.2, 20] },
+        { "t": 150, "pos": [2, -2.6, 30] }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 1.2,
+      "z": 11,
+      "id": "demo-title",
+      "label": "Journey title (HTML)",
+      "kind": "html",
+      "space": "screen",
+      "a": 74,
+      "b": 84,
+      "w": 50,
+      "html": "<div style=\"text-align:center\"><div style=\"letter-spacing:.45em;font-size:.72em;opacity:.8\">CHAPTER II · DEMO</div><h2 style=\"font-family:'Cormorant Garamond',serif;font-weight:500;font-size:4.4cqw;margin:.15em 0 0;text-shadow:0 2px 24px rgba(0,20,30,.6)\">The journey</h2></div>",
+      "keys": [
+        { "t": 74, "x": 50, "y": 16, "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 3,
+      "z": 3,
+      "id": "demo-bubbles-far",
+      "label": "Bubbles far (parallax 35%)",
+      "kind": "image",
+      "src": "assets/demo/bubbles-far.svg",
+      "space": "screen",
+      "a": 72,
+      "b": 122,
+      "w": 110,
+      "keys": [
+        { "t": 72, "x": 50, "y": 67.5, "s": 1, "r": 0, "o": 0.6, "ease": "linear" },
+        { "t": 122, "x": 50, "y": 32.5, "s": 1, "r": 0, "o": 0.6, "ease": "linear" }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 1.5,
+      "z": 5,
+      "id": "demo-card-1",
+      "label": "Card 1 (parallax 70%)",
+      "kind": "image",
+      "src": "assets/demo/card-1.svg",
+      "space": "screen",
+      "a": 78,
+      "b": 94,
+      "w": 26,
+      "keys": [
+        { "t": 78, "x": 24, "y": 95, "s": 1, "r": 0, "o": 1, "ease": "linear" },
+        { "t": 94, "x": 24, "y": 25, "s": 1, "r": 0, "o": 1, "ease": "linear" }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 1.5,
+      "z": 5,
+      "id": "demo-card-2",
+      "label": "Card 2 (parallax 70%)",
+      "kind": "image",
+      "src": "assets/demo/card-2.svg",
+      "space": "screen",
+      "a": 92,
+      "b": 108,
+      "w": 26,
+      "keys": [
+        { "t": 92, "x": 76, "y": 95, "s": 1, "r": 0, "o": 1, "ease": "linear" },
+        { "t": 108, "x": 76, "y": 25, "s": 1, "r": 0, "o": 1, "ease": "linear" }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 1.5,
+      "z": 5,
+      "id": "demo-card-3",
+      "label": "Card 3 (parallax 70%)",
+      "kind": "image",
+      "src": "assets/demo/card-3.svg",
+      "space": "screen",
+      "a": 106,
+      "b": 122,
+      "w": 26,
+      "keys": [
+        { "t": 106, "x": 26, "y": 95, "s": 1, "r": 0, "o": 1, "ease": "linear" },
+        { "t": 122, "x": 26, "y": 25, "s": 1, "r": 0, "o": 1, "ease": "linear" }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 3,
+      "z": 12,
+      "id": "demo-bubbles-near",
+      "label": "Bubbles near (parallax 200%)",
+      "kind": "image",
+      "src": "assets/demo/bubbles-near.svg",
+      "space": "screen",
+      "a": 72,
+      "b": 122,
+      "w": 130,
+      "keys": [
+        { "t": 72, "x": 50, "y": 150, "s": 1, "r": 0, "o": 0.7, "ease": "linear" },
+        { "t": 122, "x": 50, "y": -50, "s": 1, "r": 0, "o": 0.7, "ease": "linear" }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 2,
+      "z": 5,
+      "id": "demo-medallion-3d",
+      "label": "50 medallion (3D, on the route)",
+      "kind": "image",
+      "src": "assets/demo/medallion-50.svg",
+      "space": "world",
+      "a": 78,
+      "b": 98,
+      "w": 5,
+      "keys": [
+        { "t": 78, "pos": [27, -3, -12], "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 2,
+      "z": 5,
+      "id": "demo-can-3d-1",
+      "label": "Product (3D, on the route)",
+      "kind": "image",
+      "src": "assets/demo/can.svg",
+      "space": "world",
+      "a": 92,
+      "b": 110,
+      "w": 4.5,
+      "keys": [
+        { "t": 92, "pos": [8, -4, -30], "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 2,
+      "z": 5,
+      "id": "demo-can-3d-2",
+      "label": "Product (3D, on the route) 2",
+      "kind": "image",
+      "src": "assets/demo/can.svg",
+      "space": "world",
+      "a": 104,
+      "b": 122,
+      "w": 4.5,
+      "keys": [
+        { "t": 104, "pos": [-27, -3.5, -4], "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 3,
+      "z": 5,
+      "id": "demo-medallion-sky",
+      "label": "50 medallion (3D, in the sky)",
+      "kind": "image",
+      "src": "assets/demo/medallion-50.svg",
+      "space": "world",
+      "a": 126,
+      "b": 150,
+      "w": 6,
+      "keys": [
+        { "t": 126, "pos": [-14, 5, 2], "s": 0.6, "r": 0, "o": 1 },
+        { "t": 150, "pos": [-14, 8, 2], "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 1.5,
+      "z": 11,
+      "id": "demo-products",
+      "label": "Product panel (HTML, clickable)",
+      "kind": "html",
+      "space": "screen",
+      "a": 128,
+      "b": 150,
+      "w": 30,
+      "interactive": true,
+      "html": "<div style=\"padding:22px 24px;border-radius:22px;background:rgba(6,36,49,.78);border:1px solid rgba(159,231,255,.3)\"><div style=\"letter-spacing:.35em;font-size:.65em;color:#9fe7ff\">GUI · HTML DEMO</div><h3 style=\"font-family:'Cormorant Garamond',serif;font-weight:500;font-size:2.2cqw;margin:.3em 0 .5em\">From our oceans</h3><div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\"><img src=\"assets/demo/can.svg\" style=\"width:100%\"><img src=\"assets/demo/can.svg\" style=\"width:100%;filter:hue-rotate(140deg)\"><img src=\"assets/demo/can.svg\" style=\"width:100%;filter:hue-rotate(220deg)\"></div><a href=\"#\" onclick=\"this.textContent='Thanks! (demo link)';return false\" style=\"display:inline-block;margin-top:14px;padding:9px 16px;border-radius:999px;background:#f6d58a;color:#2b1a02;font-weight:600;font-size:.8em;text-decoration:none\">Discover the products &rarr;</a><div style=\"margin-top:10px;font-size:.6em;letter-spacing:.3em;color:#f6d58a;opacity:.8\">PLACEHOLDER</div></div>",
+      "keys": [
+        { "t": 128, "x": 78, "y": 52, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 131, "x": 76, "y": 50, "s": 1, "r": 0, "o": 1 }
+      ]
+    },
+    {
+      "type": "layer",
+      "fade": 1.5,
+      "z": 11,
+      "id": "demo-iframe",
+      "label": "Product page (iframe, clickable)",
+      "kind": "iframe",
+      "src": "assets/demo/product.html",
+      "space": "screen",
+      "a": 132,
+      "b": 150,
+      "w": 30,
+      "h": 48,
+      "interactive": true,
+      "keys": [
+        { "t": 132, "x": 22, "y": 54, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
+        { "t": 135, "x": 23, "y": 52, "s": 1, "r": 0, "o": 1 }
       ]
     },
     {
@@ -59,7 +314,11 @@
       "bind": "sun.elevation",
       "keys": [
         { "t": 24, "v": 55, "ease": "smooth" },
-        { "t": 39.6, "v": 7, "ease": "smooth" }
+        { "t": 39.6, "v": 7, "ease": "smooth" },
+        { "t": 62, "v": 7, "ease": "smooth" },
+        { "t": 72, "v": 42, "ease": "smooth" },
+        { "t": 120, "v": 42, "ease": "smooth" },
+        { "t": 146, "v": 10, "ease": "smooth" }
       ]
     },
     {
@@ -72,7 +331,7 @@
         { "t": 39.6, "v": -155.94, "ease": "smooth" }
       ]
     },
-    { "id": "school-gather", "type": "clip", "label": "School gathers", "bind": "school.gather", "a": 13.2, "b": 27.6, "ease": "smooth" },
+    { "id": "school-gather", "type": "clip", "label": "School gathers", "bind": "school.gather", "a": 13.0152, "b": 27.6, "ease": "smooth" },
     { "id": "water50-fade", "type": "clip", "label": "Water 50 fades in", "bind": "tentacles.fade", "a": 25.8, "b": 27.6, "ease": "smooth" },
     { "id": "water50-form", "type": "clip", "label": "Water 50 forms", "bind": "tentacles.form", "a": 26.4, "b": 55.2, "ease": "linear" },
     { "id": "tuna-free", "type": "clip", "label": "Tuna leaps", "bind": "tuna.free", "a": 30, "b": 60, "ease": "gate" },

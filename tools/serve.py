@@ -8,7 +8,10 @@
 Editor endpoints (src/editor/saves.js). Only listens on 127.0.0.1. Stdlib only.
 tools/serve.ps1 is the same server for Windows machines without Python - keep them in sync.
     GET  /__editor/ping                  {ok, save, git, branch}
-    POST /__editor/save                  body = story.json; the previous story.json is kept in saves/auto/
+    POST /__editor/save                  body = story.json; the previous story.json is kept in saves/auto/.
+                                         Header X-Base-Hash = FNV-1a of the story.json the editor loaded; if the file
+                                         changed on disk since (Claude / another tab), 409 {conflict, current} unless
+                                         X-Force: 1. Saves without the header (old editor tabs) are refused.
     POST /__editor/checkpoint?name=...   body = story.json -> saves/checkpoints/<stamp>_<name>.json
     GET  /__editor/list                  checkpoints, autosaves, git history of story.json
     GET  /__editor/load?file=<path>      story.json or a file in saves/  |  ?git=<commit>  (story.json at that commit)
@@ -62,6 +65,13 @@ def has_git():
         return git('rev-parse', '--is-inside-work-tree', timeout=10)[0] == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def fnv1a(data):
+    h = 0x811c9dc5
+    for b in data:
+        h = ((h ^ b) * 0x01000193) & 0xffffffff
+    return f'{h:08x}'
 
 
 def valid_story(body):
@@ -231,6 +241,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if os.path.exists(STORY):
                         with open(STORY, 'rb') as f:
                             old = f.read()
+                        base = self.headers.get('X-Base-Hash')
+                        if self.headers.get('X-Force') != '1' and base != fnv1a(old):
+                            return self.reply(409, {'ok': False, 'conflict': True, 'error': 'story.json changed on disk since the editor loaded it' if base else 'this editor tab is out of date - reload it', 'current': old.decode('utf-8', 'replace')})
                         if old != body:  # keep the previous version
                             write(os.path.join(AUTO, f'{stamp()}.json'), old)
                             for f in listing(AUTO)[KEEP_AUTO:]:

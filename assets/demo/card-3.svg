@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d3b4f" stop-opacity=".82"/><stop offset="1" stop-color="#062431" stop-opacity=".9"/></linearGradient>
+    <linearGradient id="gold" x1="0" x2="1"><stop offset="0" stop-color="#f6d58a"/><stop offset="1" stop-color="#d9a441"/></linearGradient>
+  </defs>
+  <rect x="2" y="2" width="636" height="416" rx="34" fill="url(#g)" stroke="#9fe7ff" stroke-opacity=".35" stroke-width="2"/>
+  <circle cx="92" cy="96" r="48" fill="none" stroke="url(#gold)" stroke-width="3"/>
+  <ellipse cx="92" cy="104" rx="34" ry="12" fill="none" stroke="#f6d58a" stroke-width="5"/><path d="M58 104v-8c0-14 68-14 68 0v8" fill="none" stroke="#9fe7ff" stroke-width="5"/>
+  <text x="168" y="86" font-family="Arial, Helvetica, sans-serif" font-size="20" letter-spacing="6" fill="#9fe7ff">STEP 3</text>
+  <text x="168" y="124" font-family="Georgia, serif" font-size="40" fill="#ffffff">To the table</text>
+  <text x="48" y="214" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#d8eef5">Placeholder copy: arriving in kitchens</text>
+  <text x="48" y="250" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#d8eef5">and on tables around the world.</text>
+  <rect x="48" y="320" width="200" height="2" fill="url(#gold)"/>
+  <text x="48" y="362" font-family="Arial, Helvetica, sans-serif" font-size="17" letter-spacing="3" fill="#f6d58a" opacity=".9">PLACEHOLDER · DEMO</text>
+</svg>

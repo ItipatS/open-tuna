@@ -73,7 +73,8 @@ src/editor/         ?edit only: editor.js (shell, menus, play mode, locks, clipb
                     for layers), editor.css, dom.js
 tools/serve.py      dev server: no-store caching + editor save system endpoints (tools/serve.ps1 = same, PowerShell; keep in sync)
 saves/              editor-made: checkpoints/ (named, committed with the story) and auto/ (previous versions, gitignored)
-assets/             editor-uploaded media for layers (images, videos, .html pages); referenced as "assets/x.png" 
+assets/             editor-uploaded media for layers (images, videos, .html pages); referenced as "assets/x.png".
+                    assets/demo/ = placeholder art for the demo chapter "The Journey" (1:00–2:30)
 src/main.js         bootstrap, asset loading/placement, post-processing (underwater + sky god rays), UI, main loop
 src/story.js        Story: progress -> evaluates the timeline into camera, sun, params, school, tentacles, tuna gates,
                     captions; PARAMS (curve-bindable) + DRIVERS (clip-bindable) registries; flightTargets()
@@ -143,6 +144,11 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
   **read `notes` when asked to act on designer feedback**). Any of them can carry `locked: true` (the editor
   won't change it — respect it when editing story.json by hand unless asked) and tracks `mute: true`.
   `Timeline.serialize()` writes one key/clip per line, numbers rounded to 4 dp; segment lookup is a binary search.
+- **Paths** (`path` tracks, `{bind: ACTORS key, a, b, blend, keys[{t, pos}]}`): `Story.evaluate` blends the actor
+  from its own behaviour toward the Hermite route (weight eases over `blend` at both ends): the school's goal
+  (`tuna.u.goal`), or `story.actors[bind]` (Object3D position + slerped orientation, +Z forward). Creature AI /
+  SwimPath run first in the main loop, story after, so the path wins while active. While a school path is active
+  the school is pulled harder (`wGoal` → 6) and tightened (`goalSpread` ≤ 9); the originals are restored after.
 - `Story` owns a separate shot camera `story.cam` (+ `story.look`); `main.js` copies it into the render camera
   unless the editor's Scene view is active. Captions are DOM nodes (in `#captions > .caps`, z-index 10) rebuilt
   when `timeline.version` changes; story time is `story.x`.
@@ -155,12 +161,19 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
   scrubbed video sets `currentTime = (x − a)·rate` — needs HTTP range support (tools/serve.* have it).
   `main.js` calls `layers.update(story.x, camera)` every frame.
 - Editor (`?edit`, dynamically imported so the site doesn't load it): playhead `editor.time` (s) → pins
-  `story.forceP = time / duration`; Play advances in real time × play speed (no smoothing). Edits mutate
+  `story.forceP = time / duration`. **Play (`playMode 'site'`) behaves like the website**: wheel / keys / drag /
+  scrollbar move `scrollT` (px → s using the site's page length), `time` eases toward it with the site's smoothing,
+  and clickable layers work (`layers.editing = false`). **Auto-play** (`'auto'`) advances time × speed. Edits mutate
   `timeline.data` directly → `editor.changed()` (live) / `editor.commit()` (undo snapshot = serialized JSON).
   Selection is held by object reference and re-resolved by index after undo. Every action that changes data
   must go through `isLocked()` / `guard()`. Context menus are built in `Editor.contextItems(target)`; menu bar in
   `menuFile/Edit/View/Help`. The Performance lane records fps per 0.5 s bucket. The Scene | Game state is
   `#ed[data-mode]` (scene / game / playing) → frame + badge colour.
+- **Save conflicts:** the editor sends `X-Base-Hash` (FNV-1a of the exact story.json bytes it loaded); the server
+  answers 409 if the file changed since (or the header is missing = an out-of-date tab). The editor then pauses
+  autosave and asks Load theirs / Keep mine (`X-Force: 1`). So when you (Claude) edit story.json while the designer
+  has the editor open, their tab can't silently overwrite your change — but tell them to reload / Load theirs.
+  `*.json` is `eol=lf` in .gitattributes so the bytes (and hash) don't change on checkout.
 - Saves (`saves.js` + `tools/serve.py`): Save → `POST /__editor/save` (server copies the previous story.json to
   `saves/auto/<stamp>.json`, keeps 100) → else File System Access picker → else download. Autosave (default 60 s,
   2 s after the last edit, per-browser setting). Checkpoints `POST /__editor/checkpoint?name=` →
@@ -215,6 +228,11 @@ intensity + light, hemi, env intensity; story calls it every frame.
   whose duration matches real gravity for that apex (+20%), easing in from its schooling position over the
   first 20%. `origin` is written only while schooling, so boids resume exactly where the leap ends.
   Surface crossings write `state` → splashes. Default: 14 hoop (idx 0–13), 70 free (idx 14–83), all < jumpers.
+  **Leap cycle** (per fish, period 10.5–22 s): `run` 4.5–5.5 s underwater run-up on a quadratic curve from the
+  schooling origin to the launch point (arriving low, heading along the leap), then the ballistic arc. A cycle
+  only runs if it *started* while the group was on (`hoopWin` / `freeWin` = sim time on/off, set by
+  `Story` via `gate()`), and the fish *commits* in the cycle's first 0.25 s if it is within 32 m of its launch
+  point (`origin.w` = committed cycle start). This replaced an ease-in that teleported fish into the air.
   Free leaps: 60% across the view (z 10–32), 20% toward/over the camera (z 18→64, apex 8–11), 20% from under
   the camera away toward the 50.
 - Rendering: the skinned tuna GLB is **baked to a static bind pose** (`bakeModel`), canonicalised to
@@ -287,6 +305,8 @@ Orientation rule: if a creature swims backwards/sideways, fix it with `CONFIG` i
 - The HDR sun disk is ~40× the sky; anything screen-space that samples it must clamp or it whites out the frame.
 - Plain `python -m http.server` refuses/resets connections under the page's parallel module + GLB burst (listen
   backlog 5) and has no Range support (videos can't seek). `tools/serve.py` fixes both; use that.
+- Jellyfish are additive and don't write depth: they must draw **after** the sea surface (renderOrder 11 > ocean 10),
+  stay ≥ 2 m below the surface, and fade out within ~4 m of the camera (near-plane slicing).
 - Waterline: the camera is kept out of a ±0.35 m band around the surface, pushed *through* it in the direction of
   travel (`camY0` in the main loop). Pushing it back to the side it came from made the Scene camera "stick".
 - **three r180 viewport-texture resize bug** (patched at the top of `main.js`): a `viewportTexture` copy used

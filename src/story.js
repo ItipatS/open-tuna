@@ -19,6 +19,12 @@ export const PARAMS = {
   'water.clarity': { label: 'Water clarity', def: 0.7, min: 0, max: 1, step: 0.01 },
 };
 
+// Creatures a `path` track can steer (see Story.actors, set up in main.js).
+export const ACTORS = {
+  school: 'Tuna school', bluewhale: 'Blue whale', humpback: 'Humpback whale',
+  shark1: 'Shark 1', shark2: 'Shark 2', turtle1: 'Turtle 1', turtle2: 'Turtle 2',
+};
+
 // Story beats a `clip` track can drive (0..1 ramp across the clip, or a 0/1 gate).
 export const DRIVERS = {
   'school.gather': 'School gathers in front of the 50 (ramp)',
@@ -56,10 +62,20 @@ export function flightTargets(G, max, { hoop = 14, free = 70 } = {}) {
   return { launch, land };
 }
 
+// w = (switched on at, switched off at) in sim time; 1e9 = never / still on
+function gate(w, on, t) {
+  if (on) { if (w.x > 1e8 || w.y < 1e8) w.set(t, 1e9); } else if (w.x < 1e8 && w.y > 1e8) w.y = t;
+}
+
 export class Story {
   // apply: { sun(elevationDeg, azimuthRad), [param id]: (value) => void } for the PARAMS above
-  constructor({ tuna, tentacles, timeline, apply, captionLayer }) {
-    Object.assign(this, { tuna, tentacles, timeline, apply, captionLayer });
+  // actors: { school, bluewhale: Object3D, … } — what path tracks can move (ACTORS)
+  constructor({ tuna, tentacles, timeline, apply, captionLayer, actors = {} }) {
+    Object.assign(this, { tuna, tentacles, timeline, apply, captionLayer, actors });
+    this.pk = { pos: [0, 0, 0], ahead: [0, 0, 0], w: 0 };
+    this.tmpV = new THREE.Vector3();
+    this.tmpM = new THREE.Matrix4();
+    this.tmpQ = new THREE.Quaternion();
     this.cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.2, 9000); // the shot camera
     this.look = new THREE.Vector3(); // where the shot camera looks
     this.k = { pos: [0, 0, 0], look: [0, 0, 0], follow: 0, fov: 50, drift: 1 };
@@ -106,6 +122,39 @@ export class Story {
     );
     tuna.u.free.value = tl.clip('tuna.free', x);
     tuna.u.hoop.value = tl.clip('tuna.hoop', x);
+    // creature paths: blend each actor from what it does by itself toward its keyed route
+    let schoolW = 0;
+    for (const pt of tl.paths()) {
+      const k = tl.path(pt, x, this.pk);
+      if (k.w <= 0) continue;
+      const P = this.tmpV.fromArray(k.pos);
+      if (pt.bind === 'school') { tuna.u.goal.value.lerp(P, k.w); schoolW = Math.max(schoolW, k.w); continue; }
+      const obj = this.actors[pt.bind];
+      if (!obj) continue;
+      obj.position.lerp(P, k.w);
+      const A = new THREE.Vector3().fromArray(k.ahead);
+      if (A.distanceToSquared(P) > 1e-6) {
+        this.tmpM.lookAt(A, P, obj.up); // Object3D convention: +Z faces the target
+        this.tmpQ.setFromRotationMatrix(this.tmpM);
+        obj.quaternion.slerp(this.tmpQ, k.w);
+      }
+    }
+
+    // a school on a path keeps up with it: stronger pull to the goal, tighter school (restored afterwards)
+    const su = tuna.u;
+    if (schoolW > 0) {
+      const sb = this.schoolBase ??= { wGoal: su.wGoal.value, spread: su.goalSpread.value.clone() };
+      su.wGoal.value = lerp(sb.wGoal, 6, schoolW);
+      su.goalSpread.value.set(lerp(sb.spread.x, Math.min(sb.spread.x, 9), schoolW), sb.spread.y, lerp(sb.spread.z, Math.min(sb.spread.z, 9), schoolW));
+    } else if (this.schoolBase) {
+      su.wGoal.value = this.schoolBase.wGoal;
+      su.goalSpread.value.copy(this.schoolBase.spread);
+      this.schoolBase = null;
+    }
+
+    // leap windows (sim time on / off): a fish only starts a leap cycle while its group is on
+    gate(tuna.u.freeWin.value, tuna.u.free.value > 0.5, t);
+    gate(tuna.u.hoopWin.value, tuna.u.hoop.value > 0.5, t);
 
     // camera: keyframed path + slow hand-held drift; `follow` blends the look-at toward the school
     if (tl.camera(x, k)) {
