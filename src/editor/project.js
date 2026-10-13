@@ -118,8 +118,40 @@ export class ProjectFiles {
   get isFile() { return !!this.slug && !IS_DEMO; } // a .tuna project (demos save in place, like code)
   get isDemo() { return IS_DEMO; }
   get fileName() { return `${this.name.replace(/[\\/:*?"<>|]+/g, '-')}.tuna`; }
-  // the story differs from what's in the .tuna file on disk
-  get tunaDirty() { return this.isFile && this.savedHash !== fnv1a(this.ed.current()); }
+  // the story differs from what's in the .tuna file on disk (a project never saved to a file counts once it's edited)
+  get tunaDirty() {
+    if (!this.isFile) return false;
+    return this.savedHash ? this.savedHash !== fnv1a(this.ed.current()) : this.ed.hi > 0;
+  }
+
+  // anything that closing the tab now would lose (or leave out of the .tuna): unsaved edits, an out-of-date .tuna,
+  // an upload / save still running. Drives the browser's "Leave site?" prompt, the Save changes dialog and the • title.
+  get unsaved() {
+    const s = this.ed.saves;
+    return !!(s.dirty || this.tunaDirty || s.busy || s.inflight > 0 || this.packing);
+  }
+
+  // before leaving for another page of the studio: "Save changes?" -> 'save' | 'discard' | null (cancel)
+  confirmLeave() {
+    if (!this.unsaved) return Promise.resolve('discard');
+    return new Promise((resolve) => {
+      let done = false;
+      const end = (v) => { if (!done) { done = true; resolve(v); } };
+      const file = this.isFile ? this.fileName : `the ${this.name} demo`;
+      dialog({
+        title: `Save changes to ${file}?`,
+        body: [h('p', {}, this.isFile
+          ? 'Your latest edits are not in your .tuna file yet. If you don’t save, they stay only in the studio’s working copy of the project.'
+          : 'Your latest edits are not saved. If you don’t save, they are lost.')],
+        buttons: [
+          { label: 'Cancel', onClick: () => end(null) },
+          { label: 'Don’t save', danger: true, onClick: () => end('discard') },
+          { label: 'Save', primary: true, onClick: () => end('save') },
+        ],
+        onClose: () => end(null),
+      });
+    });
+  }
 
   async loadMeta() {
     try {
@@ -195,9 +227,9 @@ export class ProjectFiles {
   async openTuna(fileOrHandle) {
     if (!this.ed.saves.server) return this.ed.toast('Opening a .tuna needs the editor server — start the editor with “Open Editor”', true, 6000);
     const name = fileOrHandle.name;
+    if (!(await this.leave())) return;
     const busy = this.busy(`Opening ${name}…`);
     try {
-      await this.leave();
       this.go(await openTunaFile(fileOrHandle, { progress: busy.set, warn: (m) => this.ed.toast(m, true, 8000) }));
     } catch (e) {
       busy.close();
@@ -205,9 +237,17 @@ export class ProjectFiles {
     }
   }
 
-  // save the current story before switching projects (the working copy / repo keep it)
+  // before switching to another studio page: ask to save; false = stay. A .tuna project's working copy always keeps the
+  // latest story (Don't save only leaves the .tuna file as it was); a demo's unsaved edits are dropped on Don't save.
   async leave() {
-    if (this.ed.saves.dirty && this.ed.saves.server) await this.ed.saves.save({ auto: true, quiet: true });
+    const c = await this.confirmLeave();
+    if (!c) return false;
+    const s = this.ed.saves;
+    if (c === 'save') {
+      await s.save();
+      if (s.dirty || this.tunaDirty) return false; // the save failed or its file dialog was cancelled: stay
+    } else if (this.isFile && s.dirty && s.server) await s.save({ auto: true });
+    return true;
   }
 
   go(slug) {
@@ -235,6 +275,7 @@ export class ProjectFiles {
     const text = this.ed.current();
     const name = handle && !this.isFile ? handle.name.replace(/\.tuna$/i, '') : this.name;
     const busy = this.busy('Saving…');
+    this.packing = true;
     try {
       const bytes = await this.pack(text, { name, progress: busy.set });
       if (handle) {
@@ -258,7 +299,7 @@ export class ProjectFiles {
     } catch (e) {
       this.ed.toast(`Couldn’t save the .tuna: ${e.message}`, true, 8000);
       return false;
-    } finally { busy.close(); }
+    } finally { busy.close(); this.packing = false; }
   }
 
   // ---------------------------------------------------------------- new / recent
@@ -269,9 +310,9 @@ export class ProjectFiles {
     const copy = h('input', { type: 'radio', name: 'tpl' });
     const make = async () => {
       const name = input.value.trim() || 'Untitled';
+      if (!(await this.leave())) return false;
       const busy = this.busy(`Creating ${name}…`);
       try {
-        await this.leave();
         const bytes = copy.checked
           ? await this.pack(this.ed.current(), { name, progress: busy.set })
           : blankTuna(name);
@@ -304,7 +345,7 @@ export class ProjectFiles {
       const el = h('div', { class: `pc${current ? ' cur' : ''}`, title: current ? 'Open now' : `Open ${name}` },
         h('div', { class: 'pt' }, thumb ? h('img', { src: thumb, draggable: false }) : h('span', {}, 'no preview')),
         h('b', {}, name), h('small', {}, current ? `${sub} · open now` : sub));
-      if (!current) el.addEventListener('click', async () => { d.close(); await this.leave(); open(); });
+      if (!current) el.addEventListener('click', async () => { d.close(); if (await this.leave()) open(); });
       return el;
     };
     let list = [], demos = [];

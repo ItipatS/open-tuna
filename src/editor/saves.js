@@ -42,6 +42,7 @@ export class Saves {
     this.saved = ed.tl.serialize(); // what's on disk, as the editor would write it (for "dirty")
     this.baseHash = fnv1a(ed.tl.sourceText ?? this.saved); // fingerprint of the exact file on disk
     this.conflict = false;
+    this.inflight = 0; // uploads running (closing the tab would lose them)
     this.savedAt = null;
     this.lastEdit = 0;
     this.lastAuto = performance.now();
@@ -175,10 +176,13 @@ export class Saves {
   // copy a dropped / picked file into the project's assets/ folder; returns its path (e.g. "assets/logo.png")
   async upload(file) {
     if (!this.server) throw new Error('Adding files needs the editor server — start the editor with “Open Editor”');
-    const r = await fetch(editorAPI(`upload?name=${encodeURIComponent(file.name)}`), { method: 'POST', body: file });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || r.status);
-    return j.file;
+    this.inflight++;
+    try {
+      const r = await fetch(editorAPI(`upload?name=${encodeURIComponent(file.name)}`), { method: 'POST', body: file });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || r.status);
+      return j.file;
+    } finally { this.inflight--; }
   }
 
   pickFile(accept) {

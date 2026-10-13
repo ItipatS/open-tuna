@@ -79,7 +79,8 @@ export class Editor {
     this.saves.ping();
     this.saves.checkDraft();
     setInterval(() => this.saves.tick(), 1000);
-    addEventListener('beforeunload', (e) => { if (!this.leaving && this.saves.dirty && !this.saves.autosave) { e.preventDefault(); e.returnValue = ''; } });
+    // closing / reloading the tab with unsaved work: the browser's "Leave site? Changes you made may not be saved"
+    addEventListener('beforeunload', (e) => { if (!this.leaving && this.project.unsaved) { e.preventDefault(); e.returnValue = ''; } });
     this.syncTitle();
   }
 
@@ -342,7 +343,7 @@ export class Editor {
       { label: 'New project…', onClick: () => P.newDialog(), disabled: !s.server },
       { label: 'Open .tuna file…', shortcut: `${mod}O`, onClick: () => P.pickAndOpen(), disabled: !s.server },
       { label: 'Projects / recent…', onClick: () => P.recentDialog() },
-      { label: 'Studio home', onClick: async () => { await P.leave(); P.go(''); } },
+      { label: 'Studio home', onClick: async () => { if (await P.leave()) P.go(''); } },
       '-',
       { label: P.isFile ? `Save ${P.fileName}` : 'Save', shortcut: `${mod}S`, onClick: () => s.save() },
       { label: P.isFile ? 'Save .tuna as…' : 'Save a copy as .tuna…', onClick: () => P.saveTuna({ as: true }), disabled: !s.server },
@@ -1217,6 +1218,7 @@ export class Editor {
       this.$status.textContent = st.text;
       this.$status.className = st.cls;
       this.$status.title = st.title ?? 'Save status — File menu for autosave, checkpoints and restore';
+      this.syncTitle();
       this.dataPanel?.tick();
       this.inspector.refresh();
     }
@@ -1343,7 +1345,8 @@ export class Editor {
   syncTitle() {
     const P = this.project;
     this.$proj.textContent = P.isFile ? P.fileName : `${P.name} · demo`;
-    document.title = `${P.isFile ? P.fileName : `${P.name} (demo)`} — Open Tuna Studio`;
+    const t = `${P.unsaved ? '• ' : ''}${P.isFile ? P.fileName : `${P.name} (demo)`} — Open Tuna Studio`; // • = unsaved
+    if (document.title !== t) document.title = t;
   }
 
   async snapshot() {
