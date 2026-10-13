@@ -26,7 +26,7 @@ await page.setCacheEnabled(false);                       // otherwise stale ES m
 await page.setViewport({ width: 1600, height: 900 });
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto('http://localhost:8123/?noauto');        // or ?edit&noauto
+await page.goto('http://localhost:8123/play.html?project=demo/thai-union&noauto');   // or editor.html?project=…&noauto
 await page.waitForFunction(() => window.__ocean && document.getElementById('loader').classList.contains('hidden'));
 // WebGPU validation errors do NOT reach the console — catch them:
 await page.evaluate(() => { window.__gpuErr = []; __ocean.renderer.backend.device.addEventListener('uncapturederror', (e) => __gpuErr.push(e.error.message)); });
@@ -41,7 +41,7 @@ await page.screenshot({ path: 'shot.png' });
 - the systems: `tuna`, `reef`, `sharks`, `turtles`, `hump`, `blue`, `jellies`, `splash`;
 - `story` (`forceP`, `x`, `cam`, `look`, `actors`, `schoolControl`), `timeline`, `layers`, `tentacles`;
 - `opts`, `buildPost`, `director`;
-- in `?edit`, `editor`: `setTime(s)`, `setView('scene'|'game')`, `select(sel)`, `addKey()`, `lt` (layer tools),
+- in `editor.html`, `editor`: `setTime(s)`, `setView('scene'|'game')`, `select(sel)`, `addKey()`, `lt` (layer tools),
   `assets`, `saves`, `play('site'|'auto')`, `stop()`, `undo()`, `reference()`, `contextItems(target)`, `perf`,
   `timeline` (the view: `rows`, `X(t)`, `T(x)`).
 
@@ -60,7 +60,7 @@ await page.screenshot({ path: 'shot.png' });
 
 ## Hygiene (important)
 
-- **The editor autosaves into story.json.** A test that edits in `?edit` must undo everything
+- **The editor autosaves into the project's story.json.** A test that edits a demo in the editor must undo everything
   (`while (ed.hi > 0) ed.undo()`) and **navigate to `about:blank` before finishing**. Don't pipe test output
   through `head` / anything that can kill the script while a tab is open. Back up story.json in your scratch space
   before such tests, and `cmp` it afterwards.
@@ -68,7 +68,7 @@ await page.screenshot({ path: 'shot.png' });
   `saves/auto/*`**: the designer's backups land there too.
 - `localStorage.clear()` in the test tab (drafts, clipboard, panel sizes) — only in the headless profile.
 - Test .tuna / data / build features in a **throwaway project**: `P.unpack(await P.pack(ed.current(), {name:'Test'}))`
-  → load `?edit&project=<slug>`. Then the repo's story.json is never touched. Delete only the `projects/<slug>` you
+  → load `editor.html?project=<slug>` (or `POST project/new?from=demo/thai-union`). Then the demo is never touched. Delete only the `projects/<slug>` you
   created. To capture downloads (`.tuna` / build zip), `delete window.showSaveFilePicker` (the download fallback)
   and use CDP `Page.setDownloadBehavior` into your scratch dir. Serve an unzipped build with
   `python -m http.server` on another port to check it.

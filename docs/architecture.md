@@ -5,11 +5,12 @@ three.js r180, `WebGPURenderer` + TSL node materials, ES modules from jsDelivr v
 
 ## Boot (`src/main.js`)
 
-1. Mode from the URL: `story` (default), `edit` (`?edit`), or `lab` (`?lab`), set as a class on `<html>`. A built
-   site (`window.OPEN_TUNA_BUILD`) is always `story`. `src/project.js` picks the story: the repo root, or
-   `projects/<slug>/` for `?project=<slug>` (`BASE`, `assetURL`); see [projects-build-data.md](projects-build-data.md).
+1. Mode from the page: `play.html` → `story` (or `lab` with `?lab`), `editor.html` → `edit`
+   (`window.OPEN_TUNA_PAGE`), set as a class on `<html>`. A built site (`window.OPEN_TUNA_BUILD`) is always `story`.
+   `src/project.js` picks the project from `?project=` (`demo/<id>` → `demos/<id>/`, `<slug>` → `projects/<slug>/`;
+   `BASE`, `assetURL`). Without one the page goes to the studio home. See [projects-build-data.md](projects-build-data.md).
 2. WebGPU only: an error panel if there is no adapter or no WebGPU backend.
-3. Scene: sky, ocean, seabed (procedural) → GLBs loaded in parallel with `story.json` (fetched as raw text: the
+3. Scene: sky, ocean, seabed (procedural) → GLBs (`models/`) loaded in parallel with the project's `story.json` (fetched as raw text: the
    editor fingerprints it).
 4. Systems: tuna `FishSwarm` (leap targets from `flightTargets()`), `Splash`, reef fish swarm, jellies, whales
    (`createFlexingWhale`, `createAnimated` + `SwimPath`), sharks (`Hunter`), turtles, corals, seagrass, the water 50

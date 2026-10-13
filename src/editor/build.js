@@ -1,8 +1,9 @@
 // File ▸ Build site: a standalone copy of the story for any static host (Netlify drop, S3, GitHub Pages, a CDN…):
 // no editor, no lab, no dev server. The build holds
-//   index.html          the page, marked window.OPEN_TUNA_BUILD (main.js then ignores ?edit / ?lab / ?project)
-//   src/**              the runtime modules, found by following imports from src/main.js (src/editor/ left out)
-//   *.glb               the scene's models (string literals in the runtime) + built-in models used by model clips
+//   index.html          play.html (the player shell), marked window.OPEN_TUNA_BUILD (main.js then ignores ?lab / ?project)
+//   src/**              the runtime modules, found by following imports from src/main.js (src/editor/ left out), and the
+//                       stylesheets the shell links (src/page.css)
+//   models/*.glb        the scene's models (quoted *.glb names in the runtime) + built-in models used by model clips
 //   story.json          the story as it is now in the editor (unsaved changes included), with its data samples
 //   assets/**           the files the story uses (also files referenced from its .html pages)
 //   .nojekyll, README.txt
@@ -15,7 +16,7 @@ import { BASE } from '../project.js';
 const STORED = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'mp3', 'ogg', 'glb']);
 const mb = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const IMPORT_RE = /(?:import|export)\s[^'"]*?from\s*['"](\.{1,2}\/[^'"]+)['"]|import\s*\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)|import\s*['"](\.{1,2}\/[^'"]+)['"]/g;
-const GLB_RE = /['"`]\.?\/?([\w.-]+\.(?:glb|gltf))['"`]/g;
+const GLB_RE = /['"`]\.?\/?((?:models\/)?[\w.-]+\.(?:glb|gltf))['"`]/g;
 const ASSET_RE = /assets\/[^"'\s)\\<>`]+/g;
 const REF_RE = /(?:src|href|poster)\s*=\s*["']([^"'#]+)["']|url\(\s*["']?([^"')]+)["']?\s*\)/g;
 const resolve = (from, rel) => new URL(rel, `http://x/${from}`).pathname.slice(1);
@@ -50,7 +51,7 @@ export class SiteBuilder {
         const dep = resolve(p, m[1] || m[2] || m[3]);
         if (!dep.startsWith('src/editor/')) todo.push(dep);
       }
-      for (const m of txt.matchAll(GLB_RE)) models.add(m[1]);
+      for (const m of txt.matchAll(GLB_RE)) models.add(m[1].includes('/') ? m[1] : `models/${m[1]}`);
     }
 
     // the story's files: assets/ paths anywhere in it, built-in models used by model clips
@@ -79,9 +80,11 @@ export class SiteBuilder {
 
     // the page: build flag, the story's title
     progress('Page');
-    let html = dec.decode(await bytes('./index.html'));
+    let html = dec.decode(await bytes('./play.html'));
+    for (const m of html.matchAll(/<link[^>]+href="\.?\/?(src\/[^"]+\.css)"/g)) files.set(m[1], await bytes(`./${m[1]}`));
     const title = (data.meta?.title || 'Open Tuna').replace(/[<&]/g, '');
     html = html.replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
+      .replace(/<!--[^]*?-->\n/, '')
       .replace('<script type="importmap">', '<script>window.OPEN_TUNA_BUILD = true;</script>\n<script type="importmap">');
     files.set('index.html', strToU8(html));
     files.set('story.json', strToU8(story));

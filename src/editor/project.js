@@ -6,15 +6,15 @@
 //   saves/checkpoints/*.json named checkpoints
 //   thumb.webp               a frame of the Game view (the preview in Open recent)
 // Opening one unpacks it into projects/<slug>/ through the dev server (a working copy: autosave / checkpoints /
-// uploads go there, so the runtime loads plain URLs) and reloads the editor on ?edit&project=<slug>.
+// uploads go there, so the runtime loads plain URLs) and reloads the editor on editor.html?project=<slug>.
 // Save writes the working copy, then the .tuna file itself (File System Access: the same file you opened, the
-// handle is remembered per project in IndexedDB). The repo's own story (no ?project) stays a git project;
-// "Save as .tuna" packages it. The standalone helpers below (unpackTuna, openTunaFile, blankTuna, editorURL) are
-// also used by the home page (studio.html).
+// handle is remembered per project in IndexedDB). Demo projects (demo/<id> = demos/<id>/, part of the tool) save in
+// place and can be committed to git; "Save as .tuna" packages them. The standalone helpers below (unpackTuna,
+// openTunaFile, blankTuna) are also used by the studio home page (index.html).
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 import { h, btn, download } from './dom.js';
 import { dialog } from './menu.js';
-import { PROJECT, BASE, editorAPI } from '../project.js';
+import { PROJECT, BASE, IS_DEMO, editorAPI, editorURL } from '../project.js';
 import { fnv1a } from './saves.js';
 
 export const TUNA_VERSION = 1;
@@ -42,9 +42,6 @@ export async function kv(key, val) {
     r.onerror = () => rej(r.error);
   });
 }
-
-// the editor on a project ('' = the repo story)
-export const editorURL = (slug) => `./index.html?edit${slug ? `&project=${slug}` : ''}`;
 
 // a blank story for File ▸ New project ▸ Blank
 function blankStory(title) {
@@ -111,14 +108,15 @@ export class ProjectFiles {
   constructor(ed) {
     this.ed = ed;
     this.slug = PROJECT;
-    this.name = PROJECT || 'Repo story';
+    this.name = IS_DEMO ? PROJECT.slice(5) : PROJECT;
     this.manifest = null;
     this.handle = null; // FileSystemFileHandle of the .tuna (when opened / saved through the picker)
     this.savedHash = null; // fnv1a of the story last written to the .tuna file
     if (PROJECT) this.loadMeta();
   }
 
-  get isFile() { return !!this.slug; }
+  get isFile() { return !!this.slug && !IS_DEMO; } // a .tuna project (demos save in place, like code)
+  get isDemo() { return IS_DEMO; }
   get fileName() { return `${this.name.replace(/[\\/:*?"<>|]+/g, '-')}.tuna`; }
   // the story differs from what's in the .tuna file on disk
   get tunaDirty() { return this.isFile && this.savedHash !== fnv1a(this.ed.current()); }
@@ -214,7 +212,7 @@ export class ProjectFiles {
 
   go(slug) {
     this.ed.leaving = true; // no "unsaved changes" prompt: just saved
-    location.href = editorURL(slug);
+    location.href = slug ? editorURL(slug) : './';
   }
 
   // ---------------------------------------------------------------- save
@@ -307,16 +305,17 @@ export class ProjectFiles {
       if (!current) el.addEventListener('click', async () => { d.close(); await this.leave(); open(); });
       return el;
     };
-    let list = [];
+    let list = [], demos = [];
     try {
       const r = await fetch('./__editor/projects', { cache: 'no-store' });
-      if (r.ok) list = (await r.json()).projects;
+      if (r.ok) ({ projects: list = [], demos = [] } = await r.json());
     } catch { /* server down */ }
     body.replaceChildren(
-      h('p', { class: 'muted' }, 'Projects opened on this computer (working copies in projects/). Each one saves back to its .tuna file. The repo story is the site in this repository (saved to git).'),
+      h('p', { class: 'muted' }, 'Your projects (working copies in projects/ — each saves back to its .tuna file) and the demos that come with the studio (team only: they save in place and go to git).'),
       h('div', { class: 'grid' },
-        card('Repo story', 'story.json · git', '', !this.isFile, () => this.go('')),
-        ...list.map((p) => card(p.name, ago(p.mtime), p.thumb ? `./${p.thumb}?v=${p.mtime}` : '', p.project === this.slug, () => this.go(p.project)))),
+        ...list.map((p) => card(p.name, ago(p.mtime), p.thumb ? `./${p.thumb}?v=${p.mtime}` : '', p.project === this.slug, () => this.go(p.project))),
+        ...demos.map((p) => card(`${p.name} (demo)`, 'edits the original', p.thumb ? `./${p.thumb}` : '', p.project === this.slug, () => this.go(p.project)))),
+      h('p', {}, h('a', { href: './' }, '← Studio home')),
     );
   }
 

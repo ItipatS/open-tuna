@@ -23,7 +23,7 @@ import { DataPanel } from './data-panel.js';
 import { ProjectFiles } from './project.js';
 import { ModelThumbs } from './thumbs.js';
 import { SiteBuilder } from './build.js';
-import { PROJECT } from '../project.js';
+import { PROJECT, playURL } from '../project.js';
 import { listPaths } from '../data.js';
 import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime, migrate } from '../timeline.js';
@@ -342,11 +342,10 @@ export class Editor {
       { label: 'New project…', onClick: () => P.newDialog(), disabled: !s.server },
       { label: 'Open .tuna file…', shortcut: `${mod}O`, onClick: () => P.pickAndOpen(), disabled: !s.server },
       { label: 'Projects / recent…', onClick: () => P.recentDialog() },
-      { label: 'Home (studio page) ↗', onClick: async () => { await P.leave(); this.leaving = true; location.href = './studio.html'; } },
-      P.isFile ? { label: 'Back to the repo story', onClick: async () => { await P.leave(); P.go(''); } } : null,
+      { label: 'Studio home', onClick: async () => { await P.leave(); P.go(''); } },
       '-',
       { label: P.isFile ? `Save ${P.fileName}` : 'Save', shortcut: `${mod}S`, onClick: () => s.save() },
-      { label: P.isFile ? 'Save .tuna as…' : 'Save as .tuna file…', onClick: () => P.saveTuna({ as: true }), disabled: !s.server },
+      { label: P.isFile ? 'Save .tuna as…' : 'Save a copy as .tuna…', onClick: () => P.saveTuna({ as: true }), disabled: !s.server },
       { label: 'Save checkpoint…', shortcut: `${mod}⇧S`, onClick: () => s.checkpointDialog(), disabled: !s.server },
       { label: 'Restore a version…', onClick: () => s.openDialog() },
       { label: 'Autosave', items: [0, 30, 60, 300].map((v) => ({ label: v ? (v < 60 ? `Every ${v} s` : `Every ${v / 60} min`) : 'Off', checked: A === v, onClick: () => s.setAutosave(v) })) },
@@ -358,7 +357,7 @@ export class Editor {
       { label: 'Commit to git…', onClick: () => s.gitDialog(), disabled: !s.git },
       '-',
       { label: 'Build site… (standalone, for any host)', onClick: () => this.builder.dialog() },
-      { label: 'Open site at this moment ↗', onClick: () => this.openSite() },
+      { label: 'Preview (play.html) at this moment ↗', onClick: () => this.openSite() },
       { label: 'Snapshot (PNG of the viewport)', onClick: () => this.snapshot() },
     ];
   }
@@ -1288,7 +1287,7 @@ export class Editor {
     const tl = this.tl, x = this.time, d = tl.data;
     const lines = [];
     const ch = tl.chapter(x);
-    lines.push(`Open Tuna — ${this.project.isFile ? `project "${this.project.name}" (projects/${PROJECT}/story.json)` : 'story.json'} @ ${fmtTime(x, 2)} (t=${x.toFixed(2)} s of ${tl.duration} s, p=${(x / tl.duration).toFixed(3)})${ch ? `, chapter "${ch.name}"` : ''}`);
+    lines.push(`Open Tuna — project "${this.project.name}" (${PROJECT.startsWith('demo/') ? `demos/${PROJECT.slice(5)}` : `projects/${PROJECT}`}/story.json) @ ${fmtTime(x, 2)} (t=${x.toFixed(2)} s of ${tl.duration} s, p=${(x / tl.duration).toFixed(3)})${ch ? `, chapter "${ch.name}"` : ''}`);
     const active = [];
     for (const t of tl.tracks) {
       if (t.mute) continue;
@@ -1338,13 +1337,13 @@ export class Editor {
   }
 
   // the site's time for this moment (stretch regions: the previewed item's cycle)
-  openSite() { window.open(`./index.html?${PROJECT ? `project=${PROJECT}&` : ''}t=${this.tl.warp(this.time, this.story.previewItem).toFixed(2)}`, '_blank'); }
+  openSite() { window.open(playURL(PROJECT, this.tl.warp(this.time, this.story.previewItem).toFixed(2)), '_blank'); }
 
   // window title + the project button in the top bar
   syncTitle() {
     const P = this.project;
-    this.$proj.textContent = P.isFile ? P.fileName : 'Repo story';
-    document.title = `${P.isFile ? P.fileName : 'story.json'} — Open Tuna editor`;
+    this.$proj.textContent = P.isFile ? P.fileName : `${P.name} · demo`;
+    document.title = `${P.isFile ? P.fileName : `${P.name} (demo)`} — Open Tuna Studio`;
   }
 
   async snapshot() {

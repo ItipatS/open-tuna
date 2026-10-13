@@ -1,14 +1,15 @@
 # .tuna projects, building a site, live data
 
-Open Tuna is a web graphics tool. The **editor** edits a **document**. The document is either the repo's own story or
-a **.tuna project file**. **Build** turns a document into a standalone website. **Data sources** let the site pull
-content from an API or CMS at runtime.
+This repository is the **tool** (the studio). Stories are **projects**: **demos** that ship with the tool
+(`demos/<id>/`, committed) and **.tuna project files** that people keep anywhere. **Build** turns a project into a
+standalone website: that export is what a customer receives. **Data sources** let the site pull content from an API
+or CMS at runtime.
 
 ```
  .tuna file (anywhere on disk)  ──open──►  projects/<slug>/  (working copy, served by the dev server)
         ▲                                        │  autosave, checkpoints, uploads
         └──────────── Save (Ctrl+S) ─────────────┘
- repo story (story.json + assets/ at the root)  ──  saved to git, deployed by GitHub Pages
+ demos/<id>/ (ships with the tool)  ──  "Open a copy" makes a projects/<slug>/; team edits the original + git
  either one  ──File ▸ Build site──►  <title>-site.zip / a folder  ──►  any static host (HTTPS)
 ```
 
@@ -32,12 +33,13 @@ included either.
 
 Opening a .tuna (File ▸ Open, Ctrl+O, or dropping it on the editor) unzips it in the browser (fflate, from the
 import map) and writes it file by file into **`projects/<slug>/`** through the dev server (`project/new` + `put`,
-see [dev-server.md](dev-server.md)). Then the editor reloads on `?edit&project=<slug>`. `projects/` is
+see [dev-server.md](dev-server.md)). Then the editor reloads on `editor.html?project=<slug>`. `projects/` is
 gitignored: it's a cache of opened files. Do **not** delete a working copy whose .tuna was never saved: it might be
 the only copy.
 
 With `?project=<slug>`:
-- `src/project.js` sets `BASE = "projects/<slug>/"`. The runtime fetches `BASE + story.json`.
+- `src/project.js` sets `BASE = "projects/<slug>/"` (or `"demos/<id>/"` for `demo/<id>`). The runtime fetches
+  `BASE + story.json`.
 - `assetURL(src)` maps story paths `assets/…` to `BASE + assets/…`. Everything that loads a story file must use it
   (layers, the data hub, thumbnails, the Assets tab). Root paths (`tuna_fish.glb`) are left alone.
 - `fixHTML()` rewrites `src= / href= / poster= / url(` references to `assets/` inside HTML layers.
@@ -52,16 +54,16 @@ With `?project=<slug>`:
   is downloaded.
 - **Autosave** only writes the working copy. The status bar then says *.tuna not saved* (`saved:<slug>` in
   IndexedDB = fnv1a of the story last written to the file).
-- **Repo story:** Ctrl+S saves `story.json` as before. *File ▸ Save as .tuna file…* packages it (story + assets +
-  checkpoints) into a .tuna without switching to it.
+- **Demos:** Ctrl+S saves the demo's `story.json` in place (and *Commit to git* commits its folder). *File ▸ Save a
+  copy as .tuna…* packages it (story + assets + checkpoints) into a .tuna without switching to it.
 - **New project:** blank (ocean, a camera, an empty timeline) or a copy of the current story. Either way it's packed
   and unpacked like an opened file.
 
 ## Build site (`src/editor/build.js`)
 
 File ▸ **Build site…** collects a standalone site and saves it as a zip, or writes it into a chosen folder:
-- `index.html` with `window.OPEN_TUNA_BUILD = true` (then `main.js` ignores `?edit`, `?lab` and `?project`) and the
-  story's title.
+- `index.html` = `play.html` with `window.OPEN_TUNA_BUILD = true` (then `main.js` ignores `?lab` and `?project`) and
+  the story's title, plus the stylesheet it links (`src/page.css`).
 - The runtime modules, found by following `import` statements from `src/main.js`. **`src/editor/` is never
   included.** A new runtime module is picked up automatically as long as it's imported with a relative path
   (static `import … from './x.js'` or `import('./x.js')`).

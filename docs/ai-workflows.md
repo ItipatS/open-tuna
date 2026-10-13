@@ -4,11 +4,11 @@ Recipes for the requests that come up. Read [CLAUDE.md](../CLAUDE.md) first (har
 
 ## How requests arrive
 
-The owner and the designer work in the editor (`?edit`) and talk to you in three ways:
+The owner and the designer work in the studio (`editor.html?project=…`) and talk to you in three ways:
 
 1. **A pasted "Copy ref" block.** The editor's *Copy ref* button describes the exact moment they are looking at:
    ```
-   Open Tuna — story.json @ 1:37.20 (t=97.20 s of 150 s, p=0.648), chapter "Along the route"
+   Open Tuna — project "Thai Union · 50 years" (demos/thai-union/story.json) @ 1:37.20 (t=97.20 s of 150 s, p=0.648), chapter "Along the route"
    active: sun.elevation=42.00 · tentacles.form 100% (26.4–55.2 s) · …
    camera: key #12 (t 90) → key #13 (t 100); at [6.1, -6.0, -40.2] looking at [-3.9, -7.0, -31.5]
    paths active: school "School route (demo)" (100%, 70–122 s, 5 waypoints)
@@ -27,14 +27,15 @@ The owner and the designer work in the editor (`?edit`) and talk to you in three
 
 ## Editing story.json safely
 
-**Which story?** A Copy ref starting `Open Tuna — project "Name" (projects/<slug>/story.json)` is a .tuna project:
-edit that file (its assets are in `projects/<slug>/assets/`). The designer must then press Ctrl+S to write it into
-their .tuna file. If they send a `.tuna` itself, it's a zip: unzip it, edit `story.json`, zip it back (keep
-`manifest.json`). Otherwise it's the repo's `story.json`. See [projects-build-data.md](projects-build-data.md).
+**Which story?** The Copy ref names the file. `demos/<id>/story.json` is a demo (part of the tool, in git).
+`projects/<slug>/story.json` is a .tuna project's working copy (its assets are in `projects/<slug>/assets/`); the
+designer must then press Ctrl+S to write it into their .tuna file. If they send a `.tuna` itself, it's a zip:
+unzip it, edit `story.json`, zip it back (keep `manifest.json`). See [projects-build-data.md](projects-build-data.md).
+Below, `story.json` means that file.
 
 The designer may have the editor open, and it **autosaves story.json about every minute**.
 
-1. `git diff -- story.json` first. Uncommitted changes there are the designer's work. Keep them.
+1. `git diff -- demos/<id>/story.json` first (demos). Uncommitted changes there are the designer's work. Keep them.
 2. Edit the current file. Prefer a small Node script that loads it through the project's own `Timeline` class and
    writes `tl.serialize()`, so the formatting stays canonical (one key / clip per line, 4 decimals):
    ```js
@@ -119,5 +120,5 @@ Always do this before saying something works ([testing.md](testing.md)):
 
 - Commit with a clear message. **Pushing to `main` publishes the site.** The owner wants work on `main`; mention
   each push.
-- The editor's own git button commits only `story.json`, `saves/checkpoints` and `assets`. Your commits include code.
+- The editor's own git button (demos only) commits only that demo's folder. Your commits include code.
 - Update docs (this folder, EDITOR.md, HANDOFF.md) in the same commit as the behaviour they describe.

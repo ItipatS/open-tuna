@@ -41,7 +41,7 @@
 
 ## Projects / build / previews
 - Anything that loads a story file must go through `assetURL()` (src/project.js), or it breaks in `?project=` mode
-  while working fine on the repo story.
+  while working fine elsewhere (and in exports, where BASE is empty).
 - The build finds runtime modules by following *relative* imports from `src/main.js`. Code that loads a module or a
   model some other way (computed paths) won't be in the build. Keep model names as quoted `*.glb` literals.
 - Model previews render on the live renderer between frames. Change renderer state (target, clear colour) only
@@ -49,6 +49,8 @@
   readback row (`S × 8` bytes for half floats) must be a multiple of 256: keep `S` a multiple of 32.
 - File System Access handles only live in IndexedDB (not localStorage). Writing needs `requestPermission` from a
   user gesture (Ctrl+S counts).
+
+- `editor.html` and `play.html` are the same shell; `play.html` is also the template of every export. Change both.
 
 ## Tooling
 - Plain `python -m http.server` refuses connections under the page's parallel module + GLB burst (backlog 5) and has

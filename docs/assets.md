@@ -1,6 +1,6 @@
 # Assets
 
-## Models (`*.glb` at the repo root)
+## Models (`models/*.glb`, the tool's built-in library)
 
 These are Sketchfab exports used by the scene. They are also listed in the editor's Assets tab as **built-in**:
 they can be placed as model clips (`kind: "model"` layers) but not deleted.
@@ -22,7 +22,8 @@ they can be placed as model clips (`kind: "model"` layers) but not deleted.
 and verify with the `?debug` arrows. Don't change the swim shaders. As model clips, use the layer's *Flip facing*
 or a key's `rot`.
 
-Keep paths relative (`./file.glb`, `assets/…`): the site lives under `/open-tuna/` on GitHub Pages.
+Built-in models are referenced as `models/<file>.glb` (main.js, model clips); exports copy the ones they use.
+Keep paths relative: the studio lives under `/open-tuna/` on GitHub Pages.
 
 ## `assets/` (editor uploads)
 

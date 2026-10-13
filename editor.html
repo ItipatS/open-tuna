@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open Tuna Studio — Editor</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./src/page.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@500;600&display=swap" rel="stylesheet">
+<!-- editor.html?project=<id>: the editor around a project (src/editor/). Same markup as play.html; keep them in sync. -->
+<script>window.OPEN_TUNA_PAGE = 'editor';</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "meshoptimizer/simplifier": "https://cdn.jsdelivr.net/npm/meshoptimizer@0.22.0/meshopt_simplifier.module.js",
+    "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loader"><div class="box"><h1>OPEN OCEAN</h1><div class="bar"><i id="bar"></i></div><p id="status">Initialising WebGPU…</p></div></div>
+
+<div id="panel">
+  <header id="panelHead"><b>Ocean</b><span id="fps">– fps</span></header>
+  <div class="body">
+    <div class="row"><label>Tuna <span id="vTuna"></span></label><input id="tuna" type="range" min="200" max="4096" step="1"></div>
+    <div class="row"><label>Reef fish <span id="vReef"></span></label><input id="reef" type="range" min="0" max="2048" step="1"></div>
+    <div class="row"><label>Jellyfish <span id="vJelly"></span></label><input id="jelly" type="range" min="0" max="520" step="1"></div>
+    <div class="row"><label>Sea state <span id="vSea"></span></label><input id="sea" type="range" min="0" max="2" step="0.01"></div>
+    <div class="row"><label>Water clarity <span id="vClarity"></span></label><input id="clarity" type="range" min="0" max="1" step="0.01"></div>
+    <div class="row"><label>Sun elevation <span id="vSun"></span></label><input id="sun" type="range" min="4" max="85" step="0.5"></div>
+    <div class="row"><label>Render scale <span id="vScale"></span></label><input id="scale" type="range" min="0.4" max="1" step="0.05"></div>
+    <div class="toggles">
+      <label><input id="godrays" type="checkbox" checked> God rays</label>
+      <label><input id="bloom" type="checkbox" checked> Bloom</label>
+      <label><input id="shadows" type="checkbox" checked> Shadows</label>
+      <label><input id="scare" type="checkbox" checked> Cursor scares</label>
+    </div>
+    <div class="btns2">
+      <button id="cine" class="wide">Cinematic</button>
+      <button id="breach" class="wide">Breach!</button>
+    </div>
+    <div class="btns">
+      <button data-cam="reef">Reef</button>
+      <button data-cam="school">School</button>
+      <button data-cam="surface">Surface</button>
+      <button data-cam="aerial">Aerial</button>
+    </div>
+  </div>
+</div>
+<div id="captions"></div>
+<div id="scrollspace"></div>
+<div id="help"><b>Drag</b> orbit · <b>Wheel</b> zoom · <b>WASD / QE</b> swim · <b>Move cursor</b> through the school to scatter it · <b>Click</b> the scene to take the camera</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

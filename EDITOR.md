@@ -2,8 +2,9 @@
 
 The editor lets you change **when** things happen in the story (camera moves, captions, sun, the
 water 50, tuna leaps) and see the result immediately, like Unity's Timeline. Everything you edit is
-saved in one file: **`story.json`** (the repo's story), or in a **`.tuna` project file** that you keep anywhere,
-like a .psd. **Build site** turns either one into a website you can upload anywhere.
+saved in your project: a **`.tuna` project file** that you keep anywhere, like a .psd. The studio comes with
+**demo projects** (the Thai Union story) to watch, copy and learn from. **Build site** turns a project into a
+website you can upload anywhere: that export is what a customer gets, never the studio itself.
 
 ## Open it
 
@@ -11,7 +12,7 @@ like a .psd. **Build site** turns either one into a website you can upload anywh
 2. Double-click the launcher in the project folder:
    - **Windows:** `Open Editor.bat`
    - **Mac:** `Open Editor.command` (first time: right-click → Open, to get past Gatekeeper)
-3. Chrome or Edge opens the **studio home page** (`http://localhost:8123/studio.html`): start from the demo, make
+3. Chrome or Edge opens the **studio home page** (`http://localhost:8123/`): start from the demo, make
    a new project, open a `.tuna`, or pick a recent project. Keep the black server window open while you work;
    closing it stops the editor. (On your company's studio server, just open its address.)
 
@@ -27,8 +28,10 @@ repository, saved to git) or a project file such as *Japan launch.tuna*. Click i
 - **File ▸ Open .tuna file…** (**Ctrl+O**), or drag a `.tuna` onto the editor.
 - **Ctrl+S** saves into the `.tuna` file you opened. The first time, it asks where to keep it. Autosave keeps your
   work safe in between; the top bar says *.tuna not saved* until you press Ctrl+S.
-- **File ▸ Save .tuna as…** saves a copy somewhere else. On the repo story it's *Save as .tuna file…*, which
-  packages the story so you can send it to someone.
+- **File ▸ Save .tuna as…** saves a copy somewhere else. In a demo it's *Save a copy as .tuna…*.
+- **Demos** (from the home page, *edit the original demo*) are part of the studio and save in place (and to git).
+  Normally you *Open a copy* instead, which makes a new project of your own.
+- **File ▸ Studio home** goes back to the home page. *Preview* opens the project as visitors will see it.
 - A `.tuna` holds the story, every file in its Assets tab, its checkpoints and a preview picture. Send it by email
   or put it on a shared drive. Anyone with the editor can open it.
 
@@ -278,10 +281,10 @@ Once the site is handed over, the customer only edits the CMS. Design the parts 
 | **Autosave** | On by default (every minute, after you stop editing for 2 s). Change it in File ▸ Autosave. |
 | **Previous versions** | Every save keeps the version it replaced (last 100) in `saves/auto/`. |
 | **Checkpoints** | **Ctrl+Shift+S** saves a *named* copy ("before new ending"). Kept until you delete them. They're included when you commit. |
-| **Restore a version** | File ▸ **Restore a version…** lists the saved file, checkpoints, previous versions, every version in **git history** (repo story), and the browser draft. Click Load. Loading can be undone with Ctrl+Z. |
+| **Restore a version** | File ▸ **Restore a version…** lists the saved file, checkpoints, previous versions, every version in **git history** (demos), and the browser draft. Click Load. Loading can be undone with Ctrl+Z. |
 | **Browser draft** | If the browser closes, your unsaved work is offered back next time you open the editor. |
 | **Import / Export** | File ▸ Import / Export a story JSON, to send one by chat or try someone else's. |
-| **Git** | File ▸ **Commit to git…** commits `story.json`, checkpoints and your `assets/` files (never code) with your message. Tick *Also push* to upload to GitHub. Pushing the **main** branch updates the **public** website, and the dialog warns you about that. |
+| **Git** (demos only) | File ▸ **Commit to git…** commits the demo's folder (story, checkpoints, `assets/`; never code) with your message. Tick *Also push* to upload to GitHub. Pushing the **main** branch updates the **public** website, and the dialog warns you about that. |
 
 Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps).
 

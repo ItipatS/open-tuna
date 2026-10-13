@@ -1,4 +1,4 @@
-# Editor internals (`src/editor/`, loaded only with `?edit`)
+# Editor internals (`src/editor/`, loaded only by `editor.html`)
 
 The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the editor is built.
 

@@ -310,7 +310,7 @@ export class Saves {
       h('pre', { class: 'changes' }, changes),
       h('label', { class: 'lbl' }, 'Commit message', msg),
       h('label', { class: 'chk' }, pushBox, ` Also push to GitHub${main ? ' — this branch is main: pushing updates the PUBLIC site' : ''}`),
-      h('p', { class: 'muted' }, 'Commits only story.json and saves/checkpoints — code changes are left alone.'),
+      h('p', { class: 'muted' }, 'Commits only this demo’s folder (story, checkpoints, assets) — code changes are left alone.'),
     ];
     const run = async () => {
       if (this.dirty) await this.save();

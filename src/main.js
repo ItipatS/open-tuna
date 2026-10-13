@@ -20,7 +20,7 @@ import { Story, flightTargets } from './story.js';
 import { Timeline } from './timeline.js';
 import { Layers } from './layers.js';
 import { createWaterTentacles } from './tentacles.js';
-import { BASE, IS_BUILD } from './project.js';
+import { BASE, IS_BUILD, PAGE, PROJECT } from './project.js';
 import { DataHub } from './data.js';
 
 // Per-model orientation overrides (flip = the artist's pivot/forward axis points the wrong way).
@@ -58,8 +58,10 @@ function fail(msg) { loaderEl.classList.add('error'); statusEl.textContent = msg
 
 async function main() {
   const params = new URLSearchParams(location.search);
-  const LAB = !IS_BUILD && params.has('lab'); // playground panel + shot director instead of the scroll story
-  const EDIT = !LAB && !IS_BUILD && params.has('edit'); // timeline editor around the story (src/editor/)
+  const LAB = !IS_BUILD && PAGE === 'play' && params.has('lab'); // playground panel + shot director instead of a story
+  const EDIT = !IS_BUILD && PAGE === 'editor'; // editor.html: the timeline editor around the project (src/editor/)
+  // the studio's pages need a project (?project=demo/thai-union | <slug>); without one, go to the studio home
+  if (!IS_BUILD && !LAB && !PROJECT) { location.replace('./'); return; }
   let editor = null;
   document.documentElement.classList.add(LAB ? 'lab' : EDIT ? 'edit' : 'story');
 
@@ -116,7 +118,7 @@ async function main() {
   };
   // story.json as raw text (the editor fingerprints exactly what's on disk to detect outside changes)
   const storyText = LAB ? null : fetch(`./${BASE}story.json`, { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`story.json: HTTP ${r.status}`); return r.text(); });
-  const G = Object.fromEntries(await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loader.loadAsync(`./${f}`)])));
+  const G = Object.fromEntries(await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loader.loadAsync(`./models/${f}`)])));
   const storyRaw = LAB ? null : await storyText;
   const timeline = LAB ? null : new Timeline(JSON.parse(storyRaw));
   if (timeline) timeline.sourceText = storyRaw;

@@ -1,8 +1,8 @@
 # Deploying the studio on a company server
 
 The studio is this repository served by `tools/serve.py` (the same server the launchers start). The home page is
-`studio.html`, the editor is `index.html?edit`, and a story is `index.html`. Built sites (File ▸ Build site) don't
-need any of this: they're static files for any host.
+`/`, the editor `editor.html?project=…`, the player `play.html?project=…`. Built sites (File ▸ Build site) don't need
+any of this: they're static files for any host — that's what customers get.
 
 ## What it needs
 
@@ -20,14 +20,13 @@ need any of this: they're static files for any host.
 | `--host 0.0.0.0` | `-BindHost +` (admin shell or urlacl) | listen beyond this machine. Behind a proxy on the same host, keep the default `127.0.0.1` |
 | `--password` + env `OPEN_TUNA_PASSWORD` | `-Password` + `$env:OPEN_TUNA_PASSWORD` | HTTP Basic login for everything (any user name) |
 | `--no-git` | `-NoGit` | turn off commit / push: otherwise the editor pushes **with the server's git credentials** |
-| `--landing` | `-Landing` | `/` shows the studio home page; the story stays at `/index.html` |
 | port as first argument | `-Port` | default 8123 (the next free port up to +19) |
 
 Example (Linux, proxy on the same machine):
 
 ```sh
 cd /srv/open-tuna
-OPEN_TUNA_PASSWORD='…' python3 tools/serve.py 8123 --password --landing --no-git
+OPEN_TUNA_PASSWORD='…' python3 tools/serve.py 8123 --password --no-git
 ```
 
 Caddy (automatic HTTPS for a public name, or `tls internal` on an intranet):
@@ -58,7 +57,7 @@ Keep it running as a service (systemd example):
 [Service]
 WorkingDirectory=/srv/open-tuna
 Environment=OPEN_TUNA_PASSWORD=…
-ExecStart=/usr/bin/python3 tools/serve.py 8123 --password --landing --no-git
+ExecStart=/usr/bin/python3 tools/serve.py 8123 --password --no-git
 Restart=always
 ```
 
@@ -70,8 +69,8 @@ Restart=always
 - **Where work lives:** `projects/<slug>/` holds the working copy of every project opened or created on the server.
   Ctrl+S also writes the `.tuna` to the designer's own computer. **Back up `projects/`** (and `saves/`): they're
   gitignored.
-- **The repo story** (`story.json`, `assets/`) is the demo. The home page's *Open a copy* never touches it; *edit
-  the original* does. Consider `--no-git` plus file permissions if the demo must stay fixed.
+- **Demos** (`demos/<id>/`) are part of the tool. The home page's *Open a copy* never touches them; *edit the
+  original demo* does. Consider `--no-git` plus file permissions if the demos must stay fixed.
 - **It's a small threaded stdlib server** made for a team, not for public traffic. Serve built sites from a real
   static host / CDN, not from the studio.
 - Updating the studio = `git pull` in its folder (then restart the service when `tools/serve.py` changed).

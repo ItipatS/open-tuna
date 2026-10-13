@@ -43,7 +43,7 @@ are expected but not defined yet — ask the owner.
 - ✅ Default 2000 tuna.
 - ✅ **Timeline editor instead of switching engines** (2026-10-13). The team considered Babylon Editor to get a
   timeline. Decision: stay on three.js (the custom TSL shaders, GPU boids and water would be a rewrite) and build
-  an in-repo, Unity-style editor (`?edit`) over a data file (`story.json`). A graphic designer clones the repo,
+  an in-repo, Unity-style editor (`editor.html`) over a data file (`story.json`). A graphic designer clones the repo,
   double-clicks `Open Editor`, edits, and plays. "Copy ref" + notes are how designers point Claude at exact moments.
 - Caption copy ("Fifty years of the open ocean", "It all begins beneath the surface", "Rising, together") is
   **placeholder** written by Claude — replace with real copy. No end caption now; the 50 is the finale.
@@ -55,7 +55,7 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 - Story mode default; scroll length = story length × 15 vh/s; captions fade by time window. **All timing lives in
   `story.json`, in seconds** (the act is 1:00; the story can be made any length — beyond 1:00 is empty until
   content is added).
-- **Editor (`?edit`)**: File/Edit/View/Help menus, Play / Pause / Stop with play speed, a big colour-coded
+- **Editor (`editor.html`)**: File/Edit/View/Help menus, Play / Pause / Stop with play speed, a big colour-coded
   SCENE | GAME switch (viewport frame blue / green / orange while playing), outliner (hide / solo objects),
   inspector, real-time timeline (m:ss ruler, draggable story END, camera keys, captions, sun curves, beat clips,
   chapters, notes, per-moment fps lane), **right-click menus on everything** (cut/copy/paste/duplicate, lock,
@@ -100,10 +100,13 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
     - Still to do: an owner / CTO decision on what's contractually customer-editable; a "travel along the route
       per item" camera mode (today a cycle must loop back to where it started).
 
-  - **Studio home page** (`studio.html`): the demo (watch / open a copy / edit the original), new project (blank or
+  - **The repo is now the TOOL, stories are projects.** `/` is the studio home, `editor.html?project=…` the editor,
+    `play.html?project=…` the player. The Thai Union story moved to `demos/thai-union/`, the models to `models/`.
+    Customers get an exported build (*File ▸ Build site*), never the studio. Old `/?t=` / `/?edit` links redirect.
+  - **Studio home page** (`index.html`): the demo (watch / open a copy / edit the original), new project (blank or
     a copy of the demo), open `.tuna` (picker or drop), and recent projects. The launchers open it.
-  - **The studio can run on a company server** (docs/deploy.md). The servers now have `--password`, `--no-git`,
-    `--landing` and `--host`. It needs HTTPS in front, because WebGPU only runs on secure pages.
+  - **The studio can run on a company server** (docs/deploy.md). The servers now have `--password`, `--no-git`
+    and `--host`. It needs HTTPS in front, because WebGPU only runs on secure pages.
 
   Details: docs/projects-build-data.md, docs/deploy.md.
 - **Docs restructured for AI agents**: CLAUDE.md is now a short index → `docs/` (ai-workflows, story-format,
@@ -146,7 +149,7 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 
 ## Tuning knobs (where to change things)
 
-- Timeline windows, camera path, captions, sun: **`story.json`** (or the editor, `?edit`). New beats: `DRIVERS` /
+- Timeline windows, camera path, captions, sun: **`demos/thai-union/story.json`** (or the editor). New beats: `DRIVERS` /
   `PARAMS` in `story.js` (see CLAUDE.md → Story data & editor).
 - Water 50: `tentacleDefs()` control points (digit shapes, stem roots, decor tentacles); in `update()` — braid
   radius/pitch, `m`/`g`/`settle` timing, sway, radius profile; tube shading + gold thread mask in `tentacles.js`.
@@ -159,7 +162,7 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 
 ```sh
 git clone https://github.com/ItipatS/open-tuna && cd open-tuna
-python3 tools/serve.py --open   # editor at http://localhost:8123/?edit, site at http://localhost:8123
+python3 tools/serve.py --open   # the studio home at http://localhost:8123/ (demo: play.html?project=demo/thai-union)
 ```
 Or double-click `Open Editor.bat` (Windows) / `Open Editor.command` (macOS).
 Pushing to `main` redeploys GitHub Pages publicly (https://itipats.github.io/open-tuna/) — use a branch

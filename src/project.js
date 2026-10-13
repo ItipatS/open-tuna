@@ -1,15 +1,18 @@
-// Where the open story's files live.
-//   repo story      story.json + assets/ at the site root (the default, and every built site)
-//   .tuna project   ?project=<slug>  ->  projects/<slug>/story.json + projects/<slug>/assets/ (the editor unpacks
-//                   an opened .tuna file there, see src/editor/project.js)
-// Story paths stay relative to the story ("assets/logo.png"); built-in models are root files ("tuna_fish.glb").
-const BUILD = !!window.OPEN_TUNA_BUILD; // set by the built index.html: no editor, no projects
+// Which project the page shows, and where its files live. The repository is the TOOL; stories are projects:
+//   demo/<id>   demos/<id>/      demo projects that ship with the tool (committed, e.g. demo/thai-union)
+//   <slug>      projects/<slug>/ projects created / opened in the studio (working copies of .tuna files, gitignored)
+//   built site  window.OPEN_TUNA_BUILD: the export of one project, its story.json + assets/ at the site root
+// Pages: index.html (studio home), editor.html?project=…, play.html?project=… (OPEN_TUNA_PAGE says which).
+// Story paths are relative to the project ("assets/logo.png"); the tool's built-in models are "models/…".
+const BUILD = !!window.OPEN_TUNA_BUILD;
 const q = new URLSearchParams(location.search);
-const slug = q.get('project') || '';
+const id = q.get('project') || '';
 
-export const PROJECT = !BUILD && /^[a-z0-9][a-z0-9-]{0,62}$/.test(slug) ? slug : '';
-export const BASE = PROJECT ? `projects/${PROJECT}/` : '';
 export const IS_BUILD = BUILD;
+export const PAGE = BUILD ? 'play' : window.OPEN_TUNA_PAGE || 'play';
+export const PROJECT = !BUILD && /^(demo\/)?[a-z0-9][a-z0-9-]{0,62}$/.test(id) ? id : '';
+export const IS_DEMO = PROJECT.startsWith('demo/');
+export const BASE = !PROJECT ? '' : IS_DEMO ? `demos/${PROJECT.slice(5)}/` : `projects/${PROJECT}/`;
 
 // a story path -> a URL the page can load
 export const assetURL = (src) => (src && BASE && /^assets\//.test(src) ? BASE + src : src);
@@ -19,5 +22,9 @@ export const fixHTML = (html) => (BASE && html
   ? html.replace(/((?:src|href|poster)\s*=\s*["']|url\(\s*["']?)assets\//g, `$1${BASE}assets/`)
   : html);
 
-// the editor's dev-server API for the open story (editor only)
-export const editorAPI = (path) => `./__editor/${path}${PROJECT ? `${path.includes('?') ? '&' : '?'}project=${PROJECT}` : ''}`;
+// the studio pages for a project
+export const editorURL = (p) => `./editor.html?project=${encodeURIComponent(p)}`;
+export const playURL = (p, t) => `./play.html?project=${encodeURIComponent(p)}${t !== undefined ? `&t=${t}` : ''}`;
+
+// the studio server's API for the open project (editor only)
+export const editorAPI = (path) => `./__editor/${path}${PROJECT ? `${path.includes('?') ? '&' : '?'}project=${encodeURIComponent(PROJECT)}` : ''}`;

@@ -1,14 +1,16 @@
-# Open Tuna dev server for Windows machines without Python. Same behaviour and endpoints as
-# tools/serve.py (keep them in sync): serves the project with no caching + the editor's save system.
-# Every endpoint works on the repo's story or, with ?project=<slug>, on an opened .tuna in projects/<slug>/.
+# Open Tuna Studio server for Windows machines without Python. Same behaviour and endpoints as
+# tools/serve.py (keep them in sync): serves the tool with no caching + the editor's project / save API.
+# Story endpoints take ?project=demo/<id> (demos/<id>/, committed) or <slug> (projects/<slug>/, a .tuna working copy).
 #   powershell -ExecutionPolicy Bypass -File tools\serve.ps1 [-Port 8123] [-Open]
 # Shared server (docs/deploy.md; needs HTTPS in front): -BindHost + (all interfaces, needs an admin shell or a urlacl),
-# -Password (HTTP Basic; the value comes from $env:OPEN_TUNA_PASSWORD), -NoGit, -Landing ("/" = studio.html).
-param([int]$Port = 8123, [switch]$Open, [string]$BindHost = 'localhost', [switch]$Password, [switch]$NoGit, [switch]$Landing)
+# -Password (HTTP Basic; the value comes from $env:OPEN_TUNA_PASSWORD), -NoGit.
+param([int]$Port = 8123, [switch]$Open, [string]$BindHost = 'localhost', [switch]$Password, [switch]$NoGit)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $projectsDir = Join-Path $root 'projects'
+$demosDir = Join-Path $root 'demos'
+$modelsDir = Join-Path $root 'models'
 $sep = [IO.Path]::DirectorySeparatorChar
 $uploadExt = @('png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb', 'gltf')
 $keepAuto = 100
@@ -44,15 +46,14 @@ $base = "http://localhost:$Port/"
 Write-Host ""
 Write-Host "  Open Tuna dev server - $root"
 Write-Host ""
-Write-Host "  Studio : ${base}studio.html   (home: demo, new / open projects)"
-Write-Host "  Editor : ${base}index.html?edit"
-Write-Host "  Site   : ${base}$(if ($Landing) { 'index.html' })"
-Write-Host "  Lab    : ${base}index.html?lab"
+Write-Host "  Studio : $base   (demos, new / open / recent projects)"
+Write-Host "  Demo   : ${base}play.html?project=demo/thai-union"
+Write-Host "  Lab    : ${base}play.html?lab"
 if ($BindHost -ne 'localhost') { Write-Host "  Listening on ${BindHost}:$Port$(if ($pw) { ' - password on' })$(if ($NoGit) { ' - git off' })" }
 Write-Host ""
 Write-Host "  Use Chrome or Edge (WebGPU). Keep this window open; Ctrl+C to stop."
 if (-not $hasGitExe) { Write-Host "  (git not found: the editor's Git menu is disabled)" }
-if ($Open) { Start-Process "${base}studio.html" }
+if ($Open) { Start-Process $base }
 
 function Send($ctx, [int]$code, [byte[]]$bytes, [string]$type) {
   $res = $ctx.Response
@@ -82,16 +83,34 @@ function Git([string[]]$gitArgs) {
 }
 function HasGit { if (-not $hasGitExe) { return $false }; return (Git @('rev-parse', '--is-inside-work-tree')).code -eq 0 }
 
-# the story being edited: the repo root (slug '') or an unpacked .tuna in projects/<slug>/
+# a project: demo/<id> (demos/<id>/, part of the tool, committed) or <slug> (projects/<slug>/, a .tuna working copy)
 function Proj([string]$slug) {
-  $r = $root
-  if ($slug) {
-    if ($slug -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}$') { throw 'bad project name' }
-    $r = Join-Path $projectsDir $slug
-    if (-not (Test-Path -LiteralPath $r -PathType Container)) { throw "no project `"$slug`" (open its .tuna file again)" }
-  }
+  if (-not $slug) { throw 'no project: open one from the studio home' }
+  $demo = $slug.StartsWith('demo/')
+  $name = if ($demo) { $slug.Substring(5) } else { $slug }
+  if ($name -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}$') { throw 'bad project name' }
+  $r = Join-Path $(if ($demo) { $demosDir } else { $projectsDir }) $name
+  if (-not (Test-Path -LiteralPath $r -PathType Container)) { throw "no project `"$slug`"$(if (-not $demo) { ' (open its .tuna file again)' })" }
   $saves = Join-Path $r 'saves'
-  return @{ slug = $slug; root = $r; story = (Join-Path $r 'story.json'); saves = $saves; auto = (Join-Path $saves 'auto'); check = (Join-Path $saves 'checkpoints'); assets = (Join-Path $r 'assets') }
+  return @{ slug = $slug; demo = $demo; gitRel = $(if ($demo) { "demos/$name" } else { '' }); root = $r; story = (Join-Path $r 'story.json'); saves = $saves; auto = (Join-Path $saves 'auto'); check = (Join-Path $saves 'checkpoints'); assets = (Join-Path $r 'assets') }
+}
+
+# the projects in projects/ or demos/: {project, name (manifest), mtime, thumb}, newest first
+function ProjectList($folder, [string]$prefix) {
+  $list = @()
+  if (-not (Test-Path $folder)) { return ,$list }
+  Get-ChildItem -Path $folder -Directory | ForEach-Object {
+    $d = $_.FullName; $slug = $_.Name
+    $st = Join-Path $d 'story.json'
+    if ($slug -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}$' -or -not (Test-Path $st)) { return }
+    $name = $slug
+    try { $m = [IO.File]::ReadAllText((Join-Path $d 'manifest.json'), $utf8) | ConvertFrom-Json; if ($m.name) { $name = $m.name } } catch { }
+    $rel = $d.Substring($root.Length + 1) -replace '\\', '/'
+    $thumb = ''
+    foreach ($t in @('thumb.webp', 'thumb.png', 'thumb.jpg')) { if (-not $thumb -and (Test-Path (Join-Path $d $t))) { $thumb = "$rel/$t" } }
+    $list += [ordered]@{ project = "$prefix$slug"; name = $name; mtime = (UnixTime (Get-Item $st)); thumb = $thumb }
+  }
+  return ,@($list | Sort-Object { - $_.mtime })
 }
 function Rel($P, [string]$full) { return ($full.Substring($P.root.Length + 1) -replace '\\', '/') }
 
@@ -169,11 +188,15 @@ function Editor($ctx, [string]$path) {
     if (-not $slugBase) { $slugBase = 'project' }
     $slug = $slugBase; $n = 1
     while (Test-Path (Join-Path $projectsDir $slug)) { $n++; $slug = "$slugBase-$n" }
+    $repo = $null
+    if ($q['from']) {
+      $repo = Proj $q['from']
+      if (-not $repo.demo) { throw 'only demos can be copied this way (open the .tuna instead)' }
+    }
     $d = Join-Path $projectsDir $slug
     New-Item -ItemType Directory -Force $d | Out-Null
-    if ($q['from'] -eq 'repo') {
-      # a copy of the repo story (the demo) to play with
-      $repo = Proj ''
+    if ($repo) {
+      # a copy of a demo to play with
       Copy-Item -LiteralPath $repo.story (Join-Path $d 'story.json')
       (Get-Item (Join-Path $d 'story.json')).LastWriteTime = Get-Date  # a fresh date: it's a new project
       if (Test-Path $repo.assets) { Copy-Item -Recurse -LiteralPath $repo.assets (Join-Path $d 'assets') }
@@ -183,9 +206,18 @@ function Editor($ctx, [string]$path) {
     }
     SendJson $ctx 200 @{ ok = $true; project = $slug }; return
   }
+  if ($path -eq '/__editor/projects') {
+    SendJson $ctx 200 ([ordered]@{ projects = (ProjectList $projectsDir ''); demos = (ProjectList $demosDir 'demo/') }); return
+  }
+  if ($path -eq '/__editor/ping') {
+    $g = $false
+    if ($q['project']) { $g = (Proj $q['project']).demo -and (HasGit) }
+    $br = if ($g) { (Git @('branch', '--show-current')).out } else { '' }
+    SendJson $ctx 200 ([ordered]@{ ok = $true; save = $true; git = $g; branch = $br }); return
+  }
   $P = Proj $q['project']
   if ($path -eq '/__editor/put') {
-    if (-not $P.slug) { throw 'put only writes into projects/' }
+    if ($P.demo) { throw 'put only writes into projects/' }
     $file = Putable $P $q['file']
     $bytes = ReadBytes $req
     if ((Rel $P $file) -eq 'story.json') { ValidStory ($utf8.GetString($bytes)) }
@@ -213,18 +245,13 @@ function Editor($ctx, [string]$path) {
     SendJson $ctx 200 @{ ok = $true; file = (Rel $P $file) }; return
   }
   if ($req.HttpMethod -eq 'POST') { $body = (New-Object IO.StreamReader($req.InputStream, $utf8)).ReadToEnd() }
-  if ($P.slug -and $path.StartsWith('/__editor/git/') -and $path -ne '/__editor/git/status') { throw 'a .tuna project is saved as a file, not to git' }
+  if (-not $P.demo -and $path.StartsWith('/__editor/git/') -and $path -ne '/__editor/git/status') { throw 'a .tuna project is saved as a file, not to git' }
   if ($NoGit -and ($path -eq '/__editor/git/commit' -or $path -eq '/__editor/git/push')) { throw 'git is turned off on this server (-NoGit)' }
   switch ($path) {
-    '/__editor/ping' {
-      $g = HasGit
-      $br = if ($g) { (Git @('branch', '--show-current')).out } else { '' }
-      SendJson $ctx 200 ([ordered]@{ ok = $true; save = $true; git = ($g -and -not $P.slug); branch = $br }); return
-    }
     '/__editor/list' {
       $hist = @()
-      if (-not $P.slug -and (HasGit)) {
-        $r = Git @('log', '-n', '60', '--format=%h|%cI|%an|%s', '--', 'story.json')
+      if ($P.demo -and (HasGit)) {
+        $r = Git @('log', '-n', '60', '--format=%h|%cI|%an|%s', '--', "$($P.gitRel)/story.json")
         if ($r.code -eq 0 -and $r.out) {
           foreach ($line in ($r.out -split "`n")) {
             $f = $line.Trim().Split('|', 4)
@@ -236,8 +263,8 @@ function Editor($ctx, [string]$path) {
     }
     '/__editor/load' {
       if ($q['git']) {
-        if ($P.slug -or $q['git'] -notmatch '^[0-9a-fA-F]{4,40}$') { throw 'bad commit' }
-        $r = Git @('show', "$($q['git']):story.json")
+        if (-not $P.demo -or $q['git'] -notmatch '^[0-9a-fA-F]{4,40}$') { throw 'bad commit' }
+        $r = Git @('show', "$($q['git']):$($P.gitRel)/story.json")
         if ($r.code -ne 0) { throw $r.out }
         Send $ctx 200 $utf8.GetBytes($r.out) 'application/json; charset=utf-8'; return
       }
@@ -250,8 +277,10 @@ function Editor($ctx, [string]$path) {
           $list += [ordered]@{ file = (Rel $P $_.FullName); size = $_.Length; mtime = (UnixTime $_) }
         }
       }
-      Get-ChildItem -Path $root -File | Where-Object { $_.Extension -in '.glb', '.gltf' } | Sort-Object Name | ForEach-Object {
-        $list += [ordered]@{ file = $_.Name; size = $_.Length; mtime = (UnixTime $_); builtin = $true }
+      if (Test-Path $modelsDir) {
+        Get-ChildItem -Path $modelsDir -File | Where-Object { $_.Extension -in '.glb', '.gltf' } | Sort-Object Name | ForEach-Object {
+          $list += [ordered]@{ file = "models/$($_.Name)"; size = $_.Length; mtime = (UnixTime $_); builtin = $true }
+        }
       }
       SendJson $ctx 200 @{ assets = $list }; return
     }
@@ -262,23 +291,6 @@ function Editor($ctx, [string]$path) {
       $list += (Files $P $P.check)
       SendJson $ctx 200 @{ files = $list }; return
     }
-    '/__editor/projects' {
-      $list = @()
-      if (Test-Path $projectsDir) {
-        Get-ChildItem -Path $projectsDir -Directory | ForEach-Object {
-          $d = $_.FullName; $slug = $_.Name
-          $st = Join-Path $d 'story.json'
-          if ($slug -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}$' -or -not (Test-Path $st)) { return }
-          $name = $slug
-          try { $m = [IO.File]::ReadAllText((Join-Path $d 'manifest.json'), $utf8) | ConvertFrom-Json; if ($m.name) { $name = $m.name } } catch { }
-          $thumb = ''
-          foreach ($t in @('thumb.webp', 'thumb.png')) { if (-not $thumb -and (Test-Path (Join-Path $d $t))) { $thumb = "projects/$slug/$t" } }
-          $list += [ordered]@{ project = $slug; name = $name; mtime = (UnixTime (Get-Item $st)); thumb = $thumb }
-        }
-      }
-      $sorted = @($list | Sort-Object { - $_.mtime })
-      SendJson $ctx 200 @{ projects = $sorted }; return
-    }
     '/__editor/asset-delete' {
       $full = [IO.Path]::GetFullPath((Join-Path $P.root $q['file']))
       if (-not $full.StartsWith($P.assets + $sep) -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { throw 'not a file in assets/' }
@@ -286,10 +298,10 @@ function Editor($ctx, [string]$path) {
       SendJson $ctx 200 @{ ok = $true }; return
     }
     '/__editor/git/status' {
-      if ($P.slug -or -not (HasGit)) { SendJson $ctx 200 @{ git = $false }; return }
+      if (-not $P.demo -or -not (HasGit)) { SendJson $ctx 200 @{ git = $false }; return }
       $br = (Git @('branch', '--show-current')).out
       $up = Git @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
-      $ch = (Git @('status', '--porcelain', '--', 'story.json', 'saves/checkpoints', 'assets')).out
+      $ch = (Git @('status', '--porcelain', '--', $P.gitRel)).out
       $ahead = if ($up.code -eq 0) { (Git @('rev-list', '--count', '@{u}..HEAD')).out } else { '' }
       $changes = @($ch -split "`n" | Where-Object { $_.Trim() })
       SendJson $ctx 200 ([ordered]@{ git = $true; branch = $br; upstream = $(if ($up.code -eq 0) { $up.out } else { '' }); ahead = $ahead; changes = $changes }); return
@@ -331,9 +343,7 @@ function Editor($ctx, [string]$path) {
       $msg = ''
       try { $msg = ($body | ConvertFrom-Json).message } catch { }
       if (-not $msg) { $msg = 'Update story' }
-      $paths = @('story.json')
-      if ((Test-Path $P.check) -and (Get-ChildItem $P.check).Count) { $paths += 'saves/checkpoints' }
-      if ((Test-Path $P.assets) -and (Get-ChildItem $P.assets).Count) { $paths += 'assets' }
+      $paths = @($P.gitRel)
       $r = Git (@('add', '--') + $paths)
       if ($r.code -eq 0) { $r = Git (@('commit', '-m', $msg, '--') + $paths) }
       SendJson $ctx $(if ($r.code -eq 0) { 200 } else { 400 }) ([ordered]@{ ok = ($r.code -eq 0); output = $r.out; error = $(if ($r.code -eq 0) { '' } else { $r.out }) }); return
@@ -356,7 +366,6 @@ try {
         Send $ctx 401 ([Text.Encoding]::UTF8.GetBytes('Password required')) 'text/plain'; continue
       }
       $path = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath)
-      if ($Landing -and $path -eq '/') { $path = '/studio.html' }
       if ($path.StartsWith('/__editor/')) {
         try { Editor $ctx $path } catch { SendJson $ctx 400 @{ ok = $false; error = "$_" } }
         continue

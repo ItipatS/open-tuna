@@ -9,8 +9,19 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<!-- Home page of the editor: the demo, new / open / recent projects (docs/projects-build-data.md). The dev server
-     (tools/serve.py) serves it at /studio.html, or at / with --landing. Without the server it's a read-only page. -->
+<!-- The studio home (the tool's main page): demos, new / open / recent projects (docs/projects-build-data.md).
+     Without the studio server (tools/serve.py) it's read-only. Old story links (?t= ?p= ?lab ?edit) are redirected. -->
+<script>
+  // links from before the studio had a home page: /?t=… /?p=… (the Thai Union site), /?edit, /?lab
+  (() => {
+    const q = new URLSearchParams(location.search);
+    const id = q.get('project') || 'demo/thai-union';
+    q.delete('project');
+    if (q.has('edit')) { q.delete('edit'); location.replace(`editor.html?project=${id}${q.size ? `&${q}` : ''}`); }
+    else if (q.has('lab')) location.replace(`play.html?${q}`);
+    else if (q.size || new URLSearchParams(location.search).has('project')) location.replace(`play.html?project=${id}${q.size ? `&${q}` : ''}`);
+  })();
+</script>
 <style>
   :root {
     --bg: #04121b; --bg2: #071c28; --card: rgba(13, 38, 52, 0.72); --line: rgba(160, 225, 255, 0.14); --line2: rgba(160, 225, 255, 0.3);
@@ -38,7 +49,7 @@
 
   /* hero */
   .hero { position: relative; min-height: min(100vh, 860px); display: flex; align-items: center; overflow: hidden; }
-  .hero::before { content: ""; position: absolute; inset: 0; background: url("studio/hero.jpg") 62% 50% / cover no-repeat; transform: scale(1.04); animation: drift 24s ease-in-out infinite alternate; }
+  .hero::before { content: ""; position: absolute; inset: 0; background: url("home/hero.jpg") 62% 50% / cover no-repeat; transform: scale(1.04); animation: drift 24s ease-in-out infinite alternate; }
   .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(4, 18, 27, .92) 0%, rgba(4, 18, 27, .7) 38%, rgba(4, 18, 27, .05) 75%), linear-gradient(0deg, var(--bg) 0%, transparent 28%); }
   @keyframes drift { to { transform: scale(1.1) translate(-1.5%, -1%); } }
   .hero .wrap { position: relative; z-index: 1; padding: 120px 0 90px; }
@@ -65,7 +76,7 @@
 
   /* demo */
   .demo { display: grid; grid-template-columns: 1.35fr 1fr; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; background: var(--card); }
-  .demo .media { position: relative; min-height: 360px; background: url("studio/underwater.jpg") center / cover; }
+  .demo .media { position: relative; min-height: 360px; background: url("home/underwater.jpg") center / cover; }
   .demo .media .strip { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 10px; }
   .demo .media .strip span { width: 120px; aspect-ratio: 16/9; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .35); background: center / cover; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
   .demo .body { padding: 34px 34px 30px; display: flex; flex-direction: column; gap: 14px; }
@@ -168,7 +179,7 @@
     <div class="actions">
       <button class="btn primary" data-act="new"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M7 2h2v5h5v2H9v5H7V9H2V7h5z"/></svg>New project</button>
       <button class="btn" data-act="open"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3h5l1.5 1.5h6.5v8.5h-13z"/></svg>Open .tuna file</button>
-      <a class="btn" href="index.html" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>Watch the demo</a>
+      <a class="btn" href="play.html?project=demo/thai-union" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>Watch the demo</a>
     </div>
     <div class="note" id="note"></div>
   </div>
@@ -180,7 +191,7 @@
       <div class="sh"><div><div class="kicker">Start from the demo</div><h2>Thai Union · 50 years</h2></div>
         <p>Our pre-made scene: everything the studio can do in one story. Open a copy and take it apart. The original stays untouched.</p></div>
       <div class="demo">
-        <div class="media"><div class="strip"><span style="background-image:url(studio/hero.jpg)"></span><span style="background-image:url(studio/journey.jpg)"></span></div></div>
+        <div class="media"><div class="strip"><span style="background-image:url(home/hero.jpg)"></span><span style="background-image:url(home/journey.jpg)"></span></div></div>
         <div class="body">
           <h3>From the open ocean to the table</h3>
           <ul>
@@ -191,9 +202,9 @@
           </ul>
           <div class="row">
             <button class="btn primary small" data-act="demo-copy">Open a copy in the editor</button>
-            <a class="btn small" href="index.html" target="_blank" rel="noopener">Watch it</a>
+            <a class="btn small" href="play.html?project=demo/thai-union" target="_blank" rel="noopener">Watch it</a>
           </div>
-          <div class="team">Team only: <a href="index.html?edit">edit the original</a> (the repository’s story, saved to git).</div>
+          <div class="team">Team only: <a href="editor.html?project=demo/thai-union">edit the original demo</a> (part of the tool, saved to git).</div>
         </div>
       </div>
     </div>
@@ -241,7 +252,8 @@
 <div class="toast" id="toast"></div>
 
 <script type="module">
-import { unpackTuna, openTunaFile, blankTuna, editorURL } from './src/editor/project.js';
+import { unpackTuna, openTunaFile, blankTuna } from './src/editor/project.js';
+import { editorURL } from './src/project.js';
 
 const $ = (s) => document.querySelector(s);
 let server = false;
@@ -306,7 +318,7 @@ async function create(name, tpl) {
   try {
     let slug;
     if (tpl === 'demo') {
-      const r = await fetch(`./__editor/project/new?from=repo&name=${encodeURIComponent(name)}`, { method: 'POST', body: '' });
+      const r = await fetch(`./__editor/project/new?from=demo/thai-union&name=${encodeURIComponent(name)}`, { method: 'POST', body: '' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       slug = j.project;
