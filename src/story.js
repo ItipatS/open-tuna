@@ -131,7 +131,9 @@ export class Story {
 
   buildCaptions() {
     this.capVersion = this.timeline.version;
-    this.captionLayer.replaceChildren();
+    // captions live in their own (unpositioned) wrapper so they stack with the media layers in the overlay
+    if (!this.capWrap) { this.capWrap = document.createElement('div'); this.capWrap.className = 'caps'; this.captionLayer.prepend(this.capWrap); }
+    this.capWrap.replaceChildren();
     this.capEls = this.timeline.captions().map((c) => {
       const el = document.createElement('div');
       el.className = `cap cap-${c.size || 'medium'}`;
@@ -140,7 +142,7 @@ export class Story {
       (c.title || '').split('\n').forEach((line, i) => { if (i) h.append(document.createElement('br')); h.append(line); });
       el.append(h);
       if (c.sub) { const s = document.createElement('p'); s.textContent = c.sub; el.append(s); }
-      this.captionLayer.append(el);
+      this.capWrap.append(el);
       return el;
     });
   }

@@ -119,6 +119,25 @@ export class Saves {
     return { text: this.server === false ? 'No editor server (Save downloads)' : 'Saved', cls: '' };
   }
 
+  // ---------------------------------------------------------------- assets
+  // copy a dropped / picked file into the project's assets/ folder; returns its path (e.g. "assets/logo.png")
+  async upload(file) {
+    if (!this.server) throw new Error('Adding files needs the editor server — start the editor with “Open Editor”');
+    const r = await fetch(`./__editor/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.status);
+    return j.file;
+  }
+
+  pickFile(accept) {
+    return new Promise((resolve) => {
+      const input = h('input', { type: 'file', accept, style: 'display:none' });
+      input.addEventListener('change', () => { resolve(input.files[0] || null); input.remove(); });
+      document.body.append(input);
+      input.click();
+    });
+  }
+
   // ---------------------------------------------------------------- checkpoints
   checkpointDialog() {
     if (!this.server) return this.ed.toast('Checkpoints need the editor server (start it with “Open Editor”)', true);

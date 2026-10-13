@@ -14,7 +14,8 @@ tools/serve.ps1 is the same server for Windows machines without Python - keep th
     GET  /__editor/load?file=<path>      story.json or a file in saves/  |  ?git=<commit>  (story.json at that commit)
     POST /__editor/delete?file=<path>    delete a checkpoint
     GET  /__editor/git/status            {branch, upstream, changes}
-    POST /__editor/git/commit            body {message} -> commits story.json + saves/checkpoints
+    POST /__editor/upload?name=file.png  body = file bytes -> assets/<name> (never overwrites) -> {file}
+    POST /__editor/git/commit            body {message} -> commits story.json + saves/checkpoints + assets
     POST /__editor/git/push              pushes the current branch
 """
 import datetime
@@ -33,6 +34,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORY = os.path.join(ROOT, 'story.json')
 AUTO = os.path.join(ROOT, 'saves', 'auto')
 CHECK = os.path.join(ROOT, 'saves', 'checkpoints')
+ASSETS = os.path.join(ROOT, 'assets')
+UPLOAD_EXT = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb'}
 KEEP_AUTO = 100
 TYPES = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -115,6 +118,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')  # always serve the latest modules / story.json
+        self.send_header('Accept-Ranges', 'bytes')
         super().end_headers()
 
     def reply(self, code, obj):
@@ -132,6 +136,43 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def ranged(self):
+        """Byte-range GET (206): browsers need it to seek in videos. Returns False to fall back to a full GET."""
+        fs_path = self.translate_path(self.path)
+        m = re.match(r'bytes=(\d*)-(\d*)$', self.headers.get('Range', '').strip())
+        if not m or not os.path.isfile(fs_path):
+            return False
+        size = os.path.getsize(fs_path)
+        if m.group(1):
+            start, end = int(m.group(1)), int(m.group(2)) if m.group(2) else size - 1
+        else:
+            start, end = max(0, size - int(m.group(2) or 0)), size - 1
+        end = min(end, size - 1)
+        if start > end:
+            self.send_response(416)
+            self.send_header('Content-Range', f'bytes */{size}')
+            self.end_headers()
+            return True
+        self.send_response(206)
+        self.send_header('Content-Type', self.guess_type(fs_path))
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.send_header('Content-Length', str(end - start + 1))
+        self.end_headers()
+        with open(fs_path, 'rb') as f:
+            f.seek(start)
+            left = end - start + 1
+            while left > 0:
+                chunk = f.read(min(1 << 20, left))
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+                left -= len(chunk)
+        return True
+
     def body(self):
         return self.rfile.read(int(self.headers.get('Content-Length', 0)))
 
@@ -142,6 +183,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         path, q = self.route()
         if not path.startswith('/__editor/'):
+            if self.headers.get('Range') and self.ranged():
+                return None
             return super().do_GET()
         try:
             if path == '/__editor/ping':
@@ -171,7 +214,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.reply(200, {'git': False})
                 br = git('branch', '--show-current')[1]
                 up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
-                ch = git('status', '--porcelain', '--', 'story.json', 'saves/checkpoints')[1]
+                ch = git('status', '--porcelain', '--', 'story.json', 'saves/checkpoints', 'assets')[1]
                 ahead = git('rev-list', '--count', '@{u}..HEAD')[1] if up[0] == 0 else ''
                 return self.reply(200, {'git': True, 'branch': br, 'upstream': up[1] if up[0] == 0 else '', 'ahead': ahead, 'changes': [l for l in ch.splitlines() if l.strip()]})
         except Exception as e:  # noqa: BLE001 - report to the editor
@@ -201,6 +244,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     p = os.path.join(CHECK, f'{stamp()}_{slug}.json')
                     write(p, body)
                     return self.reply(200, {'ok': True, 'file': os.path.relpath(p, ROOT).replace(os.sep, '/')})
+                if path == '/__editor/upload':
+                    name = os.path.basename(q.get('name', 'file'))
+                    stem, ext = os.path.splitext(name)
+                    ext = ext.lower().lstrip('.')
+                    if ext not in UPLOAD_EXT:
+                        raise ValueError(f'.{ext} files are not allowed')
+                    stem = re.sub(r'[^A-Za-z0-9_-]+', '-', stem).strip('-')[:60] or 'file'
+                    p, n = os.path.join(ASSETS, f'{stem}.{ext}'), 1
+                    body = self.body()
+                    while os.path.exists(p):
+                        with open(p, 'rb') as f:
+                            if f.read() == body:  # same file uploaded again: reuse it
+                                break
+                        n += 1
+                        p = os.path.join(ASSETS, f'{stem}-{n}.{ext}')
+                    else:
+                        write(p, body)
+                    return self.reply(200, {'ok': True, 'file': os.path.relpath(p, ROOT).replace(os.sep, '/')})
                 if path == '/__editor/delete':
                     p = safe_file(q.get('file'))
                     if not p.startswith(CHECK + os.sep):
@@ -209,7 +270,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.reply(200, {'ok': True})
                 if path == '/__editor/git/commit':
                     msg = (json.loads(self.body() or b'{}').get('message') or '').strip() or 'Update story'
-                    paths = ['story.json'] + (['saves/checkpoints'] if os.path.isdir(CHECK) and os.listdir(CHECK) else [])
+                    paths = ['story.json'] + [d for d, full in (('saves/checkpoints', CHECK), ('assets', ASSETS)) if os.path.isdir(full) and os.listdir(full)]
                     code, out = git('add', '--', *paths)
                     if code == 0:
                         code, out = git('commit', '-m', msg, '--', *paths)

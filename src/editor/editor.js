@@ -15,6 +15,7 @@ import { Inspector } from './inspector.js';
 import { TimelineView } from './timeline-view.js';
 import { SceneGizmos } from './scene-gizmos.js';
 import { Saves } from './saves.js';
+import { LayerTools } from './layer-tools.js';
 import { PARAMS, DRIVERS } from '../story.js';
 import { EASES, fmtTime, migrate } from '../timeline.js';
 
@@ -52,6 +53,7 @@ export class Editor {
     this.inspector = new Inspector(this, this.$right);
     this.timeline = new TimelineView(this, this.$tlwrap);
     this.gizmos = new SceneGizmos(this);
+    this.lt = new LayerTools(this);
     this.buildOutliner();
     this.bindKeys();
     this.setView('game');
@@ -149,6 +151,7 @@ export class Editor {
       add('Caption', () => this.addCaption(), 'Add a caption at the playhead'),
       add('Note', () => this.addNote(), 'Leave a note at the playhead (saved in story.json)'),
       add('Chapter', () => this.addChapter(), 'Start a new chapter at the playhead'),
+      btn('Layer ▾', (e) => { const r = e.currentTarget.getBoundingClientRect(); openMenu(r.left, r.top - 4, this.lt.addItems()).style.transform = 'translateY(-100%)'; }, { ico: 'image', title: 'Add an image, video, web page or HTML block (or drag files onto the viewport)' }),
       this.$addTrack,
       h('div', { class: 'sep' }),
       this.$snapBtn,
@@ -268,6 +271,7 @@ export class Editor {
       { label: 'Add caption at playhead', onClick: () => this.addCaption() },
       { label: 'Add note at playhead', onClick: () => this.addNote() },
       { label: 'Add chapter at playhead', onClick: () => this.addChapter() },
+      { label: 'Add layer (image, video, HTML, web page)', items: this.lt.addItems() },
       { label: 'Add track', items: this.trackItems() },
       '-',
       { label: 'Story length…', onClick: () => this.lengthDialog() },
@@ -340,7 +344,7 @@ export class Editor {
           { label: `Go to key (${fmtTime(k.t)})`, onClick: () => this.setTime(k.t) },
           tg.track.type === 'camera' ? { label: 'Set from Scene view', disabled: L, onClick: () => this.keyFromView(k) } : null,
           tg.track.type === 'camera' ? { label: 'Move key to playhead', disabled: L, onClick: () => { k.t = r4(this.time); this.commit(); } } : null,
-          tg.track.type === 'curve' ? { label: 'Ease to next', disabled: L, items: Object.keys(EASES).map((e) => ({ label: e, checked: (k.ease || 'smooth') === e, onClick: () => { k.ease = e; this.commit(); } })) } : null,
+          tg.track.type === 'curve' || tg.track.type === 'layer' ? { label: 'Ease to next', disabled: L, items: Object.keys(EASES).map((e) => ({ label: e, checked: (k.ease || 'smooth') === e, onClick: () => { k.ease = e; this.commit(); } })) } : null,
           '-', ...ccp(s), paste, '-', lockItem(s), del(s),
         ];
       }
@@ -387,6 +391,10 @@ export class Editor {
           { label: `Add note ${here}`, onClick: () => { this.setTime(at); this.addNote(); } },
           '-', ...this.trackMenuTail(t),
         ];
+      }
+      case 'layer': {
+        this.select({ kind: 'track', track: tg.track });
+        return this.lt.contextItems(tg.track);
       }
       case 'chapter': case 'note': {
         const s = { kind: tg.kind, item: tg.item }; sel(s);
@@ -659,11 +667,12 @@ export class Editor {
   // the track K / "+ Key" adds to: the selected camera / curve track, else the camera
   keyTrack() {
     const t = this.sel?.track;
-    return t && (t.type === 'camera' || t.type === 'curve') ? t : this.tl.tracks.find((x) => x.type === 'camera');
+    return t && (t.type === 'camera' || t.type === 'curve' || t.type === 'layer') ? t : this.tl.tracks.find((x) => x.type === 'camera');
   }
 
   addKey(track = this.keyTrack()) {
     if (!track) return this.toast('Select a camera or curve track first');
+    if (track.type === 'layer') return this.lt.addKey(track);
     if (track.locked) return this.toast(`“${track.label}” is locked`, true);
     const t = r4(this.time);
     let key = track.keys.find((k) => Math.abs(k.t - t) < 1e-3);
@@ -806,7 +815,7 @@ export class Editor {
     if (!this.copyable(s)) return;
     const item = structuredClone(s.item);
     delete item.locked;
-    this.clipboard = { kind: s.kind, type: s.track?.type, bind: s.track?.bind, item };
+    this.clipboard = { kind: s.kind, type: s.track?.type, bind: s.track?.bind, space: s.track?.space, layer: s.track?.type === 'layer' ? s.track.id : undefined, item };
     try { localStorage.setItem(CLIP_KEY, JSON.stringify(this.clipboard)); } catch { /* storage unavailable */ }
     navigator.clipboard?.writeText(JSON.stringify(this.clipboard, null, 1)).catch(() => {});
     this.toast('Copied');
@@ -823,10 +832,10 @@ export class Editor {
     const c = this.clipboard;
     if (!c) return;
     const x = r4(this.time), it = structuredClone(c.item);
-    const fits = (t) => t && t.type === c.type && (c.type !== 'curve' || t.bind === c.bind);
+    const fits = (t) => t && t.type === c.type && (c.type !== 'curve' || t.bind === c.bind) && (c.type !== 'layer' || (t.space ?? 'screen') === (c.space ?? 'screen'));
     if (c.kind === 'key') {
       const t = [into, this.sel?.track].find(fits) ?? this.tl.tracks.find(fits);
-      if (!t) return this.toast(`No ${c.type === 'curve' ? `“${c.bind}”` : c.type} track to paste into`, true);
+      if (!t) return this.toast(`No ${c.type === 'curve' ? `“${c.bind}”` : c.type === 'layer' ? 'matching layer (select one)' : c.type} track to paste into`, true);
       if (t.locked) return this.toast(`“${t.label}” is locked`, true);
       it.t = x;
       t.keys = t.keys.filter((k) => Math.abs(k.t - x) > 1e-3 || k.locked);
@@ -851,6 +860,7 @@ export class Editor {
   }
 
   duplicate() {
+    if (this.sel?.kind === 'track' && this.sel.track.type === 'layer') return this.lt.duplicate(this.sel.track);
     if (!this.copyable(this.sel)) return;
     const keep = this.clipboard;
     this.copy();
@@ -919,6 +929,7 @@ export class Editor {
 
   postUpdate() {
     this.gizmos.update();
+    this.lt.update();
     this.timeline.draw();
     const now = performance.now();
     if (now - (this.lastUi || 0) > 120) {
@@ -1014,6 +1025,8 @@ export class Editor {
     }
     const caps = tl.captions().filter((c) => x >= c.a && x <= c.b).map((c) => `"${c.title.replace(/\n/g, ' ')}"`);
     if (caps.length) lines.push(`caption on screen: ${caps.join(', ')}`);
+    const lay = this.lt.reference(x);
+    if (lay) lines.push(lay);
     const notes = d.notes.filter((n) => Math.abs(n.t - x) < 3 && n.text);
     if (notes.length) lines.push(`notes nearby: ${notes.map((n) => `t ${n.t}: "${n.text}"`).join(' · ')}`);
     const s = this.sel;

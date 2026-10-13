@@ -9,6 +9,8 @@ $story = Join-Path $root 'story.json'
 $savesDir = Join-Path $root 'saves'
 $autoDir = Join-Path $savesDir 'auto'
 $checkDir = Join-Path $savesDir 'checkpoints'
+$assetsDir = Join-Path $root 'assets'
+$uploadExt = @('png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb')
 $keepAuto = 100
 $utf8 = New-Object Text.UTF8Encoding($false)
 $types = @{
@@ -107,6 +109,26 @@ function Editor($ctx, [string]$path) {
   $req = $ctx.Request
   $q = $req.QueryString
   $body = ''
+  if ($path -eq '/__editor/upload') {
+    $name = [IO.Path]::GetFileName($q['name'])
+    $ext = [IO.Path]::GetExtension($name).TrimStart('.').ToLower()
+    if ($uploadExt -notcontains $ext) { throw ".$ext files are not allowed" }
+    $stem = ([IO.Path]::GetFileNameWithoutExtension($name) -replace '[^A-Za-z0-9_-]+', '-').Trim('-')
+    if ($stem.Length -gt 60) { $stem = $stem.Substring(0, 60) }
+    if (-not $stem) { $stem = 'file' }
+    $ms = New-Object IO.MemoryStream
+    $req.InputStream.CopyTo($ms)
+    $bytes = $ms.ToArray()
+    New-Item -ItemType Directory -Force $assetsDir | Out-Null
+    $file = Join-Path $assetsDir "$stem.$ext"; $n = 1
+    while (Test-Path $file) {
+      $old = [IO.File]::ReadAllBytes($file)
+      if ($old.Length -eq $bytes.Length -and [Linq.Enumerable]::SequenceEqual([byte[]]$old, [byte[]]$bytes)) { break }
+      $n++; $file = Join-Path $assetsDir "$stem-$n.$ext"
+    }
+    if (-not (Test-Path $file)) { [IO.File]::WriteAllBytes($file, $bytes) }
+    SendJson $ctx 200 @{ ok = $true; file = ($file.Substring($root.Length + 1) -replace '\\', '/') }; return
+  }
   if ($req.HttpMethod -eq 'POST') { $body = (New-Object IO.StreamReader($req.InputStream, $utf8)).ReadToEnd() }
   switch ($path) {
     '/__editor/ping' {
@@ -140,7 +162,7 @@ function Editor($ctx, [string]$path) {
       if (-not (HasGit)) { SendJson $ctx 200 @{ git = $false }; return }
       $br = (Git @('branch', '--show-current')).out
       $up = Git @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
-      $ch = (Git @('status', '--porcelain', '--', 'story.json', 'saves/checkpoints')).out
+      $ch = (Git @('status', '--porcelain', '--', 'story.json', 'saves/checkpoints', 'assets')).out
       $ahead = if ($up.code -eq 0) { (Git @('rev-list', '--count', '@{u}..HEAD')).out } else { '' }
       $changes = @($ch -split "`n" | Where-Object { $_.Trim() })
       SendJson $ctx 200 ([ordered]@{ git = $true; branch = $br; upstream = $(if ($up.code -eq 0) { $up.out } else { '' }); ahead = $ahead; changes = $changes }); return
@@ -178,6 +200,7 @@ function Editor($ctx, [string]$path) {
       if (-not $msg) { $msg = 'Update story' }
       $paths = @('story.json')
       if ((Test-Path $checkDir) -and (Get-ChildItem $checkDir).Count) { $paths += 'saves/checkpoints' }
+      if ((Test-Path $assetsDir) -and (Get-ChildItem $assetsDir).Count) { $paths += 'assets' }
       $r = Git (@('add', '--') + $paths)
       if ($r.code -eq 0) { $r = Git (@('commit', '-m', $msg, '--') + $paths) }
       SendJson $ctx $(if ($r.code -eq 0) { 200 } else { 400 }) ([ordered]@{ ok = ($r.code -eq 0); output = $r.out; error = $(if ($r.code -eq 0) { '' } else { $r.out }) }); return
@@ -207,6 +230,31 @@ try {
       }
       $ext = [IO.Path]::GetExtension($file).ToLower()
       $type = $types[$ext]; if (-not $type) { $type = 'application/octet-stream' }
+      $range = $ctx.Request.Headers['Range']
+      if ($range -match '^bytes=(\d*)-(\d*)$') {
+        # byte ranges (206): browsers need them to seek in videos
+        $size = (Get-Item -LiteralPath $file).Length
+        if ($Matches[1]) { $start = [long]$Matches[1]; $end = if ($Matches[2]) { [long]$Matches[2] } else { $size - 1 } }
+        else { $start = [Math]::Max(0, $size - [long]$Matches[2]); $end = $size - 1 }
+        $end = [Math]::Min($end, $size - 1)
+        $res = $ctx.Response
+        if ($start -gt $end) { $res.StatusCode = 416; $res.Headers['Content-Range'] = "bytes */$size"; $res.Close(); continue }
+        $len = $end - $start + 1
+        $res.StatusCode = 206; $res.ContentType = $type; $res.ContentLength64 = $len
+        $res.Headers['Content-Range'] = "bytes $start-$end/$size"; $res.Headers['Accept-Ranges'] = 'bytes'; $res.Headers['Cache-Control'] = 'no-store'
+        $fs = [IO.File]::OpenRead($file)
+        try {
+          $fs.Seek($start, 'Begin') | Out-Null
+          $buf = New-Object byte[] 1048576
+          while ($len -gt 0) {
+            $n = $fs.Read($buf, 0, [int][Math]::Min($buf.Length, $len))
+            if ($n -le 0) { break }
+            $res.OutputStream.Write($buf, 0, $n); $len -= $n
+          }
+        } catch { } finally { $fs.Close(); try { $res.OutputStream.Close() } catch { } }
+        continue
+      }
+      $ctx.Response.Headers['Accept-Ranges'] = 'bytes'
       Send $ctx 200 ([IO.File]::ReadAllBytes($file)) $type
     } catch {
       try { Send $ctx 500 ([Text.Encoding]::UTF8.GetBytes("$_")) 'text/plain' } catch { }

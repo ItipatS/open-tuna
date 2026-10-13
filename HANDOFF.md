@@ -62,6 +62,12 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
   delete, split / trim to playhead, mute, move track…), **locks** saved in story.json, undo/redo, and a save
   system: save + autosave, previous versions kept on every save, named checkpoints, Open / Restore (incl. git
   history), import/export, git commit/push with a public-site warning on main. Designer guide: `EDITOR.md`.
+- **Media layers**: images, videos (loop or scroll-scrubbed), HTML / text / buttons and web pages (iframes) as
+  screen overlays with keyframed motion and a parallax preset, or images / videos as planes in the 3D world.
+  Drag files onto the viewport; they're copied to `assets/`.
+- Fixed: the Scene camera "sticking" at the water surface; the sea from above is now see-through (seabed,
+  coral and fish visible) and its ripples / foam no longer tile visibly; the dev servers now support byte
+  ranges (videos couldn't seek).
 - story.json still carries the owner's first editor test: 12 "New chapter" markers and a Bloom curve key, all
   at 1:00 (they hit the old 0..1 wall). Owner to clean up (right-click ▸ Delete) or keep.
 - Fixed a **black-screen bug** on the live site: resizing the window wider than at load (or going fullscreen
@@ -89,8 +95,8 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 8. Mobile / non-WebGPU: error panel only (owner rule: no WebGL fallback).
 9. Later story chapters (TBD with the team) — new chapters = new tracks/drivers + chapters in `story.json`.
 10. Editor next steps (if the designer asks): keyframe more things (tuna counts / school position, tentacle look
-    params, colour grade), easing curve editor for keys, audio track for music sync, multi-select, and placing
-    GLB props from the editor (would need a scene-objects section in `story.json`).
+    params, colour grade), easing curve editor for keys, audio track for music sync, multi-select, placing GLB
+    props as world layers, layer masks / blend modes, text layers with brand fonts once brand assets arrive.
 
 ## Tuning knobs (where to change things)
 

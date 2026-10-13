@@ -185,3 +185,11 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 .ins .list .li.lk span:first-child { color: #ffcf8a; }
 .ins input:disabled, .ins textarea:disabled, .ins select:disabled { opacity: .55; }
 #ed-tlbar .ed-btn#ed-len, #ed-tlbar > .ed-btn:not([title*="Add"]) { font-variant-numeric: tabular-nums; }
+
+/* ---- media layers in the Game view: select, drag, scale, drop files */
+#captions.ed-pick .layer { cursor: move; }
+#captions.ed-pick .layer > iframe, #captions.ed-pick .layer > video { pointer-events: none; }
+#captions.ed-pick .layer:hover { outline: 1px dashed rgba(247, 143, 179, .7); outline-offset: 2px; }
+#captions .layer.ed-sel { outline: 2px solid #f78fb3; outline-offset: 2px; }
+.ed-handle { position: absolute; right: -9px; bottom: -9px; width: 14px; height: 14px; border-radius: 3px; background: #f78fb3; border: 2px solid #1b1e23; cursor: nwse-resize; pointer-events: auto; z-index: 2; }
+#ed-wrap.drop::after { content: "Drop to add as a layer"; position: absolute; inset: 10px; display: grid; place-items: center; border: 2px dashed #f78fb3; border-radius: 12px; background: rgba(247, 143, 179, .12); color: #fff; font-size: 16px; font-weight: 600; letter-spacing: .06em; pointer-events: none; z-index: 20; }

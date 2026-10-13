@@ -86,6 +86,32 @@ should grow smoothly"). Notes are saved in `story.json`, so a developer or Claud
 want. The reference says exactly where you are (time, chapter, which beats are active, camera keys,
 caption on screen, fps), so Claude knows which part of the code or which keys to edit.
 
+## Layers: images, video, HTML, web pages, parallax
+
+Add pictures, videos, text / buttons (HTML) or whole web pages on top of the scene, or put pictures and
+videos *into* the 3D world.
+
+- **Add:** drag files from your computer onto the viewport (Game view: placed where you drop them; Scene
+  view: placed in 3D). Or use **Layer ▾** in the timeline bar: *from file*, *from a URL*, *web page (iframe)*,
+  *HTML / text / button block*, or *in the 3D world*. Files are copied into the project's `assets/` folder.
+- **Each layer is a pink bar on the timeline.** Drag it to change *when* it shows, and drag its ends to change
+  start / end. *Fade* in the Inspector sets how long it fades in and out.
+- **Move it:** in the **Game** view, drag the layer itself; drag the pink corner handle to scale it.
+  3D layers: in the **Scene** view, click the picture and drag the arrows.
+- **Animate it:** a layer with one key just sits there. Press **K** (or *Key at playhead*) to add keys, then drag
+  the layer at different moments. Once it has 2+ keys, dragging at a new moment adds a key automatically.
+  Each key holds position, scale, rotation and opacity.
+- **Parallax:** right-click a layer ▸ **Make parallax…** and pick a direction and a depth (far background moves
+  a little, foreground a lot). Give several layers different depths for a parallax stack as the visitor scrolls.
+- **Stacking:** *Stack order* in the Inspector (captions are at 10; higher goes over them). Right-click ▸
+  Bring forward / Send backward.
+- **Video:** loops while visible, muted. Tick **Scrub with story** to make the video follow the scroll
+  (scrolling forwards / back plays it forwards / back).
+- **Web pages / buttons:** tick **Clickable** so visitors can click links, buttons or use the page. Scrolling
+  pauses while the mouse is over a clickable layer. Some websites refuse to be shown inside another site; your
+  own `.html` files always work.
+- On screen, sizes are in **% of the view**, so layers scale with the window and phone screens.
+
 ## Saving: you can't really lose work
 
 | What | How |
@@ -97,7 +123,7 @@ caption on screen, fps), so Claude knows which part of the code or which keys to
 | **Open / Restore** | **Ctrl+O** lists the saved file, checkpoints, previous versions, every version in **git history**, and the browser draft. Click Load. Loading can be undone with Ctrl+Z. |
 | **Browser draft** | If the browser closes, your unsaved work is offered back next time you open the editor. |
 | **Import / Export** | File ▸ Import / Export a story JSON, to send one by chat or try someone else's. |
-| **Git** | File ▸ **Commit to git…** commits `story.json` and checkpoints (never code) with your message. Tick *Also push* to upload to GitHub. Pushing the **main** branch updates the **public** website, and the dialog warns you about that. |
+| **Git** | File ▸ **Commit to git…** commits `story.json`, checkpoints and your `assets/` files (never code) with your message. Tick *Also push* to upload to GitHub. Pushing the **main** branch updates the **public** website, and the dialog warns you about that. |
 
 Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps).
 
@@ -110,7 +136,7 @@ Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps).
 
 ## What the editor doesn't do (yet)
 
-It edits the story's **timing, camera, captions and parameters**. It can't add new 3D models, or change
+It edits the story's **timing, camera, captions, parameters and media layers**. It can't add new 3D models, or change
 how the water 50, fish or ocean *look* or behave. Those are code changes: leave a note and ask a developer
 or Claude. Past the original 1:00, nothing new happens in the scene until you add keys and captions
 there. New *kinds* of beats (a new creature moment, a new effect) need code first.

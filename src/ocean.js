@@ -30,14 +30,15 @@ export const WAVES = (() => {
   return out;
 })();
 
+// fragment-only ripples: many waves with irregular lengths and wide directions, so no pattern repeats visibly
 const DETAIL = (() => {
   const r = rng(99), out = [];
-  let L = 7;
-  for (let i = 0; i < 5; i++) {
-    const a = WIND + (r() - 0.5) * 2.4;
+  let L = 9;
+  for (let i = 0; i < 12; i++) {
+    const a = WIND + (r() - 0.5) * 3.4;
     const k = (Math.PI * 2) / L;
-    out.push({ dx: Math.cos(a), dz: Math.sin(a), L, k, w: Math.sqrt(G * k), A: L * 0.005, phase: r() * 6.283 });
-    L *= 0.66;
+    out.push({ dx: Math.cos(a), dz: Math.sin(a), L, k, w: Math.sqrt(G * k), A: L * 0.0042, phase: r() * 6.283 });
+    L *= 0.7 + r() * 0.12;
   }
   return out;
 })();
@@ -155,13 +156,15 @@ export function createOcean() {
 
       // two-tone body: bright turquoise looking down, deep teal toward grazing angles
       const body = mix(vec3(0.004, 0.09, 0.16), vec3(0.02, 0.42, 0.5), smoothstep(0.05, 0.75, NdV)).mul(lit);
-      // screen-space refraction keeps fish just under the surface visible
-      const ruv = clamp(screenUV.add(Nf.xz.mul(0.015).div(max(d.mul(0.05), 1))), 0.001, 0.999);
+      // clear tropical water: refract what's below (seabed, coral, fish) and absorb it per channel along the
+      // path — red dies first, so depth reads turquoise — then add the body colour as in-scattering
+      const ruv = clamp(screenUV.add(Nf.xz.mul(0.03).div(max(d.mul(0.04), 1))), 0.001, 0.999);
       const behind = viewportTexture(ruv, null, sceneCopy).rgb;
       const sceneZ = perspectiveDepthToViewZ(viewportDepthTexture(ruv).x, cameraNear, cameraFar);
       const thick = max(positionView.z.sub(sceneZ), 0);
-      const see = exp(thick.mul(-0.22)).mul(smoothstep(0.1, 0.5, NdV));
-      const water = mix(body, behind, see.mul(0.8));
+      const trans = exp(vec3(0.32, 0.06, 0.045).mul(thick).negate());
+      const seen = behind.mul(trans).add(body.mul(float(1).sub(trans.g)));
+      const water = mix(body, seen, smoothstep(0.04, 0.4, NdV).mul(float(1).sub(smoothstep(250, 900, d))));
 
       // crest glow: wave tops light up turquoise / warm when the sun is behind them
       const crest = smoothstep(-0.1, 0.9, vHeight);
@@ -174,7 +177,10 @@ export function createOcean() {
       const glint = smoothstep(0.9975, 0.9992, rl).mul(26);
 
       // crisp foam: thresholded pattern on steep crests
-      const pat = texture(causticTex, vWorld.xz.mul(0.07).add(vec2(t.mul(0.012), t.mul(0.006)))).r;
+      // two caustic layers at unrelated scales / angles so the foam texture never visibly tiles
+      const fxz = vWorld.xz;
+      const pat = texture(causticTex, fxz.mul(0.07).add(vec2(t.mul(0.012), t.mul(0.006)))).r
+        .mul(texture(causticTex, vec2(fxz.x.mul(0.8).sub(fxz.y.mul(0.6)), fxz.x.mul(0.6).add(fxz.y.mul(0.8))).mul(0.023).sub(vec2(t.mul(0.004), 0))).r.mul(1.6).add(0.2));
       const foamRaw = float(1).sub(smoothstep(0.2, 0.7, vJac)).mul(smoothstep(0.1, 0.5, vHeight));
       const foam = smoothstep(0.45, 0.55, foamRaw.add(pat.mul(0.6)).sub(0.35)).mul(float(1).sub(smoothstep(150, 600, d)));
       const foamCol = vec3(0.95, 0.98, 1.0).mul(lit);

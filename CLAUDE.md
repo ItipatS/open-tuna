@@ -63,13 +63,17 @@ Browser: current Chrome/Edge (WebGPU). The page shows an error panel if WebGPU i
 ```
 index.html          #captions layer (filled from story.json), scroll spacer, lab panel, import map, fonts
 story.json          THE STORY DATA: camera keys, captions, sun curves, beat timings, chapters, notes, settings (edited by ?edit)
-src/timeline.js     Timeline: story.json model + evaluation (Hermite camera, eased curves, clips/gates, captions) + serializer
+src/timeline.js     Timeline: story.json model + evaluation (Hermite camera, eased curves, clips/gates, captions, evalKeys) + serializer
+src/layers.js       Layers: media layer tracks -> DOM overlays (image / video / HTML / iframe in #captions) or 3D planes (image /
+                    video textures); fades, keyframed x/y/s/r/o or pos; scrubbed videos; incremental rebuild by track id
 src/editor/         ?edit only: editor.js (shell, menus, play mode, locks, clipboard, context menus, undo, Copy ref),
                     saves.js (save / autosave / checkpoints / restore / import-export / git), timeline-view.js (canvas
                     timeline), inspector.js, scene-gizmos.js (camera path, key balls, TransformControls), menu.js
-                    (context menus, drop-downs, dialogs), editor.css, dom.js
+                    (context menus, drop-downs, dialogs), layer-tools.js (add / drop / drag / scale / auto-key / parallax
+                    for layers), editor.css, dom.js
 tools/serve.py      dev server: no-store caching + editor save system endpoints (tools/serve.ps1 = same, PowerShell; keep in sync)
 saves/              editor-made: checkpoints/ (named, committed with the story) and auto/ (previous versions, gitignored)
+assets/             editor-uploaded media for layers (images, videos, .html pages); referenced as "assets/x.png" 
 src/main.js         bootstrap, asset loading/placement, post-processing (underwater + sky god rays), UI, main loop
 src/story.js        Story: progress -> evaluates the timeline into camera, sun, params, school, tentacles, tuna gates,
                     captions; PARAMS (curve-bindable) + DRIVERS (clip-bindable) registries; flightTargets()
@@ -140,7 +144,16 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
   won't change it — respect it when editing story.json by hand unless asked) and tracks `mute: true`.
   `Timeline.serialize()` writes one key/clip per line, numbers rounded to 4 dp; segment lookup is a binary search.
 - `Story` owns a separate shot camera `story.cam` (+ `story.look`); `main.js` copies it into the render camera
-  unless the editor's Scene view is active. Captions are DOM nodes rebuilt when `timeline.version` changes.
+  unless the editor's Scene view is active. Captions are DOM nodes (in `#captions > .caps`, z-index 10) rebuilt
+  when `timeline.version` changes; story time is `story.x`.
+- **Layers** (`layer` tracks, `layers.js`): `{id, kind image|video|html|iframe, src | html, space screen|world, a, b,
+  fade, z, w (% view or m), h, fit, interactive, loop, scrub, rate, billboard, keys[{t, ease, x,y | pos[3], s, r, o}]}`.
+  Screen layers are `.layer` divs in `#captions > .lays` positioned in % with container units (cqw/cqh) and
+  `z-index = z` (captions are 10); `pointer-events` only when `interactive`. World layers are `MeshBasicNodeMaterial`
+  planes (renderOrder 15, created after the image/video loads, `fog:false`) in `layers.group`. Items are keyed by
+  track id and only rebuilt when kind/space/src/html change, so videos / iframes don't reload on edits. A
+  scrubbed video sets `currentTime = (x − a)·rate` — needs HTTP range support (tools/serve.* have it).
+  `main.js` calls `layers.update(story.x, camera)` every frame.
 - Editor (`?edit`, dynamically imported so the site doesn't load it): playhead `editor.time` (s) → pins
   `story.forceP = time / duration`; Play advances in real time × play speed (no smoothing). Edits mutate
   `timeline.data` directly → `editor.changed()` (live) / `editor.commit()` (undo snapshot = serialized JSON).
@@ -153,8 +166,10 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
   2 s after the last edit, per-browser setting). Checkpoints `POST /__editor/checkpoint?name=` →
   `saves/checkpoints/`. Restore lists `GET /__editor/list` (checkpoints, autos, `git log -- story.json`) and loads
   with `GET /__editor/load?file=|?git=` — loading is one undo step. Git: `git/status`, `git/commit` (only
-  `story.json` + `saves/checkpoints`), `git/push` (`-u origin HEAD` if no upstream; `GIT_TERMINAL_PROMPT=0`).
-  The server only reads/deletes `story.json` and `saves/**/*.json`.
+  `story.json` + `saves/checkpoints` + `assets`), `git/push` (`-u origin HEAD` if no upstream; `GIT_TERMINAL_PROMPT=0`).
+  Uploads: `POST /__editor/upload?name=` → `assets/<slug>.<ext>` (whitelisted extensions, never overwrites; an
+  identical re-upload reuses the file). The server only reads/deletes `story.json` and `saves/**/*.json`; both
+  servers answer byte-range GETs (206) — without them Chrome can't seek videos.
   Hooks it uses from `main.js`: `hidden` set (outliner), `setTimeScale` (sim speed / freeze), `capture()`
   (PNG of the next frame), `fpsInfo`, `onResize` (render size = `editor.viewSize()`), `setTunaCount`.
 - "Copy ref" (`editor.reference()`) produces a text block like `@ 0:37.20 (t=37.20 s of 60 s, p=0.620), chapter
@@ -271,7 +286,9 @@ Orientation rule: if a creature swims backwards/sideways, fix it with `CONFIG` i
 - `main.js` has a `G` (loaded GLTFs) — don't shadow it.
 - The HDR sun disk is ~40× the sky; anything screen-space that samples it must clamp or it whites out the frame.
 - Plain `python -m http.server` refuses/resets connections under the page's parallel module + GLB burst (listen
-  backlog 5). `tools/serve.py` raises it to 128; use that.
+  backlog 5) and has no Range support (videos can't seek). `tools/serve.py` fixes both; use that.
+- Waterline: the camera is kept out of a ±0.35 m band around the surface, pushed *through* it in the direction of
+  travel (`camY0` in the main loop). Pushing it back to the side it came from made the Scene camera "stick".
 - **three r180 viewport-texture resize bug** (patched at the top of `main.js`): a `viewportTexture` copy used
   inside a render target is a clone sharing its `image` with the original, so after the canvas grows it never
   reallocates its GPU texture → out-of-bounds copy → every frame dropped (**black screen** after resize /
@@ -280,10 +297,12 @@ Orientation rule: if a creature swims backwards/sideways, fix it with `CONFIG` i
 - In story mode the canvas has `pointer-events:none` (so the page scrolls); pointer listeners are on `window`.
 
 ## Ocean look (`ocean.js`, stylised)
-- Above: two-tone body (deep teal at grazing → turquoise looking down), light screen-space refraction
-  (fish under the surface), Fresnel sky reflection *without* per-pixel clouds, crest glow (turquoise, warm
-  when backlit), soft sun sheen + crisp star glints, thresholded foam; only 5 small detail waves, far normals
-  calmed from 120 m.
+- Above: two-tone body (deep teal at grazing → turquoise looking down), **clear water**: screen-space refraction of
+  what's below (seabed, corals, fish) with per-channel Beer–Lambert absorption along the view-ray thickness
+  (`exp(-(0.32, 0.06, 0.045)·d)`, red dies first) + body colour as in-scatter; Fresnel sky reflection *without*
+  per-pixel clouds, crest glow (turquoise, warm when backlit), soft sun sheen + crisp star glints, thresholded foam
+  (two caustic samples at unrelated scales/angles so it doesn't tile); 12 irregular fragment ripple waves, far
+  normals calmed from 120 m. Underwater-only systems (seagrass, reef fish, jellies…) are still hidden above water.
 - Below: widened, soft-edged Snell's window (eta 1.18 instead of 1.333, `smoothstep` on the refraction
   discriminant), bright rim at the window edge, turquoise rippled mirror (TIR) outside it.
 

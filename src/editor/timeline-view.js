@@ -8,10 +8,11 @@ import { PARAMS } from '../story.js';
 const HEAD = 210; // track header width (px)
 const CH = 20; // chapter band height
 const RULER = 48; // ruler height (chapter band + ticks + notes)
-const ROW = { camera: 32, captions: 32, curve: 30, clip: 26 };
+const ROW = { camera: 32, captions: 32, curve: 30, clip: 26, layer: 30 };
 const PERF_H = 34;
-const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f' };
-const TYPE = { camera: 'CAM', captions: 'TXT', curve: 'CRV', clip: 'CLIP' };
+const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', layer: '#f78fb3', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f' };
+const TYPE = { camera: 'CAM', captions: 'TXT', curve: 'CRV', clip: 'CLIP', layer: 'LYR' };
+const KIND = { image: 'IMG', video: 'VID', html: 'HTML', iframe: 'WEB' };
 const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
@@ -119,6 +120,7 @@ export class TimelineView {
       else if (r.t.type === 'curve') this.drawCurve(r.t, y, r.h);
       else if (r.t.type === 'clip') this.drawClip(r.t, y, r.h);
       else if (r.t.type === 'captions') this.drawCaptions(r.t, y, r.h);
+      else if (r.t.type === 'layer') this.drawLayer(r.t, y, r.h);
       ctx.restore();
       this.drawHeader(r, y, selTrack);
     }
@@ -269,6 +271,31 @@ export class TimelineView {
     }
   }
 
+  drawLayer(t, y, hgt) {
+    const { ctx, ed } = this, c = COL.layer, cy = y + hgt / 2;
+    const x0 = this.X(t.a), x1 = this.X(t.b);
+    const selected = ed.sel?.kind === 'track' && ed.sel.track === t;
+    this.bar(x0, x1, y + 4, hgt - 8, c, selected, t.locked);
+    // fades
+    const f = t.fade ?? 2.4, fw = Math.min((x1 - x0) / 2, f * this.k);
+    ctx.fillStyle = `${c}30`;
+    ctx.beginPath(); ctx.moveTo(x0, y + hgt - 4); ctx.lineTo(x0 + fw, y + 4); ctx.lineTo(x0, y + 4); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x1, y + hgt - 4); ctx.lineTo(x1 - fw, y + 4); ctx.lineTo(x1, y + 4); ctx.fill();
+    let tx = Math.max(x0, HEAD) + 6;
+    ctx.fillStyle = '#fbd3e3';
+    ctx.font = '600 9px Inter, system-ui, sans-serif';
+    const tag = `${KIND[t.kind] || ''}${t.space === 'world' ? ' 3D' : ''}`;
+    if (x1 - x0 > 60) { ctx.fillText(tag, tx, cy); tx += ctx.measureText(tag).width + 6; }
+    ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
+    if (x1 - x0 > 70) ctx.fillText(this.ellipsis(t.label || '', Math.min(x1, this.W) - tx - 6), tx, cy);
+    if (t.keys.length > 1) {
+      for (const k of t.keys) {
+        const s = ed.sel?.item === k, kx = this.X(k.t);
+        this.diamond(kx, cy, s ? 6.5 : 5, s ? '#ffffff' : k.locked ? '#9a7d88' : c, s ? COL.play : '#2a0d18');
+      }
+    }
+  }
+
   drawPerf(y, hgt) {
     const { ctx, ed } = this, N = ed.perf.length, step = 0.5, w = Math.max(1, this.k * step);
     const i0 = Math.max(0, Math.floor(this.v0 / step)), i1 = Math.min(N - 1, Math.ceil(this.v1 / step));
@@ -383,12 +410,12 @@ export class TimelineView {
     if (r.perf) return { type: x < HEAD ? 'perfHead' : 'ruler' };
     const t = r.t;
     if (x < HEAD) return { type: 'header', track: t, mute: x > HEAD - 27, lock: x > HEAD - 48 && x <= HEAD - 27 };
-    if (t.keys) {
+    if (t.keys && (t.type !== 'layer' || t.keys.length > 1)) {
       let best = null, bd = 8;
       for (const k of t.keys) { const d = Math.abs(this.X(k.t) - x); if (d < bd) { bd = d; best = k; } }
       if (best) return { type: 'key', track: t, item: best };
     }
-    if (t.type === 'clip') {
+    if (t.type === 'clip' || t.type === 'layer') {
       const x0 = this.X(t.a), x1 = this.X(t.b);
       if (Math.abs(x - x0) < 6) return { type: 'edgeA', track: t, item: t };
       if (Math.abs(x - x1) < 6) return { type: 'edgeB', track: t, item: t };
@@ -415,7 +442,7 @@ export class TimelineView {
     for (const n of tl.data.notes) if (n !== self) cand.push(n.t);
     for (const tr of tl.tracks) {
       if (tr.keys) for (const k of tr.keys) if (k !== self) cand.push(k.t);
-      if (tr.type === 'clip' && tr !== self) cand.push(tr.a, tr.b);
+      if ((tr.type === 'clip' || tr.type === 'layer') && tr !== self) cand.push(tr.a, tr.b);
       if (tr.clips) for (const c of tr.clips) if (c !== self) cand.push(c.a, c.b);
     }
     let best = null, bd = 7 / this.k;
@@ -471,6 +498,7 @@ export class TimelineView {
         const it = hit.item;
         ed.select(hit.track.type === 'captions' ? { kind: 'clip', track: hit.track, item: it } : { kind: 'track', track: hit.track });
         this.drag = this.locked(hit.track, hit.track.type === 'captions' ? it : null) ? { type: 'locked', x } : { type: hit.type, item: it, off: t, a: it.a, b: it.b };
+        if (hit.type === 'body' && it.type === 'layer') this.drag.keys0 = it.keys.map((k) => k.t); // a layer's keys move with it
         break;
       }
       case 'lane':
@@ -525,6 +553,7 @@ export class TimelineView {
       const sa = this.snap(a, e, d.item), sb = this.snap(a + w, e, d.item);
       a = Math.abs(sa - a) <= Math.abs(sb - (a + w)) ? sa : sb - w;
       d.item.a = clamp(a, 0, D - w); d.item.b = d.item.a + w;
+      if (d.keys0) d.item.keys.forEach((k, i) => { k.t = Math.round((d.keys0[i] + d.item.a - d.a) * 1e4) / 1e4; });
       ed.changed();
     }
   }
@@ -546,6 +575,7 @@ export class TimelineView {
     if (!hit) return;
     const t = this.snap(this.T(x), e);
     const at = { x: e.clientX, y: e.clientY };
+    if (hit.track?.type === 'layer' && /edge|body/.test(hit.type)) return ed.contextMenu(at.x, at.y, { kind: 'layer', track: hit.track });
     const map = {
       key: { kind: 'key', track: hit.track, item: hit.item },
       edgeA: { kind: 'clip', track: hit.track, item: hit.item },
@@ -570,7 +600,7 @@ export class TimelineView {
     if (y < RULER && x > HEAD) { ed.setTime(t); ed.addNote(); return; }
     if (hit.type === 'lane' || hit.type === 'body') {
       const tr = hit.track;
-      if (tr.type === 'camera' || tr.type === 'curve') { ed.setTime(t); ed.addKey(tr); }
+      if (tr.type === 'camera' || tr.type === 'curve' || tr.type === 'layer') { ed.setTime(t); ed.addKey(tr); }
       if (tr.type === 'captions' && hit.type === 'lane') { ed.setTime(t); ed.addCaption(); }
     }
   }

@@ -36,8 +36,12 @@ export class Inspector {
         btn('Unlock', () => (own?.locked ? ed.toggleLock() : ed.select({ kind: 'track', track: s.track })), { title: own?.locked ? 'L' : 'Select the track to unlock it' })));
     }
     if (!s) this.project(el);
-    else if (s.kind === 'track') this.track(el, s.track);
-    else if (s.kind === 'key') s.track.type === 'camera' ? this.cameraKey(el, s.track, s.item) : this.curveKey(el, s.track, s.item);
+    else if (s.kind === 'track') s.track.type === 'layer' ? this.layer(el, s.track) : this.track(el, s.track);
+    else if (s.kind === 'key') {
+      if (s.track.type === 'camera') this.cameraKey(el, s.track, s.item);
+      else if (s.track.type === 'layer') this.layerKey(el, s.track, s.item);
+      else this.curveKey(el, s.track, s.item);
+    }
     else if (s.kind === 'clip') this.caption(el, s.track, s.item);
     else if (s.kind === 'chapter') this.chapter(el, s.item);
     else if (s.kind === 'note') this.note(el, s.item);
@@ -204,6 +208,83 @@ export class Inspector {
     }
     this.sec(el, 'Track');
     this.buttons(el, btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete track', () => ed.deleteSelection(), { cls: 'danger' }));
+  }
+
+  layer(el, t) {
+    const { ed } = this, lt = ed.lt, world = t.space === 'world';
+    const KINDS = { image: 'Image', video: 'Video', html: 'HTML / text', iframe: 'Web page' };
+    this.header(el, t.label || 'Layer', `${KINDS[t.kind] || t.kind} layer · ${world ? 'in the 3D world' : 'on screen'} · ${fmtTime(t.a)} → ${fmtTime(t.b)}`);
+    el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
+    if (t.kind === 'html') el.append(this.text('HTML', () => t.html, (v) => { t.html = v; }, { area: true, placeholder: '<h2>Title</h2><p>Text</p> — any HTML; style with inline CSS' }));
+    else el.append(this.text(t.kind === 'iframe' ? 'Page URL' : 'File / URL', () => t.src, (v) => { t.src = v; }));
+    this.buttons(el,
+      t.kind !== 'html' ? btn('Replace file…', () => lt.replace(t)) : null,
+      t.src ? this.free(btn('Open ↗', () => window.open(t.src, '_blank'))) : null,
+    );
+    if (t.kind === 'image' || t.kind === 'video') {
+      el.append(this.select('Where', { screen: 'On screen (overlay)', world: 'In the 3D world' }, () => t.space || 'screen', (v) => {
+        t.space = v;
+        t.w = v === 'world' ? 8 : 30;
+        t.keys = t.keys.map(({ x, y, pos, ...k }) => (v === 'world' ? { ...k, pos: pos ?? lt.worldSpot() } : { ...k, x: x ?? 50, y: y ?? 50 }));
+      }));
+    }
+    el.append(this.check('Lock', () => t.locked, (v) => { if (v) t.locked = true; else delete t.locked; }, { free: true }));
+    el.append(this.check('Hide (mute)', () => t.mute, (v) => { if (v) t.mute = true; else delete t.mute; }));
+
+    this.sec(el, 'Timing');
+    el.append(this.time('Start', () => t.a, (v) => { t.a = Math.min(v, t.b - 0.1); }));
+    el.append(this.time('End', () => t.b, (v) => { t.b = Math.max(v, t.a + 0.1); }));
+    el.append(this.num('Fade (s)', () => t.fade ?? 2.4, (v) => { t.fade = v; }, { step: 0.1, min: 0, max: 30, dec: 2 }));
+
+    this.sec(el, world ? 'Size (3D)' : 'Size & stacking');
+    if (world) {
+      el.append(this.num('Width (m)', () => t.w ?? 8, (v) => { t.w = v; }, { step: 0.1, min: 0.1, max: 500, dec: 2 }));
+      el.append(this.check('Face camera', () => t.billboard !== false, (v) => { if (v) delete t.billboard; else t.billboard = false; }));
+    } else {
+      el.append(this.num('Width (% view)', () => t.w ?? 30, (v) => { t.w = v; }, { step: 0.5, min: 1, max: 400, dec: 1 }));
+      el.append(this.num('Height (% view)', () => t.h ?? 0, (v) => { if (v > 0) t.h = v; else delete t.h; }, { step: 0.5, min: 0, max: 400, dec: 1 }));
+      el.append(this.num('Stack order', () => t.z ?? 5, (v) => { t.z = Math.round(v); }, { step: 1, min: -50, max: 99, dec: 0 }));
+      if (t.kind === 'image' || t.kind === 'video') el.append(this.select('Fit', { '': 'Natural', contain: 'Contain', cover: 'Cover (crop)', fill: 'Stretch' }, () => t.fit || '', (v) => { if (v) t.fit = v; else delete t.fit; }));
+      el.append(this.check('Clickable', () => t.interactive, (v) => { if (v) t.interactive = true; else delete t.interactive; }));
+      el.append(h('div', { class: 'hint' }, 'Height 0 = automatic. Captions are at stack order 10 — higher goes over them. Clickable lets visitors use links / buttons / web pages (scrolling stops while the mouse is over it).'));
+    }
+    if (t.kind === 'video') {
+      this.sec(el, 'Video');
+      el.append(this.check('Loop', () => t.loop !== false, (v) => { if (v) delete t.loop; else t.loop = false; }));
+      el.append(this.check('Scrub with story', () => t.scrub, (v) => { if (v) t.scrub = true; else delete t.scrub; }));
+      el.append(this.num('Speed', () => t.rate ?? 1, (v) => { t.rate = v; }, { step: 0.05, min: 0.05, max: 8, dec: 2 }));
+      el.append(h('div', { class: 'hint' }, 'Scrub with story: the video frame follows the story time, so scrolling plays it (forwards and back). Videos are muted.'));
+    }
+
+    this.sec(el, `Motion keys (${t.keys.length})`);
+    el.append(this.readout('Now', () => {
+      const k = ed.app.layers.state(t, ed.time);
+      return world ? `[${k.pos.map((v) => v.toFixed(1)).join(', ')}] · ×${k.s.toFixed(2)} · ${Math.round(k.o * 100)}%`
+        : `x ${k.x.toFixed(1)}% · y ${k.y.toFixed(1)}% · ×${k.s.toFixed(2)} · ${Math.round(k.o * 100)}%`;
+    }));
+    this.list(el, t.keys, (k) => [`${k.locked ? '🔒 ' : ''}${fmtTime(k.t)}`, world ? `[${(k.pos ?? []).map((v) => +v.toFixed(1)).join(', ')}]` : `${+(k.x ?? 50).toFixed(1)}%, ${+(k.y ?? 50).toFixed(1)}% ×${+(k.s ?? 1).toFixed(2)}`], (k) => { ed.select({ kind: 'key', track: t, item: k }); ed.setTime(k.t); });
+    this.buttons(el, btn('Key at playhead', () => lt.addKey(t), { ico: 'plus', title: 'K' }), world ? null : btn('Make parallax…', () => lt.parallaxDialog(t)));
+    el.append(h('div', { class: 'hint' }, world
+      ? 'Move it with the arrows in the Scene view. With 2+ keys, moving it at a new moment adds a key there (auto-key).'
+      : 'Drag it in the Game view to move it, drag the corner handle to scale. With one key it just moves; with 2+ keys, dragging at a new moment adds a key there (auto-key).'));
+    this.sec(el, 'Layer');
+    this.buttons(el, this.free(btn('Duplicate', () => lt.duplicate(t))), btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete layer', () => ed.deleteSelection(), { cls: 'danger' }));
+  }
+
+  layerKey(el, t, k) {
+    const { ed } = this, world = t.space === 'world';
+    this.header(el, `${t.label} — key`, `layer key · ${fmtTime(k.t)}`);
+    el.append(this.time('Time (s)', () => k.t, (v) => { k.t = v; }));
+    if (world) el.append(this.vec('Position xyz', () => (k.pos ??= [0, 8, 10])));
+    else {
+      el.append(this.num('X (% view)', () => k.x ?? 50, (v) => { k.x = v; }, { step: 0.5, min: -300, max: 400, dec: 2 }));
+      el.append(this.num('Y (% view)', () => k.y ?? 50, (v) => { k.y = v; }, { step: 0.5, min: -300, max: 400, dec: 2 }));
+    }
+    el.append(this.num('Scale', () => k.s ?? 1, (v) => { k.s = v; }, { step: 0.01, min: 0.01, max: 50, dec: 3 }));
+    if (!world || t.billboard === false) el.append(this.num('Rotation (°)', () => k.r ?? 0, (v) => { k.r = v; }, { step: 1, min: -3600, max: 3600, dec: 1 }));
+    el.append(this.num('Opacity', () => k.o ?? 1, (v) => { k.o = v; }, { step: 0.01, min: 0, max: 1, dec: 2 }));
+    el.append(this.select('Ease to next', Object.fromEntries(Object.keys(EASES).map((e) => [e, e])), () => k.ease || 'smooth', (v) => { k.ease = v; }));
+    this.buttons(el, this.free(btn('Go to', () => ed.setTime(k.t))), this.free(btn('Layer', () => ed.select({ kind: 'track', track: t }))), btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
   }
 
   curveKey(el, t, k) {

@@ -18,6 +18,7 @@ import { createSeagrass } from './vegetation.js';
 import { Director } from './director.js';
 import { Story, flightTargets } from './story.js';
 import { Timeline } from './timeline.js';
+import { Layers } from './layers.js';
 import { createWaterTentacles } from './tentacles.js';
 
 // Per-model orientation overrides (flip = the artist's pivot/forward axis points the wrong way).
@@ -393,6 +394,7 @@ async function main() {
     'water.clarity': (v) => { U.fogDensity.value = THREE.MathUtils.lerp(0.03, 0.006, v); },
   };
   const story = LAB ? null : new Story({ tuna, tentacles, timeline, apply: applyParam, captionLayer: $('captions') });
+  const layers = story ? new Layers({ timeline, root: $('captions'), scene }) : null; // images / video / HTML / iframes
   // page length grows with the story (meta.scrollPerSecond vh per second of story)
   const fitScroll = () => { if (story) $('scrollspace').style.height = `${Math.round(timeline.duration * timeline.meta.scrollPerSecond)}vh`; };
   fitScroll();
@@ -464,12 +466,12 @@ async function main() {
   let timeScale = 1, captureCb = null;
   const fpsInfo = { fps: 60, res: 1 };
 
-  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles, timeline };
+  window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles, timeline, layers };
 
   if (EDIT) {
     const { Editor } = await import('./editor/editor.js');
     editor = new Editor({
-      renderer, scene, camera, controls, story, timeline, tuna, opts, buildPost, onResize, hidden, fpsInfo, setTunaCount,
+      renderer, scene, camera, controls, story, timeline, layers, tuna, opts, buildPost, onResize, hidden, fpsInfo, setTunaCount,
       objects: [
         { group: 'World', name: 'Sky', obj: sky }, { group: 'World', name: 'Ocean surface', obj: ocean }, { group: 'World', name: 'Seabed', obj: seabed },
         { group: 'World', name: 'Corals', obj: corals }, { group: 'World', name: 'Seagrass', obj: seagrass },
@@ -538,7 +540,7 @@ async function main() {
   }
 
   // ------------------------------------------------------------------ loop
-  let last = performance.now(), t = 0;
+  let last = performance.now(), t = 0, camY0 = null;
   let fpsFrames = 0, fpsTime = 0;
   const tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), rightV = new THREE.Vector3();
 
@@ -598,9 +600,16 @@ async function main() {
     const minY = seabedHeight(camera.position.x, camera.position.z) + 1;
     if (camera.position.y < minY) camera.position.y = minY;
 
-    // water line (avoid the camera sitting exactly on the surface)
+    // water line: keep the camera out of a ±0.35 m band around the surface, but push it *through* the band in
+    // the direction it's moving (pushing back to the side it came from made crossing need a hard drag)
     const h = waveHeightCPU(camera.position.x, camera.position.z, t, oceanU.amp.value);
-    if (Math.abs(camera.position.y - h) < 0.35) camera.position.y = h + (camera.position.y > h ? 0.35 : -0.35);
+    if (Math.abs(camera.position.y - h) < 0.35) {
+      const wasAbove = camY0 === null ? camera.position.y > h : camY0 > h;
+      const dy = camY0 === null ? 0 : camera.position.y - camY0;
+      const above = dy < -1e-4 ? false : dy > 1e-4 ? true : wasAbove;
+      camera.position.y = h + (above ? 0.35 : -0.35);
+    }
+    camY0 = camera.position.y;
     U.under.value = camera.position.y < h ? 1 : 0;
     // underwater-only systems are skipped entirely once the story camera is above the sea
     const showUnder = LAB || U.under.value > 0.5;
@@ -622,6 +631,7 @@ async function main() {
 
     // above the sea the school is only glimpsed through the surface: draw the first 800 (all leapers are < 256)
     tuna.mesh.count = story && U.under.value < 0.5 ? Math.min(tuna.count, 800) : tuna.count;
+    if (layers) layers.update(story.x, camera);
     if (editor) editor.postUpdate(rdt);
     for (const o of hidden) o.visible = false; // editor outliner
     tuna.update(renderer, dt);

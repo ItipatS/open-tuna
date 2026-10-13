@@ -47,11 +47,18 @@ export class SceneGizmos {
     this.tcHelper = tc.getHelper();
     this.tcHelper.renderOrder = 70;
     scene.add(this.tcHelper);
-    tc.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value && ed.sceneView; if (!e.value) ed.commit(); });
+    tc.addEventListener('dragging-changed', (e) => {
+      controls.enabled = !e.value && ed.sceneView;
+      const tg = this.target();
+      // a 3D layer: edit its key at the playhead (created from the current state when it's animated)
+      if (e.value && tg?.layer) this.dragKey = tg.key ?? ed.lt.keyAt(tg.layer);
+      if (!e.value) { this.dragKey = null; ed.commit(); }
+    });
     tc.addEventListener('objectChange', () => {
-      const k = this.selKey();
-      if (!k) return;
-      (this.mode === 'look' ? k.look : k.pos).splice(0, 3, ...this.proxy.position.toArray().map((v) => +v.toFixed(3)));
+      const tg = this.target(), p = this.proxy.position.toArray().map((v) => +v.toFixed(3));
+      if (tg?.cam) (this.mode === 'look' ? tg.key.look : tg.key.pos).splice(0, 3, ...p);
+      else if (tg?.layer && this.dragKey) this.dragKey.pos = p;
+      else return;
       ed.changed();
     });
 
@@ -66,8 +73,16 @@ export class SceneGizmos {
       const r = canvas.getBoundingClientRect();
       ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, camera);
-      const hit = ray.intersectObjects(this.markers.filter((m) => m.visible), false)[0];
+      const pickables = [...this.markers.filter((m) => m.visible), ...ed.app.layers.group.children.filter((m) => m.visible)];
+      const hit = ray.intersectObjects(pickables, false)[0];
       if (!hit) return;
+      const lid = hit.object.userData.layerId;
+      if (lid) {
+        const lt = ed.tl.layers().find((q) => q.id === lid);
+        if (e.button === 2) ed.contextMenu(e.clientX, e.clientY, { kind: 'layer', track: lt });
+        else ed.select({ kind: 'track', track: lt });
+        return;
+      }
       const { key, look } = hit.object.userData, track = ed.tl.ofType('camera');
       this.mode = look ? 'look' : 'pos';
       if (e.button === 2) ed.contextMenu(e.clientX, e.clientY, { kind: 'key', track, item: key });
@@ -78,6 +93,14 @@ export class SceneGizmos {
   selKey() {
     const s = this.ed.sel;
     return s?.kind === 'key' && s.track.type === 'camera' ? s.item : null;
+  }
+
+  // what the move gizmo edits: a camera key, or a 3D layer (a specific key, or its key at the playhead)
+  target() {
+    const s = this.ed.sel;
+    if (s?.kind === 'key' && s.track.type === 'camera') return { cam: true, key: s.item };
+    if (s?.track?.type === 'layer' && s.track.space === 'world') return { layer: s.track, key: s.kind === 'key' ? s.item : null };
+    return null;
   }
 
   rebuild() {
@@ -130,8 +153,12 @@ export class SceneGizmos {
     if (fc.fov !== sc.fov || fc.aspect !== sc.aspect) { fc.fov = sc.fov; fc.aspect = sc.aspect; fc.updateProjectionMatrix(); }
     fc.matrixWorld.copy(sc.matrixWorld);
     this.frustum.update();
-    if (sel && !ed.isLocked(ed.sel)) {
-      if (!this.tc.dragging) this.proxy.position.fromArray(this.mode === 'look' ? sel.look : sel.pos);
+    const tg = this.target();
+    if (tg && !ed.isLocked(ed.sel)) {
+      if (!this.tc.dragging) {
+        this.proxy.position.fromArray(tg.cam ? (this.mode === 'look' ? tg.key.look : tg.key.pos)
+          : tg.key?.pos ?? ed.app.layers.state(tg.layer, ed.time).pos);
+      }
       if (this.tc.object !== this.proxy) this.tc.attach(this.proxy);
       this.tcHelper.visible = true;
     } else if (this.tc.object) { this.tc.detach(); this.tcHelper.visible = false; }

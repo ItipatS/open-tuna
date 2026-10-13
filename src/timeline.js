@@ -15,6 +15,9 @@
 //     clip      one clip [a, b] (s) driving a story beat (`bind`, see DRIVERS in story.js): ramps 0 -> 1 across
 //               the clip with `ease`, or with ease "gate" is 1 inside the clip and 0 outside.
 //     captions  clips { a, b, title, sub, size, y, fade } shown over the canvas.
+//     layer     one media layer (see layers.js): { kind image|video|html|iframe, src, html, space screen|world,
+//               a, b, fade, z, w, h, fit, interactive, loop, scrub, rate, billboard,
+//               keys: [{ t, ease, x, y, s, r, o }] (screen: x / y in % of the view) or [{ t, ease, pos[3], s, r, o }] (world, m) }
 //   Any track / key / clip / chapter / note may carry `locked: true` (editor won't change it);
 //   a track may carry `mute: true` (ignored by the story).
 
@@ -50,7 +53,7 @@ export function migrate(data) {
 }
 
 // index pair around x (keys sorted by t) and the local parameter s in [0, 1]
-function segment(keys, x) {
+export function segment(keys, x) {
   const n = keys.length;
   if (x <= keys[0].t) return [0, 0, 0];
   if (x >= keys[n - 1].t) return [n - 1, n - 1, 0];
@@ -82,6 +85,20 @@ export function evalCurve(keys, x) {
   const [i, j, s] = segment(keys, x);
   if (i === j) return keys[i].v;
   return keys[i].v + (keys[j].v - keys[i].v) * (EASES[keys[i].ease] || EASES.smooth)(s);
+}
+
+// interpolate every numeric / array field of keyframes (layer keys); `ease` of a key shapes the segment after it
+export function evalKeys(keys, x, out = {}) {
+  if (!keys.length) return out;
+  const [i, j, s] = segment(keys, x), A = keys[i], B = keys[j];
+  const e = (EASES[A.ease] || EASES.smooth)(s);
+  for (const f in A) {
+    if (f === 't' || f === 'ease' || f === 'locked') continue;
+    const va = A[f], vb = B[f] ?? va;
+    if (typeof va === 'number') out[f] = va + (vb - va) * e;
+    else if (Array.isArray(va)) out[f] = va.map((v, c) => v + ((vb[c] ?? v) - v) * e);
+  }
+  return out;
 }
 
 export function evalClip(t, x, duration = Infinity) {
@@ -151,7 +168,7 @@ export class Timeline {
     for (const t of d.tracks) {
       if (t.keys) for (const k of t.keys) e = Math.max(e, k.t);
       if (t.clips) for (const c of t.clips) e = Math.max(e, Math.min(c.b, c.a + 0.5));
-      if (t.type === 'clip') e = Math.max(e, Math.min(t.b, t.a + 0.5));
+      if (t.type === 'clip' || t.type === 'layer') e = Math.max(e, Math.min(t.b, t.a + 0.5));
     }
     return e;
   }
@@ -184,6 +201,7 @@ export class Timeline {
   }
 
   captions() { return this.ofType('captions')?.clips ?? []; }
+  layers() { return this.data.tracks.filter((t) => t.type === 'layer'); }
 
   chapter(x) {
     let c = null;
