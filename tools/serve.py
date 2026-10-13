@@ -18,6 +18,8 @@ tools/serve.ps1 is the same server for Windows machines without Python - keep th
     POST /__editor/delete?file=<path>    delete a checkpoint
     GET  /__editor/git/status            {branch, upstream, changes}
     POST /__editor/upload?name=file.png  body = file bytes -> assets/<name> (never overwrites) -> {file}
+    GET  /__editor/assets                every file under assets/ {file, size, mtime}
+    POST /__editor/asset-delete?file=    delete one file under assets/
     POST /__editor/git/commit            body {message} -> commits story.json + saves/checkpoints + assets
     POST /__editor/git/push              pushes the current branch
 """
@@ -219,6 +221,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.raw(out.encode('utf-8'))
                 with open(safe_file(q.get('file', 'story.json')), 'rb') as f:
                     return self.raw(f.read())
+            if path == '/__editor/assets':
+                out = []
+                for dirpath, _, names in os.walk(ASSETS):
+                    for n in sorted(names):
+                        full = os.path.join(dirpath, n)
+                        out.append({'file': os.path.relpath(full, ROOT).replace(os.sep, '/'), 'size': os.path.getsize(full), 'mtime': int(os.path.getmtime(full))})
+                out.sort(key=lambda a: -a['mtime'])
+                return self.reply(200, {'assets': out})
             if path == '/__editor/git/status':
                 if not has_git():
                     return self.reply(200, {'git': False})
@@ -275,6 +285,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     else:
                         write(p, body)
                     return self.reply(200, {'ok': True, 'file': os.path.relpath(p, ROOT).replace(os.sep, '/')})
+                if path == '/__editor/asset-delete':
+                    p = os.path.normpath(os.path.join(ROOT, q.get('file', '')))
+                    if not p.startswith(ASSETS + os.sep) or not os.path.isfile(p):
+                        raise ValueError('not a file in assets/')
+                    os.remove(p)
+                    return self.reply(200, {'ok': True})
                 if path == '/__editor/delete':
                     p = safe_file(q.get('file'))
                     if not p.startswith(CHECK + os.sep):

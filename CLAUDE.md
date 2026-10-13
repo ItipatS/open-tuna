@@ -144,6 +144,17 @@ Everything lives in a compact play area (`STAGE = 42` m in `main.js`):
   **read `notes` when asked to act on designer feedback**). Any of them can carry `locked: true` (the editor
   won't change it — respect it when editing story.json by hand unless asked) and tracks `mute: true`.
   `Timeline.serialize()` writes one key/clip per line, numbers rounded to 4 dp; segment lookup is a binary search.
+- **Groups / lanes** (editor organisation, no effect on the story except inherited mute / lock): `{type:'group', id,
+  label, collapsed}` with tracks pointing to it via `parent`; `{type:'lane', id, label, parent?}` with layer / path
+  tracks pointing to it via `lane` (they're drawn inside the lane row, overlapping clips packed into sub-rows,
+  `TimelineView.pack`). Track order in the array = display order; a group's members appear under its header, lane
+  members wherever they are in the array. `Timeline.muted(t)` / `lockedTrack(t)` include the lane and the group —
+  use those, never `t.mute` / `t.locked` directly, when deciding whether something plays or can be edited.
+  New layers / paths go into a lane (`Editor.defaultLane`). Dropping files / assets on a lane row creates clips there
+  at the drop time (`LayerTools.dropOnTimeline`); dragging a clip vertically moves it to the lane under the pointer.
+- **Assets tab** (`assets-panel.js`): `GET /__editor/assets` lists assets/ recursively; drag sets the
+  `application/x-opentuna-asset` data type (timeline + viewport accept it); `POST /__editor/asset-delete?file=`
+  deletes one file under assets/ (both servers).
 - **Paths** (`path` tracks, `{bind: ACTORS key, a, b, blend, keys[{t, pos}]}`) have **priority** over the creatures'
   own behaviour. Creatures (`story.actors[bind] = {obj, swim | hunter, speed}`) are *driven* while x ∈ [a, b]
   (`Story.drive`): own position / velocity / heading state that steers toward the Hermite route at a capped speed

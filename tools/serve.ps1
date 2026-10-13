@@ -164,6 +164,21 @@ function Editor($ctx, [string]$path) {
       }
       Send $ctx 200 ([IO.File]::ReadAllBytes((SafeFile $q['file']))) 'application/json; charset=utf-8'; return
     }
+    '/__editor/assets' {
+      $list = @()
+      if (Test-Path $assetsDir) {
+        Get-ChildItem -Path $assetsDir -File -Recurse | Sort-Object LastWriteTime -Descending | ForEach-Object {
+          $list += [ordered]@{ file = ($_.FullName.Substring($root.Length + 1) -replace '\\', '/'); size = $_.Length; mtime = [int][double]::Parse((Get-Date $_.LastWriteTimeUtc -UFormat %s)) }
+        }
+      }
+      SendJson $ctx 200 @{ assets = $list }; return
+    }
+    '/__editor/asset-delete' {
+      $full = [IO.Path]::GetFullPath((Join-Path $root $q['file']))
+      if (-not $full.StartsWith($assetsDir + [IO.Path]::DirectorySeparatorChar) -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { throw 'not a file in assets/' }
+      Remove-Item -LiteralPath $full
+      SendJson $ctx 200 @{ ok = $true }; return
+    }
     '/__editor/git/status' {
       if (-not (HasGit)) { SendJson $ctx 200 @{ git = $false }; return }
       $br = (Git @('branch', '--show-current')).out

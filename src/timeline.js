@@ -21,8 +21,12 @@
 //     path      a creature follows keyed waypoints while the clip [a, b] is on: { bind (actor: school, bluewhale,
 //               humpback, shark1, shark2, turtle1, turtle2), a, b, blend (s to ease in / out), keys: [{ t, pos[3] }] }
 //               (Hermite through the waypoints; the creature faces along the path)
-//   Any track / key / clip / chapter / note may carry `locked: true` (editor won't change it);
-//   a track may carry `mute: true` (ignored by the story).
+//   group     a folder of tracks in the editor: { id, label, collapsed }; tracks join it with `parent: <group id>`
+//   lane      an editor row that holds several layer / path clips (like a video-editor track): { id, label };
+//             layer / path tracks join it with `lane: <lane id>` and are drawn inside it instead of on their own row
+//   Any track / key / clip / chapter / note may carry `locked: true` (editor won't change it); a track may carry
+//   `mute: true` (ignored by the story) and `collapsed: true` (thin row in the editor). Muting / locking a group or
+//   lane applies to everything in it.
 
 export const VERSION = 2;
 
@@ -152,7 +156,8 @@ export class Timeline {
     }
     d.chapters.sort((x, y) => x.t - y.t);
     d.notes.sort((x, y) => x.t - y.t);
-    this.bound = new Map(d.tracks.filter((t) => t.bind).map((t) => [t.bind, t]));
+    this.byId = new Map(d.tracks.map((t) => [t.id, t]));
+    this.bound = new Map(d.tracks.filter((t) => t.bind && t.type !== 'path').map((t) => [t.bind, t]));
     this.version++;
   }
 
@@ -160,7 +165,13 @@ export class Timeline {
   get duration() { return this.data.meta.duration; }
   get tracks() { return this.data.tracks; }
   track(id) { return this.data.tracks.find((t) => t.id === id); }
-  ofType(type) { return this.data.tracks.find((t) => t.type === type && !t.mute); }
+  ofType(type) { return this.data.tracks.find((t) => t.type === type && !this.muted(t)); }
+
+  // the lane / group a track sits in (lanes can be in a group too)
+  laneOf(t) { const l = t.lane && this.byId.get(t.lane); return l?.type === 'lane' ? l : null; }
+  groupOf(t) { const g = this.byId.get((this.laneOf(t) ?? t).parent); return g?.type === 'group' ? g : null; }
+  muted(t) { return !!(t.mute || this.laneOf(t)?.mute || this.groupOf(t)?.mute); }
+  lockedTrack(t) { return !!(t.locked || this.laneOf(t)?.locked || this.groupOf(t)?.locked); }
 
   // the latest time anything is placed at (the story can't be shortened past it)
   contentEnd() {
@@ -179,13 +190,13 @@ export class Timeline {
   // clip driver value (0 when there is no such track or it is muted)
   clip(bind, x) {
     const t = this.bound.get(bind);
-    return t && !t.mute && t.type === 'clip' ? evalClip(t, x, this.duration) : 0;
+    return t && !this.muted(t) && t.type === 'clip' ? evalClip(t, x, this.duration) : 0;
   }
 
   // scalar parameter: animated by a curve track, else the constant in settings.params, else `def`
   param(bind, x, def) {
     const t = this.bound.get(bind);
-    if (t && !t.mute && t.type === 'curve' && t.keys.length) return evalCurve(t.keys, x);
+    if (t && !this.muted(t) && t.type === 'curve' && t.keys.length) return evalCurve(t.keys, x);
     return this.data.settings.params[bind] ?? def;
   }
 
@@ -205,7 +216,7 @@ export class Timeline {
 
   captions() { return this.ofType('captions')?.clips ?? []; }
   layers() { return this.data.tracks.filter((t) => t.type === 'layer'); }
-  paths() { return this.data.tracks.filter((t) => t.type === 'path' && !t.mute && t.keys?.length); }
+  paths() { return this.data.tracks.filter((t) => t.type === 'path' && !this.muted(t) && t.keys?.length); }
 
   // a path track at x: weight (0 outside the clip, easing in / out over `blend` s) + position + heading
   path(t, x, out) {

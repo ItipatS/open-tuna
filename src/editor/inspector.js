@@ -39,7 +39,8 @@ export class Inspector {
     }
     if (!s) this.project(el);
     else if (s.kind === 'track') {
-      if (s.track.type === 'layer') this.layer(el, s.track);
+      if (s.track.type === 'group' || s.track.type === 'lane') this.container(el, s.track);
+      else if (s.track.type === 'layer') this.layer(el, s.track);
       else if (s.track.type === 'path') this.path(el, s.track);
       else this.track(el, s.track);
     }
@@ -214,6 +215,7 @@ export class Inspector {
       this.buttons(el, btn('Caption at playhead', () => ed.addCaption(), { ico: 'plus' }));
     }
     this.sec(el, 'Track');
+    el.append(this.placement(t));
     this.buttons(el, btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete track', () => ed.deleteSelection(), { cls: 'danger' }));
   }
 
@@ -307,7 +309,41 @@ export class Inspector {
       ? 'Move it with the arrows in the Scene view. With 2+ keys, moving it at a new moment adds a key there (auto-key).'
       : 'Drag it in the Game view to move it, drag the corner handle to scale. With one key it just moves; with 2+ keys, dragging at a new moment adds a key there (auto-key).'));
     this.sec(el, 'Layer');
+    el.append(this.placement(t));
     this.buttons(el, this.free(btn('Duplicate', () => lt.duplicate(t))), btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete layer', () => ed.deleteSelection(), { cls: 'danger' }));
+  }
+
+  // a group (folder) or a lane (several clips in one row)
+  container(el, t) {
+    const { ed } = this, isG = t.type === 'group';
+    const kids = ed.timeline.contents(t).filter((m) => m.type !== 'lane' || isG);
+    this.header(el, t.label, isG ? `group · ${kids.length} item(s)` : `lane · ${kids.length} clip(s)`);
+    el.append(this.text('Name', () => t.label, (v) => { t.label = v; }));
+    el.append(this.check('Collapsed', () => t.collapsed, (v) => { if (v) t.collapsed = true; else delete t.collapsed; }));
+    el.append(this.check('Mute all', () => t.mute, (v) => { if (v) t.mute = true; else delete t.mute; }));
+    el.append(this.check('Lock all', () => t.locked, (v) => { if (v) t.locked = true; else delete t.locked; }, { free: true }));
+    if (!isG) el.append(this.placement(t, false));
+    this.sec(el, isG ? 'In this group' : 'Clips in this lane');
+    this.list(el, kids, (m) => [m.label || m.id, m.a !== undefined ? `${fmtTime(m.a, 0)}–${fmtTime(m.b, 0)}` : m.type], (m) => { ed.select({ kind: 'track', track: m }); if (m.a !== undefined) ed.setTime(m.a); });
+    el.append(h('div', { class: 'hint' }, isG
+      ? 'Right-click any track ▸ Move to group to add it here. Collapse the group to save space; mute / lock apply to everything inside.'
+      : 'Drop files (or assets from the Assets tab) on this lane in the timeline to add clips at that time. Drag a clip up / down to move it to another lane. Overlapping clips stack inside the lane.'));
+    this.buttons(el, btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)),
+      isG ? btn('Ungroup', () => ed.removeContainer(t, false)) : null,
+      btn(isG ? 'Delete with contents' : 'Delete lane + clips', () => ed.removeContainer(t, true), { cls: 'danger' }));
+  }
+
+  // group / lane pickers for a track
+  placement(t, laneToo = true) {
+    const { ed } = this, box = h('div');
+    const groups = ed.tl.tracks.filter((q) => q.type === 'group'), lanes = ed.tl.tracks.filter((q) => q.type === 'lane');
+    if (laneToo && (t.type === 'layer' || t.type === 'path')) {
+      box.append(this.select('Lane', { '': '(own row)', ...Object.fromEntries(lanes.map((l) => [l.id, l.label])) }, () => t.lane ?? '', (v) => { if (v) t.lane = v; else delete t.lane; }));
+    }
+    if (!t.lane || !laneToo) {
+      box.append(this.select('Group', { '': '(none)', ...Object.fromEntries(groups.map((g) => [g.id, g.label])) }, () => t.parent ?? '', (v) => { if (v) t.parent = v; else delete t.parent; }));
+    }
+    return box;
   }
 
   path(el, t) {
@@ -327,6 +363,7 @@ export class Inspector {
     this.buttons(el, btn('Waypoint at playhead', () => ed.addPathKey(t), { ico: 'plus', title: 'K — in the Scene view it goes where the camera looks' }));
     el.append(h('div', { class: 'hint' }, 'In the Scene view (1) the path is the green line; click a green ball and drag the arrows to move a waypoint. Keep fish under water (y below 0) unless you want them to fly.'));
     this.sec(el, 'Path');
+    el.append(this.placement(t));
     this.buttons(el, btn('Move up', () => ed.moveTrack(t, -1)), btn('Move down', () => ed.moveTrack(t, 1)), btn('Delete path', () => ed.deleteSelection(), { cls: 'danger' }));
   }
 

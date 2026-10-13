@@ -68,6 +68,92 @@
         { "a": 61, "b": 69, "size": "medium", "y": 42, "title": "The journey continues", "sub": "Placeholder", "fade": 1.5 }
       ]
     },
+    { "id": "group-beats", "type": "group", "label": "Story beats", "collapsed": true },
+    {
+      "id": "sun-elevation",
+      "type": "curve",
+      "label": "Sun elevation",
+      "bind": "sun.elevation",
+      "keys": [
+        { "t": 24, "v": 55, "ease": "smooth" },
+        { "t": 39.6, "v": 7, "ease": "smooth" },
+        { "t": 62, "v": 7, "ease": "smooth" },
+        { "t": 72, "v": 42, "ease": "smooth" },
+        { "t": 120, "v": 42, "ease": "smooth" },
+        { "t": 146, "v": 10, "ease": "smooth" }
+      ],
+      "parent": "group-beats"
+    },
+    {
+      "id": "sun-azimuth",
+      "type": "curve",
+      "label": "Sun azimuth",
+      "bind": "sun.azimuth",
+      "keys": [
+        { "t": 24, "v": 51.57, "ease": "smooth" },
+        { "t": 39.6, "v": -155.94, "ease": "smooth" }
+      ],
+      "parent": "group-beats"
+    },
+    {
+      "id": "school-gather",
+      "type": "clip",
+      "label": "School gathers",
+      "bind": "school.gather",
+      "a": 13.0152,
+      "b": 27.6,
+      "ease": "smooth",
+      "parent": "group-beats"
+    },
+    {
+      "id": "water50-fade",
+      "type": "clip",
+      "label": "Water 50 fades in",
+      "bind": "tentacles.fade",
+      "a": 25.8,
+      "b": 27.6,
+      "ease": "smooth",
+      "parent": "group-beats"
+    },
+    {
+      "id": "water50-form",
+      "type": "clip",
+      "label": "Water 50 forms",
+      "bind": "tentacles.form",
+      "a": 26.4,
+      "b": 55.2,
+      "ease": "linear",
+      "parent": "group-beats"
+    },
+    { "id": "tuna-free", "type": "clip", "label": "Tuna leaps", "bind": "tuna.free", "a": 30, "b": 60, "ease": "gate", "parent": "group-beats" },
+    {
+      "id": "tuna-hoop",
+      "type": "clip",
+      "label": "Tuna through the 0",
+      "bind": "tuna.hoop",
+      "a": 50.4,
+      "b": 60,
+      "ease": "gate",
+      "parent": "group-beats"
+    },
+    {
+      "id": "post-bloom",
+      "type": "curve",
+      "label": "Bloom",
+      "bind": "post.bloom",
+      "keys": [
+        { "t": 60, "v": 0.28, "ease": "smooth" }
+      ],
+      "parent": "group-beats"
+    },
+    { "id": "group-demo", "type": "group", "label": "Demo — The Journey" },
+    { "id": "lane-creatures", "type": "lane", "label": "Creatures", "parent": "group-demo" },
+    { "id": "lane-text", "type": "lane", "label": "Text", "parent": "group-demo" },
+    { "id": "lane-cards", "type": "lane", "label": "Cards", "parent": "group-demo" },
+    { "id": "lane-bubbles", "type": "lane", "label": "Bubbles", "parent": "group-demo" },
+    { "id": "lane-3d", "type": "lane", "label": "3D billboards", "parent": "group-demo" },
+    { "id": "lane-panel", "type": "lane", "label": "Product panel", "parent": "group-demo" },
+    { "id": "lane-iframe", "type": "lane", "label": "Iframe page", "parent": "group-demo" },
     {
       "id": "demo-school-path",
       "type": "path",
@@ -82,7 +168,8 @@
         { "t": 96, "pos": [-4, -7, -32] },
         { "t": 108, "pos": [-28, -6, -14] },
         { "t": 120, "pos": [-26, -4, 14] }
-      ]
+      ],
+      "lane": "lane-creatures"
     },
     {
       "id": "demo-title",
@@ -109,7 +196,8 @@
       "keys": [
         { "t": 73, "x": 50, "y": 34, "s": 0.94, "r": 0, "o": 1, "ease": "linear" },
         { "t": 86, "x": 50, "y": 22, "s": 1.06, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-text"
     },
     {
       "id": "demo-bigtype",
@@ -135,7 +223,8 @@
       "keys": [
         { "t": 78, "x": 66, "y": 56, "s": 1, "r": 0, "o": 0.32, "ease": "linear" },
         { "t": 120, "x": 34, "y": 50, "s": 1, "r": 0, "o": 0.32 }
-      ]
+      ],
+      "lane": "lane-text"
     },
     {
       "id": "demo-bluewhale-path",
@@ -149,7 +238,8 @@
         { "t": 84, "pos": [45, -16, -38] },
         { "t": 102, "pos": [0, -18, -56] },
         { "t": 120, "pos": [-48, -15, -30] }
-      ]
+      ],
+      "lane": "lane-creatures"
     },
     {
       "id": "demo-humpback-path",
@@ -163,7 +253,8 @@
         { "t": 124, "pos": [-52, -2.6, 4] },
         { "t": 137, "pos": [-28, -2.2, 20] },
         { "t": 150, "pos": [2, -2.6, 30] }
-      ]
+      ],
+      "lane": "lane-creatures"
     },
     {
       "type": "layer",
@@ -188,7 +279,8 @@
       "caustic": 0.2,
       "chroma": 0.15,
       "glow": 0,
-      "glass": 0
+      "glass": 0,
+      "lane": "lane-bubbles"
     },
     {
       "type": "layer",
@@ -214,7 +306,8 @@
       "chroma": 0.3,
       "glow": 0,
       "glass": 0.95,
-      "radius": 0.08
+      "radius": 0.08,
+      "lane": "lane-cards"
     },
     {
       "type": "layer",
@@ -240,7 +333,8 @@
       "chroma": 0.3,
       "glow": 0,
       "glass": 0.95,
-      "radius": 0.08
+      "radius": 0.08,
+      "lane": "lane-cards"
     },
     {
       "type": "layer",
@@ -266,7 +360,8 @@
       "chroma": 0.3,
       "glow": 0,
       "glass": 0.95,
-      "radius": 0.08
+      "radius": 0.08,
+      "lane": "lane-cards"
     },
     {
       "type": "layer",
@@ -291,7 +386,8 @@
       "caustic": 0,
       "chroma": 0.4,
       "glow": 0.1,
-      "glass": 0
+      "glass": 0,
+      "lane": "lane-bubbles"
     },
     {
       "type": "layer",
@@ -313,7 +409,8 @@
       "caustic": 0.45,
       "chroma": 0.2,
       "glow": 0.45,
-      "glass": 0
+      "glass": 0,
+      "lane": "lane-3d"
     },
     {
       "type": "layer",
@@ -335,7 +432,8 @@
       "caustic": 0.5,
       "chroma": 0.3,
       "glow": 0,
-      "glass": 0
+      "glass": 0,
+      "lane": "lane-3d"
     },
     {
       "type": "layer",
@@ -357,7 +455,8 @@
       "caustic": 0.5,
       "chroma": 0.3,
       "glow": 0,
-      "glass": 0
+      "glass": 0,
+      "lane": "lane-3d"
     },
     {
       "type": "layer",
@@ -380,7 +479,8 @@
       "caustic": 0,
       "chroma": 0.15,
       "glow": 0.7,
-      "glass": 0
+      "glass": 0,
+      "lane": "lane-3d"
     },
     {
       "id": "demo-panel",
@@ -405,7 +505,8 @@
       "keys": [
         { "t": 128, "x": 76, "y": 53, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 131.5, "x": 76, "y": 50, "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-panel"
     },
     {
       "id": "demo-panel-text",
@@ -432,7 +533,8 @@
       "keys": [
         { "t": 128, "x": 76, "y": 37, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 131.5, "x": 76, "y": 34, "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-text"
     },
     {
       "id": "demo-panel-can-1",
@@ -456,7 +558,8 @@
       "keys": [
         { "t": 128, "x": 67.5, "y": 57, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 131.5, "x": 67.5, "y": 54, "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-panel"
     },
     {
       "id": "demo-panel-can-2",
@@ -480,7 +583,8 @@
       "keys": [
         { "t": 128, "x": 76, "y": 57, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 131.5, "x": 76, "y": 54, "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-panel"
     },
     {
       "id": "demo-panel-can-3",
@@ -504,7 +608,8 @@
       "keys": [
         { "t": 128, "x": 84.5, "y": 57, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 131.5, "x": 84.5, "y": 54, "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-panel"
     },
     {
       "id": "demo-panel-button",
@@ -522,7 +627,8 @@
       "keys": [
         { "t": 128, "x": 76, "y": 73, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 131.5, "x": 76, "y": 70, "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-panel"
     },
     {
       "type": "layer",
@@ -541,7 +647,8 @@
       "keys": [
         { "t": 132, "x": 22, "y": 54, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 135, "x": 23, "y": 52, "s": 1, "r": 0, "o": 1 }
-      ]
+      ],
+      "lane": "lane-iframe"
     },
     {
       "id": "demo-iframe-glass",
@@ -566,45 +673,8 @@
       "keys": [
         { "t": 132, "x": 22, "y": 54, "s": 0.96, "r": 0, "o": 1, "ease": "out" },
         { "t": 135, "x": 23, "y": 52, "s": 1, "r": 0, "o": 1 }
-      ]
-    },
-    {
-      "id": "sun-elevation",
-      "type": "curve",
-      "label": "Sun elevation",
-      "bind": "sun.elevation",
-      "keys": [
-        { "t": 24, "v": 55, "ease": "smooth" },
-        { "t": 39.6, "v": 7, "ease": "smooth" },
-        { "t": 62, "v": 7, "ease": "smooth" },
-        { "t": 72, "v": 42, "ease": "smooth" },
-        { "t": 120, "v": 42, "ease": "smooth" },
-        { "t": 146, "v": 10, "ease": "smooth" }
-      ]
-    },
-    {
-      "id": "sun-azimuth",
-      "type": "curve",
-      "label": "Sun azimuth",
-      "bind": "sun.azimuth",
-      "keys": [
-        { "t": 24, "v": 51.57, "ease": "smooth" },
-        { "t": 39.6, "v": -155.94, "ease": "smooth" }
-      ]
-    },
-    { "id": "school-gather", "type": "clip", "label": "School gathers", "bind": "school.gather", "a": 13.0152, "b": 27.6, "ease": "smooth" },
-    { "id": "water50-fade", "type": "clip", "label": "Water 50 fades in", "bind": "tentacles.fade", "a": 25.8, "b": 27.6, "ease": "smooth" },
-    { "id": "water50-form", "type": "clip", "label": "Water 50 forms", "bind": "tentacles.form", "a": 26.4, "b": 55.2, "ease": "linear" },
-    { "id": "tuna-free", "type": "clip", "label": "Tuna leaps", "bind": "tuna.free", "a": 30, "b": 60, "ease": "gate" },
-    { "id": "tuna-hoop", "type": "clip", "label": "Tuna through the 0", "bind": "tuna.hoop", "a": 50.4, "b": 60, "ease": "gate" },
-    {
-      "id": "post-bloom",
-      "type": "curve",
-      "label": "Bloom",
-      "bind": "post.bloom",
-      "keys": [
-        { "t": 60, "v": 0.28, "ease": "smooth" }
-      ]
+      ],
+      "lane": "lane-iframe"
     }
   ]
 }

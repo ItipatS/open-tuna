@@ -202,3 +202,21 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 /* ---- GPU layer selection box (they are drawn by WebGPU, so the box is an overlay) */
 .ed-gbox { position: absolute; display: none; outline: 2px solid #f78fb3; outline-offset: 2px; pointer-events: none; z-index: 30; }
 .ed-gbox .ed-handle { pointer-events: auto; }
+
+/* ---- left panel tabs + assets grid */
+.ed-h.ltabs { display: flex; gap: 4px; padding: 6px 8px; }
+.ltab { flex: 1; height: 26px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--dim); font: 600 11px/1 Inter, system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.ltab.on { background: var(--panel2); border-color: var(--line2); color: var(--text); }
+.ed-abar { display: flex; gap: 4px; padding: 8px; position: sticky; top: 42px; background: var(--panel); z-index: 1; }
+.ed-abar .ed-btn { height: 26px; padding: 0 7px; font-size: 11px; }
+.ed-asearch { flex: 1; min-width: 0; height: 26px; padding: 0 7px; background: #15171b; border: 1px solid var(--line2); border-radius: 5px; color: var(--text); font: inherit; }
+.ed-assets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 8px 8px; }
+.ed-asset { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: #15171b; cursor: grab; }
+.ed-asset:hover { border-color: #f78fb3; }
+.ed-asset .th { position: relative; aspect-ratio: 4 / 3; display: grid; place-items: center; background: repeating-conic-gradient(#1d2026 0 25%, #23272e 0 50%) 0 0 / 12px 12px; }
+.ed-asset .th img, .ed-asset .th video { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+.ed-asset .th .ico { font: 700 12px/1 Inter, system-ui, sans-serif; color: #b49cff; letter-spacing: .08em; }
+.ed-asset .th .used { position: absolute; right: 4px; top: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #f78fb3; color: #1b0b12; font: 700 10px/16px Inter, system-ui, sans-serif; text-align: center; }
+.ed-asset .nm { padding: 4px 6px; font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ed-ahint { padding: 6px 10px 12px; font-size: 11px; color: var(--faint); line-height: 1.45; }
+#ed-left.drop, #ed-left .drop { outline: 2px dashed #f78fb3; outline-offset: -4px; }

@@ -16,6 +16,7 @@ import { TimelineView } from './timeline-view.js';
 import { SceneGizmos } from './scene-gizmos.js';
 import { Saves } from './saves.js';
 import { LayerTools } from './layer-tools.js';
+import { AssetsPanel } from './assets-panel.js';
 import { PARAMS, DRIVERS, ACTORS } from '../story.js';
 import { EASES, fmtTime, migrate } from '../timeline.js';
 
@@ -56,6 +57,7 @@ export class Editor {
     this.timeline = new TimelineView(this, this.$tlwrap);
     this.gizmos = new SceneGizmos(this);
     this.lt = new LayerTools(this);
+    this.assets = new AssetsPanel(this, this.$assets);
     this.buildOutliner();
     this.bindKeys();
     this.setView('game');
@@ -122,7 +124,15 @@ export class Editor {
     );
 
     this.$outliner = h('div');
-    const left = h('aside', { id: 'ed-left' }, h('div', { class: 'ed-h' }, 'Scene'), this.$outliner);
+    this.$assets = h('div', { style: 'display:none' });
+    const tab = (name, el) => h('button', { class: 'ltab', onclick: (e) => {
+      this.$outliner.style.display = name === 'scene' ? '' : 'none';
+      this.$assets.style.display = name === 'assets' ? '' : 'none';
+      e.currentTarget.parentNode.querySelectorAll('.ltab').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
+      if (name === 'assets') this.assets?.refresh();
+    } }, el);
+    const left = h('aside', { id: 'ed-left' }, h('div', { class: 'ed-h ltabs' }, tab('scene', 'Scene'), tab('assets', 'Assets')), this.$outliner, this.$assets);
+    left.querySelector('.ltab').classList.add('on');
 
     const aspect = h('select', { title: 'Game view frame' }, Object.keys(ASPECTS).map((k) => h('option', { value: k }, k === 'free' ? 'Free aspect' : k)));
     aspect.value = this.aspect;
@@ -157,6 +167,8 @@ export class Editor {
       add('Caption', () => this.addCaption(), 'Add a caption at the playhead'),
       add('Note', () => this.addNote(), 'Leave a note at the playhead (saved in story.json)'),
       add('Chapter', () => this.addChapter(), 'Start a new chapter at the playhead'),
+      add('Lane', () => this.addLane(), 'A lane holds many layer / path clips side by side, like a video-editor track'),
+      add('Group', () => this.addGroup(), 'A folder for tracks — collapse it to save space'),
       btn('Layer ▾', (e) => { const r = e.currentTarget.getBoundingClientRect(); openMenu(r.left, r.top - 4, this.lt.addItems()).style.transform = 'translateY(-100%)'; }, { ico: 'image', title: 'Add an image, video, web page or HTML block (or drag files onto the viewport)' }),
       this.$addTrack,
       h('div', { class: 'sep' }),
@@ -365,6 +377,8 @@ export class Editor {
     if (items.length) openMenu(x, y, items);
   }
 
+  contextMenuItems(x, y, items) { openMenu(x, y, items); }
+
   contextItems(tg) {
     const at = tg.t ?? this.time;
     const here = `at ${fmtTime(at)}`;
@@ -410,6 +424,7 @@ export class Editor {
       case 'track': {
         const s = { kind: 'track', track: tg.track }; sel(s);
         const t = tg.track, i = this.tl.tracks.indexOf(t), L = !!t.locked;
+        if (t.type === 'group' || t.type === 'lane') return this.containerItems(t);
         return [
           { label: 'Rename…', disabled: L, onClick: () => this.inspector.focus('Name') },
           t.keys ? { label: `Add key at playhead (${fmtTime(this.time)})`, shortcut: 'K', disabled: L, onClick: () => this.addKey(t) } : null,
@@ -419,8 +434,10 @@ export class Editor {
           { label: t.mute ? 'Unmute' : 'Mute', onClick: () => { if (t.mute) delete t.mute; else t.mute = true; this.commit(); } },
           { label: L ? 'Unlock track' : 'Lock track', shortcut: 'L', onClick: () => this.toggleLock() },
           '-',
+          { label: t.collapsed ? 'Expand row' : 'Collapse row', onClick: () => { if (t.collapsed) delete t.collapsed; else t.collapsed = true; this.commit(); } },
           { label: 'Move up', disabled: i <= 0, onClick: () => this.moveTrack(t, -1) },
           { label: 'Move down', disabled: i >= this.tl.tracks.length - 1, onClick: () => this.moveTrack(t, 1) },
+          this.groupMenu(t),
           '-',
           { label: 'Delete track', danger: true, disabled: L, onClick: () => this.deleteSelection() },
         ];
@@ -451,6 +468,7 @@ export class Editor {
           { label: 'Show in Scene view', onClick: () => { this.setView('scene'); const p = new THREE.Vector3().fromArray(this.actorPos(t.bind)); const { camera, controls } = this.app; const d = camera.position.clone().sub(controls.target); controls.target.copy(p); camera.position.copy(p).add(d.setLength(Math.min(d.length(), 45))); } },
           { label: 'Set start to playhead', disabled: L || this.time >= t.b, onClick: () => { t.a = r4(this.time); this.commit(); } },
           { label: 'Set end to playhead', disabled: L || this.time <= t.a, onClick: () => { t.b = r4(this.time); this.commit(); } },
+          this.laneMenu(t),
           '-', ...this.trackMenuTail(t),
           { label: 'Delete path', danger: true, disabled: L, onClick: () => this.deleteSelection() },
         ];
@@ -491,6 +509,94 @@ export class Editor {
       }
       default: return [];
     }
+  }
+
+  // "Move to group ▸" for any track / lane; "Move to lane ▸" for layer and path clips
+  groupMenu(t) {
+    const groups = this.tl.tracks.filter((q) => q.type === 'group');
+    return { label: 'Move to group', items: [
+      ...groups.map((g) => ({ label: g.label, checked: t.parent === g.id, onClick: () => { t.parent = g.id; this.commit(); } })),
+      groups.length ? '-' : null,
+      { label: 'New group…', onClick: () => this.addGroup([t]) },
+      { label: 'No group', disabled: !t.parent, onClick: () => { delete t.parent; this.commit(); } },
+    ] };
+  }
+
+  laneMenu(t) {
+    const lanes = this.tl.tracks.filter((q) => q.type === 'lane');
+    return { label: 'Move to lane', items: [
+      ...lanes.map((l) => ({ label: l.label, checked: t.lane === l.id, onClick: () => { t.lane = l.id; this.commit(); } })),
+      lanes.length ? '-' : null,
+      { label: 'New lane', onClick: () => { const l = this.addLane({ select: false }); t.lane = l.id; this.commit(); } },
+      { label: 'Own row (no lane)', disabled: !t.lane, onClick: () => { delete t.lane; this.commit(); } },
+    ] };
+  }
+
+  containerItems(t) {
+    const L = !!t.locked, isG = t.type === 'group';
+    return [
+      { label: 'Rename…', onClick: () => this.inspector.focus('Name') },
+      { label: t.collapsed ? 'Expand' : 'Collapse', onClick: () => { if (t.collapsed) delete t.collapsed; else t.collapsed = true; this.commit(); } },
+      !isG ? { label: 'Drop files here: drag them from your computer or the Assets tab', disabled: true } : null,
+      '-',
+      { label: t.mute ? `Unmute ${isG ? 'group' : 'lane'}` : `Mute ${isG ? 'group' : 'lane'} (everything in it)`, onClick: () => { if (t.mute) delete t.mute; else t.mute = true; this.commit(); } },
+      { label: L ? 'Unlock' : `Lock ${isG ? 'group' : 'lane'} (everything in it)`, onClick: () => this.toggleLock() },
+      '-',
+      { label: 'Move up', onClick: () => this.moveTrack(t, -1) },
+      { label: 'Move down', onClick: () => this.moveTrack(t, 1) },
+      !isG ? this.groupMenu(t) : null,
+      '-',
+      isG ? { label: 'Ungroup (keep the tracks)', disabled: L, onClick: () => this.removeContainer(t, false) } : null,
+      { label: isG ? 'Delete group and everything in it' : 'Delete lane and its clips', danger: true, disabled: L, onClick: () => this.removeContainer(t, true) },
+    ];
+  }
+
+  addGroup(members = []) {
+    const n = this.tl.tracks.filter((q) => q.type === 'group').length + 1;
+    const g = { id: `group-${Date.now().toString(36)}`, type: 'group', label: `Group ${n}` };
+    const at = members.length ? this.tl.tracks.indexOf(members[0]) : this.tl.tracks.length;
+    this.tl.tracks.splice(Math.max(0, at), 0, g);
+    for (const m of members) m.parent = g.id;
+    if (!members.length && this.sel?.track && this.sel.track.type !== 'group') { this.sel.track.parent = g.id; }
+    this.commit();
+    this.select({ kind: 'track', track: g });
+    setTimeout(() => this.inspector.focus('Name'), 0);
+    return g;
+  }
+
+  addLane({ label, parent, select = true } = {}) {
+    const n = this.tl.tracks.filter((q) => q.type === 'lane').length + 1;
+    const l = { id: `lane-${Date.now().toString(36)}${n}`, type: 'lane', label: label || `Lane ${n}` };
+    if (parent) l.parent = parent;
+    this.tl.tracks.push(l);
+    this.commit();
+    if (select) { this.select({ kind: 'track', track: l }); this.toast(`${l.label} added — drop files on it, or move clips into it`); }
+    return l;
+  }
+
+  // a lane to put a new clip in: the selected lane / the selected clip's lane / one by name, created if needed
+  defaultLane(type, name) {
+    const s = this.sel?.track, tracks = this.tl.tracks;
+    if (s?.type === 'lane') return s;
+    if (s?.lane && s.type === type) return this.tl.byId.get(s.lane);
+    return tracks.find((q) => q.type === 'lane' && q.label === name) ?? this.addLane({ label: name, select: false });
+  }
+
+  // delete a group / lane: with its contents, or (groups) just the folder
+  removeContainer(t, withContents) {
+    const tracks = this.tl.tracks;
+    if (withContents) {
+      const gone = new Set([t, ...(this.timeline.contents(t))]);
+      if ([...gone].some((q) => q.locked || q.keys?.some((k) => k.locked))) return this.toast('Something inside is locked — unlock it first', true);
+      this.tl.data.tracks = tracks.filter((q) => !gone.has(q));
+    } else {
+      for (const q of tracks) if (q.parent === t.id) delete q.parent;
+      tracks.splice(tracks.indexOf(t), 1);
+    }
+    this.tl.changed();
+    this.commit();
+    this.select(null);
+    this.toast(`Deleted — ${mod}Z to undo`);
   }
 
   trackMenuTail(t) {
@@ -576,7 +682,7 @@ export class Editor {
   // locked: the item itself, or the track it lives on
   isLocked(s) {
     if (!s || s.kind === 'object') return false;
-    return !!(s.item?.locked || s.track?.locked);
+    return !!(s.item?.locked || (s.track && this.tl.lockedTrack(s.track)));
   }
 
   toggleLock() {
@@ -836,7 +942,7 @@ export class Editor {
     } else if (type === 'path') {
       const p = this.actorPos(bind), f = this.actorFwd(bind);
       const t1 = r4(Math.min(this.duration, t0 + 10));
-      t = { id: `path-${bind}-${Date.now().toString(36)}`, type, label: `${ACTORS[bind]} path`, bind, a: t0, b: r4(Math.min(this.duration, t0 + 20)), blend: 2,
+      t = { id: `path-${bind}-${Date.now().toString(36)}`, type, label: `${ACTORS[bind]} path`, bind, lane: this.defaultLane('path', 'Creatures').id, a: t0, b: r4(Math.min(this.duration, t0 + 20)), blend: 2,
         keys: [{ t: t0, pos: p.map((v) => +v.toFixed(2)) }, { t: t1, pos: p.map((v, i) => +(v + f[i] * 25).toFixed(2)) }] };
       this.toast(`${ACTORS[bind]} path added — move its waypoints in the Scene view (1), or press K there to add one where you look`);
     } else if (type === 'captions') {
@@ -891,6 +997,7 @@ export class Editor {
   deleteSelection() {
     const s = this.sel, d = this.tl.data;
     if (!s || s.kind === 'object' || !this.guard()) return;
+    if (s.kind === 'track' && (s.track.type === 'group' || s.track.type === 'lane')) return this.removeContainer(s.track, s.track.type === 'lane');
     if (s.kind === 'track' && (s.track.keys?.some((k) => k.locked) || s.track.clips?.some((c) => c.locked))) return this.toast('This track has locked items — unlock them first', true);
     const drop = (arr, it) => { const i = arr.indexOf(it); if (i >= 0) arr.splice(i, 1); };
     if (s.kind === 'key') drop(s.track.keys, s.item);

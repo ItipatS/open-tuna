@@ -79,6 +79,9 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
   (dissolve / wipe / ripple), water flow, caustics, chroma-on-scroll, glow and frosted glass refracting the ocean,
   at a depth so fish pass in front. The demo chapter uses them (shader title + huge background type, glass cards,
   glass product panel); real buttons / iframes stay HTML on top.
+- **Timeline organisation**: lanes hold many clips (layers / paths) like video-editor tracks, groups fold tracks
+  away, every row collapses; drop files straight onto a lane at a time; an Assets tab lists / reuses everything in
+  assets/. The demo now sits in one group with 7 lanes (was 22 separate rows); story beats are in a collapsed group.
 - **Creature paths have priority**: no sliding / snapping, the school ignores predators + cursor on a path, creatures
   resume their own behaviour where the path left them. Cursor scaring is off in the story by default (param).
 - Fixed: tuna leaps teleporting into the sky (fish now swim to the launch point and only leap in cycles that

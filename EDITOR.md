@@ -47,6 +47,32 @@ Keys keep their times when the length changes. Things that ran "until the end" k
 On the website, scrolling the whole page plays the whole story. Set *Scroll vh / s* in the Project
 inspector to make scrolling faster or slower.
 
+## Organising the timeline: lanes, groups, collapse
+
+- **Lanes** work like tracks in a video editor. One lane holds many clips side by side: layers (images, text,
+  glass, HTML…) and creature paths. When clips overlap in time, the lane grows a second row for them. You decide
+  what goes where:
+  - **+ Lane** makes a new lane.
+  - Drag a clip **up or down** to move it into another lane.
+  - Or right-click a clip ▸ **Move to lane**.
+- **Groups** are folders. **+ Group** makes one, and right-click any track or lane ▸ **Move to group** adds it.
+  Muting or locking a group or lane applies to everything inside.
+- **Collapse:** click the small triangle at the left of any row. A collapsed group or row shows a thin overview
+  of what's inside.
+- **Drop files straight onto a lane.** Drag images, videos or `.html` files from your computer onto a lane in
+  the timeline. They start where you drop them. Drop several at once and they're placed one after another.
+  Dropping on empty space or on a group makes a new lane.
+
+## Assets
+
+The **Assets** tab on the left (next to *Scene*) shows everything in the project's `assets/` folder, with
+thumbnails. The pink number on a thumbnail is how many layers use that file.
+- **Drag** an asset onto a lane in the timeline (it starts at the drop time), or onto the viewport.
+- **Double-click** an asset to add it at the playhead.
+- Right-click an asset to add it in the 3D world, see which layer uses it, copy its path, or delete it. Deleting
+  warns you if the file is in use.
+- **Upload…**, or drop files onto the panel, to add files without placing them yet.
+
 ## Timeline basics
 
 - **Scrub:** drag in the ruler. Chapters are the coloured bands at the top.

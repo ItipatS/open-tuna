@@ -64,7 +64,9 @@ export class LayerTools {
       this.ed.toast(`Adding ${file.name}…`);
       const src = await this.ed.saves.upload(file);
       const space = kind === 'iframe' ? 'screen' : opts.space || 'screen';
-      this.add({ kind, src, label: file.name.replace(/\.[^.]+$/, ''), ...opts, space });
+      const t = this.add({ kind, src, label: file.name.replace(/\.[^.]+$/, ''), ...opts, space });
+      this.ed.assets?.refresh();
+      return t;
     } catch (e) { this.ed.toast(e.message, true, 6000); }
   }
 
@@ -89,9 +91,9 @@ export class LayerTools {
   }
 
   // create a layer at the playhead, visible for 8 s
-  add({ kind, src = '', html, label, space = 'screen', x = 50, y = 50, pos }) {
+  add({ kind, src = '', html, label, space = 'screen', x = 50, y = 50, pos, lane, at }) {
     const ed = this.ed, D = ed.duration;
-    const a = r4(Math.min(ed.time, Math.max(0, D - 0.5))), b = r4(Math.min(D, a + 8));
+    const a = r4(Math.min(at ?? ed.time, Math.max(0, D - 0.5))), b = r4(Math.min(D, a + 8));
     const world = space === 'world';
     const key = world ? { t: a, pos: (pos ?? this.worldSpot()).map(r2), s: 1, r: 0, o: 1 } : { t: a, x: r2(x), y: r2(y), s: 1, r: 0, o: 1 };
     const id = `layer-${Date.now().toString(36)}`;
@@ -109,8 +111,8 @@ export class LayerTools {
     if (kind === 'glass') Object.assign(t, { w: 30, h: 40, glass: 1, caustic: 0.35 });
     if (kind === 'iframe') { t.h = 50; t.w = 50; t.interactive = true; }
     if (kind === 'video') t.loop = true;
-    const tracks = ed.tl.tracks, ci = tracks.findIndex((q) => q.type === 'captions');
-    tracks.splice(ci >= 0 ? ci + 1 : tracks.length, 0, t);
+    t.lane = (lane ?? ed.defaultLane('layer', 'Layers')).id;
+    ed.tl.tracks.push(t);
     ed.commit();
     ed.select({ kind: 'track', track: t });
     ed.toast(`Layer “${t.label}” added at ${fmtTime(a)} — drag it in the ${world ? 'Scene' : 'Game'} view to place it`);
@@ -146,6 +148,25 @@ export class LayerTools {
       if (kind === 'iframe') t.space = 'screen';
       this.ed.commit();
     } catch (e) { this.ed.toast(e.message, true); }
+  }
+
+  // a drop on the timeline: onto a lane (or a new lane in the group under the pointer), starting at `at`
+  async dropOnTimeline(dt, at, target) {
+    const ed = this.ed;
+    let lane = target?.type === 'lane' ? target : null;
+    if (!lane) lane = ed.addLane({ parent: target?.type === 'group' ? target.id : target?.parent, select: false });
+    if (ed.tl.lockedTrack(lane)) return ed.toast(`“${lane.label}” is locked`, true);
+    const asset = dt.getData('application/x-opentuna-asset');
+    if (asset) return this.addAsset(asset, { lane, at });
+    let t = at;
+    for (const f of dt.files) { const made = await this.addFile(f, { lane, at: t }); if (made) t = made.b; }
+  }
+
+  // an asset already in assets/ (from the Assets tab)
+  addAsset(src, opts = {}) {
+    const kind = kindOf(src);
+    if (!kind) return this.ed.toast(`Can't use ${src}`, true);
+    return this.add({ kind, src, label: src.split('/').pop().replace(/\.[^.]+$/, ''), ...opts, space: kind === 'iframe' ? 'screen' : opts.space || 'screen' });
   }
 
   // ------------------------------------------------------------------ keys
@@ -234,6 +255,7 @@ export class LayerTools {
       t.kind !== 'html' ? { label: 'Replace file…', disabled: L, onClick: () => this.replace(t) } : null,
       t.src ? { label: 'Open source ↗', onClick: () => window.open(t.src, '_blank') } : null,
       { label: 'Duplicate layer', onClick: () => this.duplicate(t) },
+      ed.laneMenu(t),
       '-',
       { label: t.mute ? 'Show (unmute)' : 'Hide (mute)', onClick: () => { if (t.mute) delete t.mute; else t.mute = true; ed.commit(); } },
       { label: L ? 'Unlock' : 'Lock', shortcut: 'L', onClick: () => { ed.select({ kind: 'track', track: t }); ed.toggleLock(); } },
@@ -340,14 +362,17 @@ export class LayerTools {
 
   bindDrop() {
     const ed = this.ed, wrap = ed.$wrap;
-    wrap.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); wrap.classList.add('drop'); } });
+    wrap.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].some((ty) => ty === 'Files' || ty === 'application/x-opentuna-asset')) { e.preventDefault(); wrap.classList.add('drop'); } });
     wrap.addEventListener('dragleave', () => wrap.classList.remove('drop'));
     wrap.addEventListener('drop', async (e) => {
       e.preventDefault();
       wrap.classList.remove('drop');
       const r = ed.$stage.getBoundingClientRect();
       const x = Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100)), y = Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100));
-      for (const f of e.dataTransfer.files) await this.addFile(f, ed.sceneView ? { space: 'world' } : { x, y });
+      const where = ed.sceneView ? { space: 'world' } : { x, y };
+      const asset = e.dataTransfer.getData('application/x-opentuna-asset');
+      if (asset) return this.addAsset(asset, where);
+      for (const f of e.dataTransfer.files) await this.addFile(f, where);
     });
   }
 

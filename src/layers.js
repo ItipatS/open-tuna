@@ -289,7 +289,7 @@ export class Layers {
   // current state of a layer at story time x: { o (incl. fade), f (fade / reveal 0..1), x, y | pos, s, r }
   state(t, x) {
     const k = evalKeys(t.keys ?? [], x, { ...(t.space === 'world' ? WORLD_KEY : SCREEN_KEY) });
-    k.f = t.mute ? 0 : captionOpacity(t, x, this.tl.duration);
+    k.f = this.tl.muted(t) ? 0 : captionOpacity(t, x, this.tl.duration);
     k.o = (k.o ?? 1) * k.f;
     return k;
   }

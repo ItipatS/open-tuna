@@ -8,10 +8,13 @@ import { PARAMS } from '../story.js';
 const HEAD = 210; // track header width (px)
 const CH = 20; // chapter band height
 const RULER = 48; // ruler height (chapter band + ticks + notes)
-const ROW = { camera: 32, captions: 32, curve: 30, clip: 26, layer: 30, path: 30 };
+const ROW = { camera: 32, captions: 32, curve: 30, clip: 26, layer: 30, path: 30, group: 24 };
+const SUB = 24; // height of one clip row inside a lane
+const THIN = 14; // a collapsed row
+const INDENT = 12;
 const PERF_H = 34;
-const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', layer: '#f78fb3', path: '#7be3d0', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f' };
-const TYPE = { camera: 'CAM', captions: 'TXT', curve: 'CRV', clip: 'CLIP', layer: 'LYR', path: 'PATH' };
+const COL = { camera: '#4fb8ff', captions: '#c792ea', curve: '#ffcb6b', clip: '#5fd4a0', layer: '#f78fb3', path: '#7be3d0', lane: '#b49cff', group: '#9aa4b2', note: '#ffd166', play: '#ff9f43', end: '#ff5d8f' };
+const TYPE = { camera: 'CAM', captions: 'TXT', curve: 'CRV', clip: 'CLIP', layer: 'LYR', path: 'PATH', lane: 'LANE', group: '' };
 const BAR = new Set(['layer', 'path']); // tracks drawn as one bar with keys inside (the keys move with the bar)
 const KIND = { image: 'IMG', video: 'VID', html: 'HTML', iframe: 'WEB' };
 const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
@@ -41,6 +44,24 @@ export class TimelineView {
     cv.addEventListener('wheel', (e) => this.wheel(e), { passive: false });
     cv.addEventListener('contextmenu', (e) => this.context(e));
     cv.addEventListener('pointerleave', () => { this.hover = null; });
+    // drop files (or assets from the Assets tab) onto a lane at the time under the pointer
+    const accepts = (e) => [...e.dataTransfer.types].some((ty) => ty === 'Files' || ty === 'application/x-opentuna-asset');
+    cv.addEventListener('dragover', (e) => {
+      if (!accepts(e)) return;
+      e.preventDefault();
+      const [x, y] = this.xy(e);
+      this.dropAt = { t: this.T(x), row: this.rows.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h) };
+      this.draw();
+    });
+    cv.addEventListener('dragleave', () => { this.dropAt = null; this.draw(); });
+    cv.addEventListener('drop', (e) => {
+      if (!accepts(e)) return;
+      e.preventDefault();
+      const [x, y] = this.xy(e);
+      const row = this.rows.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h);
+      this.dropAt = null;
+      this.ed.lt.dropOnTimeline(e.dataTransfer, Math.max(0, this.snap(this.T(x), e)), row?.t ?? null);
+    });
   }
 
   resize() {
@@ -75,9 +96,30 @@ export class TimelineView {
     }
   }
 
+  // rows: groups (folders) with their tracks indented under them, lanes holding several layer / path clips
+  // (packed into sub-rows where they overlap), every row collapsible to a thin strip
   layout() {
+    const tracks = this.ed.tl.tracks;
+    const lanes = new Set(tracks.filter((t) => t.type === 'lane').map((t) => t.id));
+    const groups = new Set(tracks.filter((t) => t.type === 'group').map((t) => t.id));
+    const inLane = (t) => t.lane && lanes.has(t.lane) && BAR.has(t.type);
+    const rows = [];
     let y = RULER;
-    const rows = this.ed.tl.tracks.map((t) => { const r = { t, y, h: ROW[t.type] || 26 }; y += r.h; return r; });
+    const add = (t, depth) => {
+      let h, pack = null;
+      if (t.type === 'group') h = ROW.group;
+      else if (t.type === 'lane') {
+        pack = this.pack(tracks.filter((m) => m.lane === t.id && BAR.has(m.type)));
+        h = t.collapsed ? THIN : Math.max(1, pack.n) * SUB + 6;
+      } else h = t.collapsed ? THIN : ROW[t.type] || 26;
+      rows.push({ t, y, h, depth, pack });
+      y += h;
+    };
+    for (const t of tracks) {
+      if (inLane(t) || (t.parent && groups.has(t.parent) && t.type !== 'group')) continue;
+      add(t, 0);
+      if (t.type === 'group' && !t.collapsed) for (const c of tracks) if (c.parent === t.id && c.type !== 'group' && !inLane(c)) add(c, 1);
+    }
     rows.push({ perf: true, y, h: PERF_H });
     y += PERF_H;
     this.contentH = y;
@@ -85,7 +127,30 @@ export class TimelineView {
     return rows;
   }
 
-  locked(track, item) { return !!(track?.locked || item?.locked); }
+  locked(track, item) { return !!((track && this.ed.tl.lockedTrack(track)) || item?.locked); }
+
+  // overlapping clips in a lane go on separate sub-rows (first free row, by start time)
+  pack(members) {
+    const ends = [], level = new Map();
+    for (const m of [...members].sort((p, q) => p.a - q.a)) {
+      let i = ends.findIndex((e) => e <= m.a + 1e-6);
+      if (i < 0) { i = ends.length; ends.push(0); }
+      ends[i] = m.b;
+      level.set(m, i);
+    }
+    return { level, n: ends.length, members };
+  }
+
+  // everything inside a group / lane / track (for summaries and selection highlights)
+  contents(t) {
+    const tracks = this.ed.tl.tracks;
+    if (t.type === 'lane') return tracks.filter((m) => m.lane === t.id);
+    if (t.type === 'group') {
+      const kids = tracks.filter((c) => c.parent === t.id && c.type !== 'group');
+      return [...kids, ...kids.filter((k) => k.type === 'lane').flatMap((l) => tracks.filter((m) => m.lane === l.id))];
+    }
+    return [t];
+  }
 
   // ------------------------------------------------------------------ drawing
   draw() {
@@ -109,15 +174,22 @@ export class TimelineView {
     for (const r of rows) {
       const y = r.y - this.scrollY;
       if (y > H || y + r.h < RULER) continue;
-      const selTrack = sel && sel.track === r.t;
+      const selTrack = sel && (sel.track === r.t || (r.t?.type === 'lane' && sel.track?.lane === r.t.id));
+      if (r.t?.type === 'group') { ctx.fillStyle = '#16181c'; ctx.fillRect(HEAD, y, W - HEAD, r.h); }
       if (selTrack) { ctx.fillStyle = 'rgba(79,184,255,0.07)'; ctx.fillRect(HEAD, y, W - HEAD, r.h); }
-      if (r.t?.locked) this.hatch(HEAD, y, W - HEAD, r.h);
+      if (r.t && tl.lockedTrack(r.t)) this.hatch(HEAD, y, W - HEAD, r.h);
       ctx.fillStyle = '#2a2e35'; ctx.fillRect(0, y + r.h - 1, W, 1);
       ctx.save();
       ctx.beginPath(); ctx.rect(HEAD, y, W - HEAD, r.h); ctx.clip();
-      ctx.globalAlpha = r.t?.mute ? 0.35 : 1;
+      ctx.globalAlpha = r.t && tl.muted(r.t) ? 0.35 : 1;
       if (r.perf) this.drawPerf(y, r.h);
-      else if (r.t.type === 'camera') this.drawKeys(r.t, y, r.h);
+      else if (r.t.type === 'group' || r.t.collapsed) this.drawSummary(r.t, y, r.h);
+      else if (r.t.type === 'lane') {
+        for (const m of r.pack.members) {
+          ctx.globalAlpha = tl.muted(m) ? 0.35 : 1;
+          this.drawLayer(m, y + 3 + r.pack.level.get(m) * SUB, SUB);
+        }
+      } else if (r.t.type === 'camera') this.drawKeys(r.t, y, r.h);
       else if (r.t.type === 'curve') this.drawCurve(r.t, y, r.h);
       else if (r.t.type === 'clip') this.drawClip(r.t, y, r.h);
       else if (r.t.type === 'captions') this.drawCaptions(r.t, y, r.h);
@@ -133,6 +205,11 @@ export class TimelineView {
     for (const n of tl.data.notes) { const x = this.X(n.t); if (x > HEAD) { ctx.fillStyle = 'rgba(255,209,102,0.22)'; ctx.fillRect(x, RULER, 1, H); } }
     const px = this.X(ed.time);
     if (px >= HEAD) { ctx.fillStyle = COL.play; ctx.fillRect(px - 0.5, RULER, 1.5, H); }
+    if (this.dropAt) {
+      const dx = this.X(this.dropAt.t), r = this.dropAt.row;
+      ctx.fillStyle = 'rgba(247,143,179,0.9)'; ctx.fillRect(dx - 1, RULER, 2, H);
+      if (r && !r.perf) { ctx.strokeStyle = '#f78fb3'; ctx.lineWidth = 2; ctx.strokeRect(HEAD + 1, r.y - this.scrollY + 1, W - HEAD - 2, r.h - 2); }
+    }
     ctx.restore();
 
     this.drawRuler();
@@ -158,9 +235,22 @@ export class TimelineView {
     ctx.restore();
   }
 
+  // a thin overview of what's inside a collapsed row or a group: clip spans and key ticks
+  drawSummary(t, y, hgt) {
+    const { ctx } = this, top = y + 3, bh = Math.max(4, hgt - 6);
+    for (const m of this.contents(t)) {
+      const c = COL[m.type] || '#8b93a0';
+      ctx.fillStyle = `${c}55`;
+      if (m.a !== undefined && m.b !== undefined) ctx.fillRect(this.X(m.a), top + bh * 0.25, Math.max(2, this.X(m.b) - this.X(m.a)), bh * 0.5);
+      if (m.clips) for (const cl of m.clips) ctx.fillRect(this.X(cl.a), top + bh * 0.25, Math.max(2, this.X(cl.b) - this.X(cl.a)), bh * 0.5);
+      ctx.fillStyle = c;
+      if (m.keys && m.type !== 'layer') for (const k of m.keys) ctx.fillRect(this.X(k.t) - 1, top, 2, bh);
+    }
+  }
+
   drawHeader(r, y, selTrack) {
-    const { ctx } = this;
-    ctx.fillStyle = selTrack ? '#23384d' : '#20232a';
+    const { ctx } = this, tl = this.ed.tl;
+    ctx.fillStyle = selTrack ? '#23384d' : r.t?.type === 'group' ? '#1a1d22' : '#20232a';
     ctx.fillRect(0, y, HEAD, r.h - 1);
     ctx.fillStyle = '#2a2e35'; ctx.fillRect(HEAD - 1, y, 1, r.h);
     if (r.perf) {
@@ -168,19 +258,32 @@ export class TimelineView {
       ctx.fillText('Performance (fps)', 12, y + r.h / 2);
       return;
     }
-    const t = r.t, c = COL[t.type] || '#aaa', my = y + r.h / 2;
-    ctx.fillStyle = c; ctx.fillRect(0, y, 3, r.h - 1);
-    ctx.globalAlpha = t.mute ? 0.45 : 1;
-    ctx.fillStyle = '#5d6470'; ctx.font = '600 9px Inter, system-ui, sans-serif';
-    ctx.fillText(TYPE[t.type] || '', 10, my);
+    const t = r.t, c = COL[t.type] || '#aaa', my = y + r.h / 2, ind = r.depth * INDENT;
+    ctx.fillStyle = c; ctx.fillRect(ind, y, 3, r.h - 1);
+    // collapse triangle
+    const open = !t.collapsed, tx = ind + 11;
+    ctx.fillStyle = '#8b93a0';
+    ctx.beginPath();
+    if (open) { ctx.moveTo(tx - 4, my - 2); ctx.lineTo(tx + 4, my - 2); ctx.lineTo(tx, my + 3); } else { ctx.moveTo(tx - 2, my - 4); ctx.lineTo(tx + 3, my); ctx.lineTo(tx - 2, my + 4); }
+    ctx.fill();
+    if (r.h <= THIN) { ctx.font = '10px Inter, system-ui, sans-serif'; }
+    ctx.globalAlpha = tl.muted(t) ? 0.45 : 1;
+    let lx = ind + 20;
+    if (TYPE[t.type]) {
+      ctx.fillStyle = '#5d6470'; ctx.font = '600 9px Inter, system-ui, sans-serif';
+      ctx.fillText(TYPE[t.type], lx, my);
+      lx += 30;
+    }
+    ctx.font = t.type === 'group' ? '600 11px Inter, "Segoe UI", system-ui, sans-serif' : r.h <= THIN ? '10px Inter, system-ui, sans-serif' : '11px Inter, "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = t.type === 'group' ? '#eef2f7' : '#d9dee6';
+    const n = t.type === 'group' || t.type === 'lane' ? this.contents(t).filter((m) => m.type !== 'lane').length : 0;
+    ctx.fillText(this.ellipsis(`${t.label || t.id}${n ? `  (${n})` : ''}`, HEAD - lx - 50), lx, my);
     ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
-    ctx.fillStyle = '#d9dee6';
-    ctx.fillText(this.ellipsis(t.label || t.id, HEAD - 92), 40, my);
     ctx.globalAlpha = 1;
     // lock toggle
-    const lx = HEAD - 38;
-    if (t.locked) this.lockIcon(lx, my + 1, '#ffb35c');
-    else { ctx.globalAlpha = 0.28; this.lockIcon(lx, my + 1, '#8b93a0'); ctx.globalAlpha = 1; }
+    const kx = HEAD - 38;
+    if (t.locked) this.lockIcon(kx, my + 1, '#ffb35c');
+    else { ctx.globalAlpha = 0.28; this.lockIcon(kx, my + 1, '#8b93a0'); ctx.globalAlpha = 1; }
     // mute toggle
     const mx = HEAD - 16;
     ctx.beginPath(); ctx.arc(mx, my, 4.5, 0, Math.PI * 2);
@@ -410,7 +513,30 @@ export class TimelineView {
     if (!r) return null;
     if (r.perf) return { type: x < HEAD ? 'perfHead' : 'ruler' };
     const t = r.t;
-    if (x < HEAD) return { type: 'header', track: t, mute: x > HEAD - 27, lock: x > HEAD - 48 && x <= HEAD - 27 };
+    const ind = r.depth * INDENT;
+    if (x < HEAD) return { type: 'header', track: t, row: r, mute: x > HEAD - 27, lock: x > HEAD - 48 && x <= HEAD - 27, fold: x >= ind && x < ind + 20 };
+    if (t.type === 'group' || t.collapsed) return { type: 'lane', track: t, row: r };
+    if (t.type === 'lane') {
+      const lv = Math.floor((cy - r.y - 3) / SUB);
+      const m = r.pack.members.find((q) => r.pack.level.get(q) === lv && x > this.X(q.a) - 6 && x < this.X(q.b) + 6);
+      return m ? this.hitBar(m, x) : { type: 'lane', track: t, row: r };
+    }
+    return this.hitTrack(t, x);
+  }
+
+  hitBar(t, x) {
+    if (t.keys && (t.type !== 'layer' || t.keys.length > 1)) {
+      let best = null, bd = 8;
+      for (const k of t.keys) { const d = Math.abs(this.X(k.t) - x); if (d < bd) { bd = d; best = k; } }
+      if (best) return { type: 'key', track: t, item: best };
+    }
+    const x0 = this.X(t.a), x1 = this.X(t.b);
+    if (Math.abs(x - x0) < 6) return { type: 'edgeA', track: t, item: t };
+    if (Math.abs(x - x1) < 6) return { type: 'edgeB', track: t, item: t };
+    return { type: 'body', track: t, item: t };
+  }
+
+  hitTrack(t, x) {
     if (t.keys && (t.type !== 'layer' || t.keys.length > 1)) {
       let best = null, bd = 8;
       for (const k of t.keys) { const d = Math.abs(this.X(k.t) - x); if (d < bd) { bd = d; best = k; } }
@@ -484,6 +610,11 @@ export class TimelineView {
         if (!hit.item.locked) this.drag = { type: 'marker', item: hit.item, off: hit.item.t - t };
         break;
       case 'header':
+        if (hit.fold) {
+          if (hit.track.collapsed) delete hit.track.collapsed; else hit.track.collapsed = true;
+          ed.commit();
+          break;
+        }
         if (hit.mute) {
           if (hit.track.mute) delete hit.track.mute; else hit.track.mute = true;
           ed.commit();
@@ -555,6 +686,11 @@ export class TimelineView {
       a = Math.abs(sa - a) <= Math.abs(sb - (a + w)) ? sa : sb - w;
       d.item.a = clamp(a, 0, D - w); d.item.b = d.item.a + w;
       if (d.keys0) d.item.keys.forEach((k, i) => { k.t = Math.round((d.keys0[i] + d.item.a - d.a) * 1e4) / 1e4; });
+      // vertical: into the lane under the pointer (like moving a clip between tracks in a video editor)
+      if (BAR.has(d.item.type) && d.item.lane) {
+        const row = this.rows.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h);
+        if (row?.t?.type === 'lane' && row.t.id !== d.item.lane && !ed.tl.lockedTrack(row.t)) d.item.lane = row.t.id;
+      }
       ed.changed();
     }
   }
@@ -577,6 +713,7 @@ export class TimelineView {
     const t = this.snap(this.T(x), e);
     const at = { x: e.clientX, y: e.clientY };
     if (BAR.has(hit.track?.type) && /edge|body/.test(hit.type)) return ed.contextMenu(at.x, at.y, { kind: hit.track.type, track: hit.track, t });
+    if (hit.type === 'lane' && (hit.track.type === 'lane' || hit.track.type === 'group')) return ed.contextMenu(at.x, at.y, { kind: 'track', track: hit.track, t });
     const map = {
       key: { kind: 'key', track: hit.track, item: hit.item },
       edgeA: { kind: 'clip', track: hit.track, item: hit.item },
