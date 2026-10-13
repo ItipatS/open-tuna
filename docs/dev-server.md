@@ -27,11 +27,15 @@ to that folder. Git endpoints refuse projects. See [projects-build-data.md](proj
 | POST | `asset-delete?file=` | deletes one file under `assets/` (built-ins can't be deleted) |
 | GET | `files` | what a .tuna holds: `story.json`, `assets/**`, `saves/checkpoints/*.json` with size / mtime |
 | GET | `projects` | working copies in `projects/`: `{project, name (manifest), mtime, thumb}`, newest first |
-| POST | `project/new?name=` | creates `projects/<slug>/` (slug from the name, `-2`… if taken) → `{project}` |
+| POST | `project/new?name=` | creates `projects/<slug>/` (slug from the name, `-2`… if taken) → `{project}`. `&from=repo` fills it with a copy of the repo story (story.json, assets/, checkpoints) + a manifest: the home page's *Open a copy of the demo* |
 | POST | `put?project=&file=` | body = bytes → one file of a project (only `story.json`, `manifest.json`, `thumb.webp/png`, `assets/**` with an allowed extension, `saves/checkpoints/*.json`); overwrites. Projects only |
 | GET | `git/status` | `{branch, upstream, ahead, changes}` for story.json / saves/checkpoints / assets |
 | POST | `git/commit` | body `{message}`: commits **only** story.json, saves/checkpoints, assets |
 | POST | `git/push` | pushes the current branch (`-u origin HEAD` if no upstream); `GIT_TERMINAL_PROMPT=0` |
+
+**Options** (shared servers, see [deploy.md](deploy.md)): `--host`, `--password` (env `OPEN_TUNA_PASSWORD`; HTTP
+Basic on every request), `--no-git` (git endpoints refuse; ping reports `git: false`), `--landing` (`/` serves
+`studio.html`). PowerShell: `-BindHost`, `-Password`, `-NoGit`, `-Landing`. `--open` / `-Open` open `studio.html`.
 
 **Safety.** Reads and deletes are limited to `story.json`, `saves/**/*.json` and `assets/**`. Nothing else can be
 written except through `save` / `checkpoint` / `upload` / `put` (projects only, whitelisted paths, no `..`).

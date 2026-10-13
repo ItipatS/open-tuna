@@ -21,6 +21,7 @@ This file is the entry point. Details live in `docs/` — read the one you need:
 | [docs/editor.md](docs/editor.md) | Changing the editor (`src/editor/`): modules, selection / undo model, timeline rows, gizmos, saves, play modes |
 | [docs/projects-build-data.md](docs/projects-build-data.md) | `.tuna` project files, `?project=` working copies, *Build site*, live data sources and `{{bindings}}` |
 | [docs/dev-server.md](docs/dev-server.md) | The local servers (`tools/serve.py` / `serve.ps1`) and their `/__editor/*` API |
+| [docs/deploy.md](docs/deploy.md) | Running the studio on a company server: HTTPS proxy, `--password`, `--no-git`, `--landing` |
 | [docs/assets.md](docs/assets.md) | GLB models (per-model fixes), `assets/`, the demo placeholder art |
 | [docs/testing.md](docs/testing.md) | Verifying anything: headless Chrome + puppeteer recipes, fps, WebGPU errors, **test hygiene** |
 | [docs/gotchas.md](docs/gotchas.md) | Before touching rendering / the editor: bugs already paid for |
@@ -45,12 +46,13 @@ This file is the entry point. Details live in `docs/` — read the one you need:
 ## Run
 
 ```sh
-python3 tools/serve.py --open        # site http://localhost:8123  ·  editor http://localhost:8123/?edit
+python3 tools/serve.py --open        # home http://localhost:8123/studio.html · editor /index.html?edit · site /
 ```
 Use Chrome or Edge (WebGPU). For non-developers there are double-click launchers: `Open Editor.bat` (Windows,
 which falls back to `tools/serve.ps1` without Python) and `Open Editor.command` (macOS).
 
 URL flags:
+- `studio.html` — the studio home page (demo, new / open / recent projects). The launchers open it.
 - `?edit` — the editor (`&project=<slug>`: an opened .tuna project in `projects/<slug>/`).
 - `?t=42` / `?p=0.7` — open the site at that point (seconds / progress).
 - `?lab` (`&free`) — the old playground.
@@ -66,6 +68,7 @@ to happen. Keep asset paths relative.
 ```
 story.json            THE STORY DATA (times in seconds). Edited by the editor — see docs/story-format.md
 index.html            page shell: import map, fonts, #captions overlay (captions + DOM layers), lab panel
+studio.html           the studio home page (+ studio/*.jpg, frames of the demo); uses src/editor/project.js helpers
 src/main.js           bootstrap, scene assembly, post, params -> uniforms, main loop
 src/story.js          Story: story time -> camera / sun / params / school / water 50 / leaps / paths / captions;
                       PARAMS, DRIVERS, ACTORS registries; flightTargets()

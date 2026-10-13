@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """Open Tuna dev server: serves the project (never cached) + the editor's save system.
 
-    python3 tools/serve.py            -> http://localhost:8123/        (the site)
-    python3 tools/serve.py --open     -> also opens http://localhost:8123/?edit  (the editor)
+    python3 tools/serve.py            -> http://localhost:8123/             (the site)
+    python3 tools/serve.py --open     -> also opens http://localhost:8123/studio.html  (the home page)
     python3 tools/serve.py 8200       -> another port
 
-Editor endpoints (src/editor/saves.js, src/editor/project.js). Only listens on 127.0.0.1. Stdlib only.
+Shared / company server (see docs/deploy.md — it needs HTTPS in front, WebGPU only runs on https:// or localhost):
+    --host 0.0.0.0      listen on every interface (default 127.0.0.1: this computer only)
+    --password          ask for a password (HTTP Basic, any user name); the value comes from the environment
+                        variable OPEN_TUNA_PASSWORD (`--password=secret` also works but shows in the process list)
+    --no-git            turn off the git endpoints (commit / push with the server's credentials)
+    --landing           "/" shows the home page (studio.html) instead of the story (still at /index.html)
+
+Editor endpoints (src/editor/saves.js, src/editor/project.js). Stdlib only.
 tools/serve.ps1 is the same server for Windows machines without Python - keep them in sync.
 
 Every endpoint works on the repo's own story (story.json, assets/, saves/ at the root) or, with ?project=<slug>, on
@@ -25,14 +32,17 @@ project root; the built-in *.glb models always live at the repo root.
     POST /__editor/asset-delete?file=    delete one file under assets/
     GET  /__editor/files                 what a .tuna holds: story.json, assets/**, saves/checkpoints/*.json
     GET  /__editor/projects              unpacked .tuna projects in projects/ {project, name, mtime, thumb}
-    POST /__editor/project/new?name=     make projects/<slug>/ -> {project}
+    POST /__editor/project/new?name=     make projects/<slug>/ -> {project}; &from=repo copies the repo story into it
+                                         (story.json, assets/, saves/checkpoints/) — "open a copy of the demo"
     POST /__editor/put?project=&file=    body = bytes -> one file of a project (story.json, manifest.json, thumb.*,
                                          assets/**, saves/checkpoints/*.json); overwrites. Projects only.
     GET  /__editor/git/status            {branch, upstream, changes}                       (repo only)
     POST /__editor/git/commit            body {message} -> commits story.json + saves/checkpoints + assets  (repo only)
     POST /__editor/git/push              pushes the current branch                         (repo only)
 """
+import base64
 import datetime
+import hmac
 import http.server
 import json
 import os
@@ -57,6 +67,7 @@ TYPES = {
     '.ktx2': 'image/ktx2', '.hdr': 'application/octet-stream', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
 }
 LOCK = threading.Lock()
+OPTS = {'password': '', 'git': True, 'landing': False}  # set from the command line in main()
 
 
 def stamp():
@@ -251,8 +262,37 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         return u.path, {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
 
+    def authorized(self):
+        """--password: HTTP Basic (any user name). Sends the 401 challenge and returns False when it doesn't match."""
+        if not OPTS['password']:
+            return True
+        h = self.headers.get('Authorization', '')
+        try:
+            pw = base64.b64decode(h[6:]).decode('utf-8').split(':', 1)[1] if h.startswith('Basic ') else ''
+        except (ValueError, IndexError):
+            pw = ''
+        if hmac.compare_digest(pw.encode(), OPTS['password'].encode()):
+            return True
+        body = b'Password required'
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'Basic realm="Open Tuna Studio", charset="UTF-8"')
+        self.send_header('Content-Type', 'text/plain')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
+    def do_HEAD(self):
+        if self.authorized():
+            super().do_HEAD()
+
     def do_GET(self):
+        if not self.authorized():
+            return None
         path, q = self.route()
+        if OPTS['landing'] and path == '/':  # --landing: the home page at the root
+            self.path = '/studio.html' + (f'?{urllib.parse.urlparse(self.path).query}' if '?' in self.path else '')
+            path = '/studio.html'
         if not path.startswith('/__editor/'):
             if self.headers.get('Range') and self.ranged():
                 return None
@@ -261,6 +301,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             P = Proj(q.get('project', ''))
             if path == '/__editor/ping':
                 g = has_git()
+                g = g and OPTS['git']
                 return self.reply(200, {'ok': True, 'save': True, 'git': g and not P.slug, 'branch': git('branch', '--show-current')[1] if g else ''})
             if path == '/__editor/list':
                 hist = []
@@ -312,7 +353,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 out.sort(key=lambda p: -p['mtime'])
                 return self.reply(200, {'projects': out})
             if path == '/__editor/git/status':
-                if P.slug or not has_git():
+                if P.slug or not OPTS['git'] or not has_git():
                     return self.reply(200, {'git': False})
                 br = git('branch', '--show-current')[1]
                 up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
@@ -324,6 +365,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return self.reply(404, {'ok': False, 'error': 'unknown endpoint'})
 
     def do_POST(self):
+        if not self.authorized():
+            return None
         path, q = self.route()
         try:
             with LOCK:
@@ -333,7 +376,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     while os.path.exists(os.path.join(PROJECTS, slug)):
                         n += 1
                         slug = f'{base}-{n}'
-                    os.makedirs(os.path.join(PROJECTS, slug))
+                    d = os.path.join(PROJECTS, slug)
+                    os.makedirs(d)
+                    if q.get('from') == 'repo':  # a copy of the repo story (the demo) to play with
+                        repo = Proj('')
+                        shutil.copyfile(repo.story, os.path.join(d, 'story.json'))  # a fresh date: it's a new project
+                        if os.path.isdir(repo.assets):
+                            shutil.copytree(repo.assets, os.path.join(d, 'assets'))
+                        if os.path.isdir(repo.check):
+                            shutil.copytree(repo.check, os.path.join(d, 'saves', 'checkpoints'))
+                        write(os.path.join(d, 'manifest.json'), json.dumps({'format': 'open-tuna', 'version': 1, 'name': q.get('name') or slug, 'created': datetime.datetime.now().isoformat(timespec='seconds')}, indent=2).encode())
                     return self.reply(200, {'ok': True, 'project': slug})
                 P = Proj(q.get('project', ''))
                 if path == '/__editor/put':
@@ -399,6 +451,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.reply(200, {'ok': True})
                 if path in ('/__editor/git/commit', '/__editor/git/push') and P.slug:
                     raise ValueError('a .tuna project is saved as a file, not to git')
+                if path in ('/__editor/git/commit', '/__editor/git/push') and not OPTS['git']:
+                    raise ValueError('git is turned off on this server (--no-git)')
                 if path == '/__editor/git/commit':
                     msg = (json.loads(self.body() or b'{}').get('message') or '').strip() or 'Update story'
                     paths = ['story.json'] + [d for d, full in (('saves/checkpoints', P.check), ('assets', P.assets)) if os.path.isdir(full) and os.listdir(full)]
@@ -420,11 +474,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    argv = sys.argv[1:]
+    host = '127.0.0.1'
+    if '--host' in argv:
+        host = argv[argv.index('--host') + 1]
+        del argv[argv.index('--host'):argv.index('--host') + 2]
+    pw = next((a.split('=', 1)[1] for a in argv if a.startswith('--password=')), None)
+    if pw is None and '--password' in argv:
+        pw = os.environ.get('OPEN_TUNA_PASSWORD', '')
+        if not pw:
+            sys.exit('--password: set the OPEN_TUNA_PASSWORD environment variable')
+    OPTS.update(password=pw or '', git='--no-git' not in argv, landing='--landing' in argv)
+    if host not in ('127.0.0.1', 'localhost') and not OPTS['password']:
+        print('\n  WARNING: listening beyond this computer WITHOUT a password: anyone who can reach it can change the\n'
+              '  story, upload files and use git. Add --password (and --no-git).\n')
+    args = [a for a in argv if not a.startswith('--')]
     port = int(args[0]) if args else 8123
     for p in range(port, port + 20):
         try:
-            server = Server(('127.0.0.1', p), Handler)
+            server = Server((host, p), Handler)
             break
         except OSError:
             continue
@@ -432,14 +500,18 @@ def main():
         sys.exit(f'No free port between {port} and {port + 19}')
     base = f'http://localhost:{p}/'
     print(f'\n  Open Tuna dev server - {ROOT}\n')
-    print(f'  Editor : {base}?edit')
-    print(f'  Site   : {base}')
-    print(f'  Lab    : {base}?lab\n')
+    print(f'  Studio : {base}studio.html   (home: demo, new / open projects)')
+    print(f'  Editor : {base}index.html?edit')
+    print(f'  Site   : {base}{"index.html" if OPTS["landing"] else ""}')
+    print(f'  Lab    : {base}index.html?lab')
+    if host not in ('127.0.0.1', 'localhost'):
+        print(f'  Listening on {host}:{p}{" · password on" if OPTS["password"] else ""}{" · git off" if not OPTS["git"] else ""}')
+    print()
     print('  Use Chrome or Edge (WebGPU). Keep this window open; Ctrl+C to stop.\n')
     if not shutil.which('git'):
         print('  (git not found: the editor\'s Git menu is disabled)\n')
     if '--open' in sys.argv:
-        threading.Timer(0.6, lambda: webbrowser.open(f'{base}?edit')).start()
+        threading.Timer(0.6, lambda: webbrowser.open(f'{base}studio.html')).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

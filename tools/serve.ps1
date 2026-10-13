@@ -2,7 +2,9 @@
 # tools/serve.py (keep them in sync): serves the project with no caching + the editor's save system.
 # Every endpoint works on the repo's story or, with ?project=<slug>, on an opened .tuna in projects/<slug>/.
 #   powershell -ExecutionPolicy Bypass -File tools\serve.ps1 [-Port 8123] [-Open]
-param([int]$Port = 8123, [switch]$Open)
+# Shared server (docs/deploy.md; needs HTTPS in front): -BindHost + (all interfaces, needs an admin shell or a urlacl),
+# -Password (HTTP Basic; the value comes from $env:OPEN_TUNA_PASSWORD), -NoGit, -Landing ("/" = studio.html).
+param([int]$Port = 8123, [switch]$Open, [string]$BindHost = 'localhost', [switch]$Password, [switch]$NoGit, [switch]$Landing)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -18,13 +20,20 @@ $types = @{
   '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.webp' = 'image/webp'; '.svg' = 'image/svg+xml'
   '.mp3' = 'audio/mpeg'; '.ogg' = 'audio/ogg'; '.mp4' = 'video/mp4'; '.webm' = 'video/webm'
 }
-$hasGitExe = [bool](Get-Command git -ErrorAction SilentlyContinue)
+$hasGitExe = [bool](Get-Command git -ErrorAction SilentlyContinue) -and -not $NoGit
+$pw = ''
+if ($Password) {
+  $pw = $env:OPEN_TUNA_PASSWORD
+  if (-not $pw) { Write-Host '-Password: set the OPEN_TUNA_PASSWORD environment variable'; exit 1 }
+}
+if ($BindHost -ne 'localhost' -and -not $pw) { Write-Host "`n  WARNING: listening beyond this computer WITHOUT a password - add -Password (and -NoGit).`n" }
 
 $listener = $null
 for ($p = $Port; $p -lt $Port + 20; $p++) {
   try {
     $l = New-Object System.Net.HttpListener
-    $l.Prefixes.Add("http://localhost:$p/")
+    $l.Prefixes.Add("http://${BindHost}:$p/")
+    if ($pw) { $l.AuthenticationSchemes = [System.Net.AuthenticationSchemes]::Basic }
     $l.Start()
     $listener = $l; $Port = $p; break
   } catch { }
@@ -35,13 +44,15 @@ $base = "http://localhost:$Port/"
 Write-Host ""
 Write-Host "  Open Tuna dev server - $root"
 Write-Host ""
-Write-Host "  Editor : ${base}?edit"
-Write-Host "  Site   : $base"
-Write-Host "  Lab    : ${base}?lab"
+Write-Host "  Studio : ${base}studio.html   (home: demo, new / open projects)"
+Write-Host "  Editor : ${base}index.html?edit"
+Write-Host "  Site   : ${base}$(if ($Landing) { 'index.html' })"
+Write-Host "  Lab    : ${base}index.html?lab"
+if ($BindHost -ne 'localhost') { Write-Host "  Listening on ${BindHost}:$Port$(if ($pw) { ' - password on' })$(if ($NoGit) { ' - git off' })" }
 Write-Host ""
 Write-Host "  Use Chrome or Edge (WebGPU). Keep this window open; Ctrl+C to stop."
 if (-not $hasGitExe) { Write-Host "  (git not found: the editor's Git menu is disabled)" }
-if ($Open) { Start-Process "${base}?edit" }
+if ($Open) { Start-Process "${base}studio.html" }
 
 function Send($ctx, [int]$code, [byte[]]$bytes, [string]$type) {
   $res = $ctx.Response
@@ -158,7 +169,18 @@ function Editor($ctx, [string]$path) {
     if (-not $slugBase) { $slugBase = 'project' }
     $slug = $slugBase; $n = 1
     while (Test-Path (Join-Path $projectsDir $slug)) { $n++; $slug = "$slugBase-$n" }
-    New-Item -ItemType Directory -Force (Join-Path $projectsDir $slug) | Out-Null
+    $d = Join-Path $projectsDir $slug
+    New-Item -ItemType Directory -Force $d | Out-Null
+    if ($q['from'] -eq 'repo') {
+      # a copy of the repo story (the demo) to play with
+      $repo = Proj ''
+      Copy-Item -LiteralPath $repo.story (Join-Path $d 'story.json')
+      (Get-Item (Join-Path $d 'story.json')).LastWriteTime = Get-Date  # a fresh date: it's a new project
+      if (Test-Path $repo.assets) { Copy-Item -Recurse -LiteralPath $repo.assets (Join-Path $d 'assets') }
+      if (Test-Path $repo.check) { New-Item -ItemType Directory -Force (Join-Path $d 'saves') | Out-Null; Copy-Item -Recurse -LiteralPath $repo.check (Join-Path $d 'saves\checkpoints') }
+      $nm = if ($q['name']) { $q['name'] } else { $slug }
+      WriteFile (Join-Path $d 'manifest.json') (ConvertTo-Json ([ordered]@{ format = 'open-tuna'; version = 1; name = $nm; created = (Get-Date).ToString('s') }))
+    }
     SendJson $ctx 200 @{ ok = $true; project = $slug }; return
   }
   $P = Proj $q['project']
@@ -192,6 +214,7 @@ function Editor($ctx, [string]$path) {
   }
   if ($req.HttpMethod -eq 'POST') { $body = (New-Object IO.StreamReader($req.InputStream, $utf8)).ReadToEnd() }
   if ($P.slug -and $path.StartsWith('/__editor/git/') -and $path -ne '/__editor/git/status') { throw 'a .tuna project is saved as a file, not to git' }
+  if ($NoGit -and ($path -eq '/__editor/git/commit' -or $path -eq '/__editor/git/push')) { throw 'git is turned off on this server (-NoGit)' }
   switch ($path) {
     '/__editor/ping' {
       $g = HasGit
@@ -328,7 +351,12 @@ try {
   while ($listener.IsListening) {
     $ctx = $listener.GetContext()
     try {
+      if ($pw -and ($null -eq $ctx.User -or $ctx.User.Identity.Password -ne $pw)) {
+        try { $ctx.Response.AddHeader('WWW-Authenticate', 'Basic realm="Open Tuna Studio"') } catch { }
+        Send $ctx 401 ([Text.Encoding]::UTF8.GetBytes('Password required')) 'text/plain'; continue
+      }
       $path = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath)
+      if ($Landing -and $path -eq '/') { $path = '/studio.html' }
       if ($path.StartsWith('/__editor/')) {
         try { Editor $ctx $path } catch { SendJson $ctx 400 @{ ok = $false; error = "$_" } }
         continue

@@ -100,7 +100,12 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
     - Still to do: an owner / CTO decision on what's contractually customer-editable; a "travel along the route
       per item" camera mode (today a cycle must loop back to where it started).
 
-  Details: docs/projects-build-data.md.
+  - **Studio home page** (`studio.html`): the demo (watch / open a copy / edit the original), new project (blank or
+    a copy of the demo), open `.tuna` (picker or drop), and recent projects. The launchers open it.
+  - **The studio can run on a company server** (docs/deploy.md). The servers now have `--password`, `--no-git`,
+    `--landing` and `--host`. It needs HTTPS in front, because WebGPU only runs on secure pages.
+
+  Details: docs/projects-build-data.md, docs/deploy.md.
 - **Docs restructured for AI agents**: CLAUDE.md is now a short index → `docs/` (ai-workflows, story-format,
   architecture, editor, dev-server, assets, testing, gotchas). AGENTS.md points there.
 - **Creature paths have priority**: no sliding / snapping, the school ignores predators + cursor on a path, creatures

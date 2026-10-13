@@ -342,6 +342,7 @@ export class Editor {
       { label: 'New project…', onClick: () => P.newDialog(), disabled: !s.server },
       { label: 'Open .tuna file…', shortcut: `${mod}O`, onClick: () => P.pickAndOpen(), disabled: !s.server },
       { label: 'Projects / recent…', onClick: () => P.recentDialog() },
+      { label: 'Home (studio page) ↗', onClick: async () => { await P.leave(); this.leaving = true; location.href = './studio.html'; } },
       P.isFile ? { label: 'Back to the repo story', onClick: async () => { await P.leave(); P.go(''); } } : null,
       '-',
       { label: P.isFile ? `Save ${P.fileName}` : 'Save', shortcut: `${mod}S`, onClick: () => s.save() },
@@ -1337,7 +1338,7 @@ export class Editor {
   }
 
   // the site's time for this moment (stretch regions: the previewed item's cycle)
-  openSite() { window.open(`./?${PROJECT ? `project=${PROJECT}&` : ''}t=${this.tl.warp(this.time, this.story.previewItem).toFixed(2)}`, '_blank'); }
+  openSite() { window.open(`./index.html?${PROJECT ? `project=${PROJECT}&` : ''}t=${this.tl.warp(this.time, this.story.previewItem).toFixed(2)}`, '_blank'); }
 
   // window title + the project button in the top bar
   syncTitle() {

@@ -11,8 +11,9 @@ like a .psd. **Build site** turns either one into a website you can upload anywh
 2. Double-click the launcher in the project folder:
    - **Windows:** `Open Editor.bat`
    - **Mac:** `Open Editor.command` (first time: right-click → Open, to get past Gatekeeper)
-3. Chrome or Edge opens at `http://localhost:8123/?edit`. Keep the black server window open while
-   you work; closing it stops the editor.
+3. Chrome or Edge opens the **studio home page** (`http://localhost:8123/studio.html`): start from the demo, make
+   a new project, open a `.tuna`, or pick a recent project. Keep the black server window open while you work;
+   closing it stops the editor. (On your company's studio server, just open its address.)
 
 The Mac launcher needs Python 3 (`xcode-select --install`). On Windows it uses Python if it's
 installed, otherwise a built-in PowerShell server, so there's nothing to install.

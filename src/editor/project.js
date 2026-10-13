@@ -9,7 +9,8 @@
 // uploads go there, so the runtime loads plain URLs) and reloads the editor on ?edit&project=<slug>.
 // Save writes the working copy, then the .tuna file itself (File System Access: the same file you opened, the
 // handle is remembered per project in IndexedDB). The repo's own story (no ?project) stays a git project;
-// "Save as .tuna" packages it.
+// "Save as .tuna" packages it. The standalone helpers below (unpackTuna, openTunaFile, blankTuna, editorURL) are
+// also used by the home page (studio.html).
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 import { h, btn, download } from './dom.js';
 import { dialog } from './menu.js';
@@ -32,7 +33,7 @@ function idb() {
     r.onerror = () => rej(r.error);
   });
 }
-async function kv(key, val) {
+export async function kv(key, val) {
   const db = await idb();
   return new Promise((res, rej) => {
     const st = db.transaction('kv', val === undefined ? 'readonly' : 'readwrite').objectStore('kv');
@@ -41,6 +42,9 @@ async function kv(key, val) {
     r.onerror = () => rej(r.error);
   });
 }
+
+// the editor on a project ('' = the repo story)
+export const editorURL = (slug) => `./index.html?edit${slug ? `&project=${slug}` : ''}`;
 
 // a blank story for File ▸ New project ▸ Blank
 function blankStory(title) {
@@ -59,6 +63,48 @@ function blankStory(title) {
     ],
     sources: [],
   }, null, 2)}\n`;
+}
+
+// a .tuna holding a blank story
+export function blankTuna(name) {
+  return zipSync({ 'story.json': strToU8(blankStory(name)), 'manifest.json': strToU8(JSON.stringify({ format: 'open-tuna', version: TUNA_VERSION, name, created: new Date().toISOString() }, null, 2)) });
+}
+
+// .tuna bytes -> a new projects/<slug>/ working copy (through the dev server) -> { slug, story }
+export async function unpackTuna(bytes, fallbackName, { progress, warn } = {}) {
+  let entries;
+  try { entries = unzipSync(bytes); } catch { throw new Error('this isn’t a .tuna file (not a zip)'); }
+  if (!entries['story.json']) throw new Error('this .tuna has no story.json inside');
+  const story = strFromU8(entries['story.json']);
+  if (!Array.isArray(JSON.parse(story).tracks)) throw new Error('the story.json inside is not an Open Tuna story');
+  let manifest = {};
+  try { manifest = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])) : {}; } catch { /* keep going */ }
+  if (manifest.version > TUNA_VERSION) warn?.(`This .tuna was made by a newer editor (v${manifest.version}) — some things may not show`);
+  const name = manifest.name || fallbackName || 'Untitled';
+  if (!entries['manifest.json']) entries['manifest.json'] = strToU8(JSON.stringify({ format: 'open-tuna', version: TUNA_VERSION, name }, null, 2));
+  const made = await fetch(`./__editor/project/new?name=${encodeURIComponent(name)}`, { method: 'POST', body: '' });
+  const j = await made.json().catch(() => ({}));
+  if (!made.ok) throw new Error(j.error || `HTTP ${made.status}`);
+  const names = Object.keys(entries).filter((n) => !n.endsWith('/') && PUTABLE.test(n));
+  let i = 0;
+  for (const n of names) {
+    progress?.(`Unpacking ${n} (${++i}/${names.length})`);
+    const r = await fetch(apiFor(j.project, `put?file=${encodeURIComponent(n)}`), { method: 'POST', body: entries[n] });
+    if (!r.ok) throw new Error(`${n}: ${(await r.json().catch(() => ({}))).error || r.status}`);
+  }
+  return { slug: j.project, story };
+}
+
+// a File (input / drop) or a FileSystemFileHandle (picker: Save later writes back to it) -> working copy slug
+export async function openTunaFile(fileOrHandle, opts = {}) {
+  const handle = fileOrHandle.getFile ? fileOrHandle : null;
+  const file = handle ? await handle.getFile() : fileOrHandle;
+  const { slug, story } = await unpackTuna(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.tuna$/i, ''), opts);
+  try {
+    if (handle) await kv(`handle:${slug}`, handle);
+    await kv(`saved:${slug}`, fnv1a(story));
+  } catch { /* IndexedDB unavailable: Save will ask where to save */ }
+  return slug;
 }
 
 export class ProjectFiles {
@@ -132,28 +178,8 @@ export class ProjectFiles {
   }
 
   // .tuna bytes -> a new projects/<slug>/ working copy -> its slug
-  async unpack(bytes, fallbackName, progress) {
-    let entries;
-    try { entries = unzipSync(bytes); } catch { throw new Error('this isn’t a .tuna file (not a zip)'); }
-    if (!entries['story.json']) throw new Error('this .tuna has no story.json inside');
-    const story = strFromU8(entries['story.json']);
-    if (!Array.isArray(JSON.parse(story).tracks)) throw new Error('the story.json inside is not an Open Tuna story');
-    let manifest = {};
-    try { manifest = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])) : {}; } catch { /* keep going */ }
-    if (manifest.version > TUNA_VERSION) this.ed.toast(`This .tuna was made by a newer editor (v${manifest.version}) — some things may not show`, true, 8000);
-    const name = manifest.name || fallbackName || 'Untitled';
-    if (!entries['manifest.json']) entries['manifest.json'] = strToU8(JSON.stringify({ format: 'open-tuna', version: TUNA_VERSION, name }, null, 2));
-    const made = await fetch(`./__editor/project/new?name=${encodeURIComponent(name)}`, { method: 'POST', body: '' });
-    const j = await made.json().catch(() => ({}));
-    if (!made.ok) throw new Error(j.error || `HTTP ${made.status}`);
-    const names = Object.keys(entries).filter((n) => !n.endsWith('/') && PUTABLE.test(n));
-    let i = 0;
-    for (const n of names) {
-      progress?.(`Unpacking ${n} (${++i}/${names.length})`);
-      const r = await fetch(apiFor(j.project, `put?file=${encodeURIComponent(n)}`), { method: 'POST', body: entries[n] });
-      if (!r.ok) throw new Error(`${n}: ${(await r.json().catch(() => ({}))).error || r.status}`);
-    }
-    return { slug: j.project, story };
+  unpack(bytes, fallbackName, progress) {
+    return unpackTuna(bytes, fallbackName, { progress, warn: (m) => this.ed.toast(m, true, 8000) });
   }
 
   // ---------------------------------------------------------------- open
@@ -170,20 +196,14 @@ export class ProjectFiles {
   // a File (input / drop) or a FileSystemFileHandle (picker: saving later writes back to it)
   async openTuna(fileOrHandle) {
     if (!this.ed.saves.server) return this.ed.toast('Opening a .tuna needs the editor server — start the editor with “Open Editor”', true, 6000);
-    const handle = fileOrHandle.getFile ? fileOrHandle : null;
-    const file = handle ? await handle.getFile() : fileOrHandle;
-    const busy = this.busy(`Opening ${file.name}…`);
+    const name = fileOrHandle.name;
+    const busy = this.busy(`Opening ${name}…`);
     try {
       await this.leave();
-      const { slug, story } = await this.unpack(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.tuna$/i, ''), busy.set);
-      try {
-        if (handle) await kv(`handle:${slug}`, handle);
-        await kv(`saved:${slug}`, fnv1a(story));
-      } catch { /* IndexedDB unavailable: Save will ask where to save */ }
-      this.go(slug);
+      this.go(await openTunaFile(fileOrHandle, { progress: busy.set, warn: (m) => this.ed.toast(m, true, 8000) }));
     } catch (e) {
       busy.close();
-      this.ed.toast(`Couldn’t open ${file.name}: ${e.message}`, true, 8000);
+      this.ed.toast(`Couldn’t open ${name}: ${e.message}`, true, 8000);
     }
   }
 
@@ -194,7 +214,7 @@ export class ProjectFiles {
 
   go(slug) {
     this.ed.leaving = true; // no "unsaved changes" prompt: just saved
-    location.href = slug ? `./?edit&project=${slug}` : './?edit';
+    location.href = editorURL(slug);
   }
 
   // ---------------------------------------------------------------- save
@@ -254,7 +274,7 @@ export class ProjectFiles {
         await this.leave();
         const bytes = copy.checked
           ? await this.pack(this.ed.current(), { name, progress: busy.set })
-          : zipSync({ 'story.json': strToU8(blankStory(name)), 'manifest.json': strToU8(JSON.stringify({ format: 'open-tuna', version: TUNA_VERSION, name, created: new Date().toISOString() }, null, 2)) });
+          : blankTuna(name);
         const { slug } = await this.unpack(bytes, name, busy.set);
         this.go(slug);
       } catch (e) { busy.close(); this.ed.toast(`Couldn’t create it: ${e.message}`, true, 8000); return false; }
