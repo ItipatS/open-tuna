@@ -3,77 +3,137 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Open Tuna — WebGPU</title>
+<title>Open Tuna Studio</title>
+<meta name="description" content="Design scroll-driven WebGPU ocean stories on a timeline, connect them to your CMS, and build a standalone site." />
 <link rel="icon" href="data:,">
-<style>
-  :root {
-    --glass: rgba(8, 28, 40, 0.55);
-    --line: rgba(160, 225, 255, 0.18);
-    --text: #dff4ff;
-    --dim: #8fb7c9;
-    --accent: #6fe3ff;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #02121c; color: var(--text);
-    font: 13px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; }
-  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
-
-  #loader { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #0c3a52, #020d14 70%); z-index: 20; transition: opacity .8s; }
-  #loader.hidden { opacity: 0; pointer-events: none; }
-  #loader .box { width: min(420px, 80vw); text-align: center; }
-  #loader h1 { font-weight: 300; letter-spacing: .3em; font-size: 22px; margin: 0 0 18px; }
-  #loader .bar { height: 3px; background: rgba(255,255,255,.1); border-radius: 2px; overflow: hidden; }
-  #loader .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-  #loader p { color: var(--dim); margin-top: 12px; min-height: 1.4em; }
-  #loader.error p { color: #ff9c8f; white-space: pre-line; }
-
-  #panel { position: fixed; top: 14px; right: 14px; width: 260px; padding: 14px 14px 10px; background: var(--glass);
-    border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); z-index: 10; user-select: none; }
-  #panel.collapsed .body { display: none; }
-  #panel header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-  #panel header b { font-weight: 600; letter-spacing: .08em; font-size: 12px; text-transform: uppercase; }
-  #fps { font-variant-numeric: tabular-nums; color: var(--accent); }
-  .row { margin-top: 10px; }
-  .row label { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; }
-  .row label span { color: var(--text); font-variant-numeric: tabular-nums; }
-  input[type=range] { width: 100%; accent-color: var(--accent); margin: 4px 0 0; }
-  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-top: 12px; }
-  .toggles label { display: flex; gap: 6px; align-items: center; color: var(--dim); font-size: 12px; cursor: pointer; }
-  input[type=checkbox] { accent-color: var(--accent); }
-  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
-  button { background: rgba(111, 227, 255, .08); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 6px 0; font: inherit; font-size: 11px; cursor: pointer; }
-  button:hover { background: rgba(111, 227, 255, .2); }
-  .btns2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
-  .btns2 button { padding: 8px 0; font-size: 12px; letter-spacing: .04em; }
-  #cine.on { background: rgba(111, 227, 255, .28); border-color: rgba(111, 227, 255, .6); }
-  #help { position: fixed; left: 14px; bottom: 12px; color: var(--dim); font-size: 12px; z-index: 10; text-shadow: 0 1px 2px #000; pointer-events: none; }
-  #help b { color: var(--text); font-weight: 600; }
-  @media (max-width: 600px) { #panel { width: calc(100vw - 28px); } #help { display: none; } }
-
-  /* ---- story mode (default; ?lab restores the playground panel) */
-  html.story, html.story body { overflow-x: hidden; overflow-y: auto; height: auto; }
-  html.story canvas { position: fixed; inset: 0; pointer-events: none; }
-  html.story #panel, html.story #help { display: none; }
-  #scrollspace { display: none; }
-  html.story #scrollspace { display: block; height: 900vh; }
-  #captions { display: none; position: fixed; inset: 0; z-index: 5; pointer-events: none; container-type: size; overflow: hidden; }
-  html.story #captions, html.edit #captions { display: block; }
-  /* media layers (src/layers.js) share the overlay with the captions; z-index decides who is on top */
-  .layer { position: absolute; left: 50%; top: 50%; pointer-events: none; transform-origin: 50% 50%; }
-  .layer > img, .layer > video { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
-  .layer.fixed-h > * { height: 100%; }
-  .layer > iframe { display: block; width: 100%; border: 0; background: transparent; }
-  .layer > .html { color: #f4fbff; font: 500 clamp(14px, 1.6cqw, 22px)/1.45 "Inter", system-ui, sans-serif; }
-  .cap { position: absolute; left: 0; right: 0; z-index: 10; text-align: center; opacity: 0; visibility: hidden;
-    color: #f4fbff; text-shadow: 0 2px 24px rgba(0, 20, 30, .55); will-change: opacity, transform; }
-  .cap h1, .cap h2 { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 500; margin: 0; letter-spacing: .01em; }
-  .cap h1 { font-size: clamp(30px, 7cqw, 104px); line-height: .98; }
-  .cap h2 { font-size: clamp(22px, 4.2cqw, 60px); line-height: 1.05; }
-  .cap p { font: 500 11px/1 "Inter", system-ui, sans-serif; letter-spacing: .4em; text-transform: uppercase; margin-top: 34px; opacity: .8; }
-</style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Home page of the editor: the demo, new / open / recent projects (docs/projects-build-data.md). The dev server
+     (tools/serve.py) serves it at /studio.html, or at / with --landing. Without the server it's a read-only page. -->
+<style>
+  :root {
+    --bg: #04121b; --bg2: #071c28; --card: rgba(13, 38, 52, 0.72); --line: rgba(160, 225, 255, 0.14); --line2: rgba(160, 225, 255, 0.3);
+    --text: #e6f6ff; --dim: #93b9cb; --faint: #5f8396; --accent: #6fe3ff; --gold: #f2c879; --bad: #ff8f80; --good: #6ee7a8;
+    --serif: "Cormorant Garamond", Georgia, serif; --sans: Inter, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  button { font: inherit; color: inherit; }
+  .wrap { width: min(1180px, 100% - 32px); margin: 0 auto; }
+
+  /* nav */
+  nav { position: fixed; inset: 0 0 auto; z-index: 20; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); background: rgba(4, 18, 27, 0.55); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; gap: 18px; height: 60px; }
+  .logo { font: 600 12px/1 var(--sans); letter-spacing: .28em; text-transform: uppercase; text-decoration: none; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .logo i { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #bff4ff, #2aa6d6 45%, #0b3f5e 75%); box-shadow: 0 0 18px rgba(111, 227, 255, .5); }
+  .logo b { color: var(--gold); font-weight: 600; }
+  nav .links { display: flex; gap: 22px; margin-left: auto; font-size: 13px; color: var(--dim); }
+  nav .links a { text-decoration: none; } nav .links a:hover { color: var(--text); }
+  .pill { font-size: 11px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line2); color: var(--dim); white-space: nowrap; }
+  .pill.on { color: var(--good); border-color: rgba(110, 231, 168, .4); }
+  .pill.off { color: var(--gold); border-color: rgba(242, 200, 121, .4); }
+
+  /* hero */
+  .hero { position: relative; min-height: min(100vh, 860px); display: flex; align-items: center; overflow: hidden; }
+  .hero::before { content: ""; position: absolute; inset: 0; background: url("studio/hero.jpg") 62% 50% / cover no-repeat; transform: scale(1.04); animation: drift 24s ease-in-out infinite alternate; }
+  .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(4, 18, 27, .92) 0%, rgba(4, 18, 27, .7) 38%, rgba(4, 18, 27, .05) 75%), linear-gradient(0deg, var(--bg) 0%, transparent 28%); }
+  @keyframes drift { to { transform: scale(1.1) translate(-1.5%, -1%); } }
+  .hero .wrap { position: relative; z-index: 1; padding: 120px 0 90px; }
+  .kicker { font: 600 11px/1 var(--sans); letter-spacing: .32em; text-transform: uppercase; color: var(--gold); }
+  h1 { font: 500 clamp(44px, 6.4vw, 84px)/1.02 var(--serif); margin: 18px 0 20px; max-width: 12ch; letter-spacing: -.01em; }
+  h1 em { font-style: italic; color: #bdefff; }
+  .lede { max-width: 520px; color: #c3dfeb; font-size: 17px; margin: 0 0 34px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn { display: inline-flex; align-items: center; gap: 9px; height: 46px; padding: 0 22px; border-radius: 99px; border: 1px solid var(--line2); background: rgba(10, 34, 48, .55); cursor: pointer; text-decoration: none; font-weight: 500; transition: transform .15s, background .2s, border-color .2s; }
+  .btn:hover { transform: translateY(-1px); border-color: var(--accent); background: rgba(16, 50, 68, .8); }
+  .btn.primary { background: linear-gradient(135deg, #8beeff, #39b8e8); color: #04202e; border: none; font-weight: 600; box-shadow: 0 10px 30px -10px rgba(111, 227, 255, .6); }
+  .btn.primary:hover { background: linear-gradient(135deg, #a7f3ff, #4cc6f2); }
+  .btn.small { height: 36px; padding: 0 16px; font-size: 13px; }
+  .btn[disabled] { opacity: .4; pointer-events: none; }
+  .btn svg { width: 16px; height: 16px; }
+  .note { margin-top: 18px; font-size: 13px; color: var(--gold); max-width: 560px; }
+  .note:empty { display: none; }
+
+  /* sections */
+  section.block { padding: 70px 0; }
+  .sh { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 28px; flex-wrap: wrap; }
+  h2 { font: 500 clamp(30px, 3.4vw, 44px)/1.1 var(--serif); margin: 10px 0 0; }
+  .sh p { color: var(--dim); margin: 0; max-width: 460px; }
+
+  /* demo */
+  .demo { display: grid; grid-template-columns: 1.35fr 1fr; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; background: var(--card); }
+  .demo .media { position: relative; min-height: 360px; background: url("studio/underwater.jpg") center / cover; }
+  .demo .media .strip { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 10px; }
+  .demo .media .strip span { width: 120px; aspect-ratio: 16/9; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .35); background: center / cover; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+  .demo .body { padding: 34px 34px 30px; display: flex; flex-direction: column; gap: 14px; }
+  .demo h3 { font: 500 34px/1.1 var(--serif); margin: 0; }
+  .demo ul { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; }
+  .demo ul li { margin: 3px 0; }
+  .demo .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; }
+  .demo .team { font-size: 12px; color: var(--faint); }
+  .demo .team a { color: var(--dim); }
+
+  /* projects */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
+  .pcard { text-align: left; padding: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--card); cursor: pointer; transition: transform .15s, border-color .2s; display: flex; flex-direction: column; }
+  .pcard:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .pcard .th { aspect-ratio: 16 / 9; background: linear-gradient(135deg, #0d3a52, #062030); display: grid; place-items: center; font: 500 40px/1 var(--serif); color: rgba(191, 244, 255, .5); }
+  .pcard .th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pcard .meta { padding: 12px 14px 14px; }
+  .pcard b { display: block; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pcard small { color: var(--faint); font-size: 12px; }
+  .pcard.new { border-style: dashed; justify-content: center; align-items: center; min-height: 190px; color: var(--dim); gap: 8px; }
+  .pcard.new span { font-size: 30px; line-height: 1; color: var(--accent); }
+  .empty { color: var(--faint); font-size: 14px; padding: 6px 0 18px; }
+
+  /* how */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+  .step { border: 1px solid var(--line); border-radius: 16px; padding: 22px; background: linear-gradient(180deg, rgba(13, 38, 52, .6), rgba(13, 38, 52, .2)); }
+  .step i { font: italic 500 30px/1 var(--serif); color: var(--gold); }
+  .step h4 { margin: 12px 0 6px; font-size: 16px; }
+  .step p { margin: 0; color: var(--dim); font-size: 14px; }
+
+  footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: var(--faint); font-size: 13px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: space-between; }
+  footer a { color: var(--dim); }
+
+  /* dialog + drop + busy */
+  .modal { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; background: rgba(2, 10, 16, .7); backdrop-filter: blur(6px); padding: 16px; }
+  .modal.on { display: grid; }
+  .dlg { width: min(460px, 100%); border: 1px solid var(--line2); border-radius: 18px; background: #0a2232; padding: 26px; box-shadow: 0 30px 80px rgba(0, 0, 0, .5); }
+  .dlg h3 { margin: 0 0 16px; font: 500 30px/1.1 var(--serif); }
+  .dlg label { display: block; font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+  .dlg input[type=text] { display: block; width: 100%; margin-top: 6px; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line2); background: #061722; color: var(--text); font: inherit; }
+  .dlg input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .opt { display: flex !important; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; color: var(--text) !important; }
+  .opt:has(input:checked) { border-color: var(--accent); background: rgba(111, 227, 255, .06); }
+  .opt input { margin-top: 4px; accent-color: var(--accent); }
+  .opt small { display: block; color: var(--dim); font-size: 12px; }
+  .dlg .row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+  .drop { position: fixed; inset: 12px; z-index: 60; border: 2px dashed var(--accent); border-radius: 24px; display: none; place-items: center; background: rgba(4, 18, 27, .8); font: 500 34px var(--serif); pointer-events: none; }
+  .drop.on { display: grid; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 70; padding: 12px 18px; border-radius: 12px; background: #0d2c3e; border: 1px solid var(--line2); font-size: 14px; display: none; max-width: calc(100% - 32px); }
+  .toast.on { display: block; }
+  .toast.err { border-color: rgba(255, 143, 128, .5); color: var(--bad); }
+
+  @media (max-width: 900px) {
+    .demo { grid-template-columns: 1fr; }
+    .demo .media { min-height: 240px; }
+    .steps { grid-template-columns: 1fr 1fr; }
+    nav .links a.hide-m { display: none; }
+  }
+  @media (max-width: 560px) {
+    .steps { grid-template-columns: 1fr; }
+    .demo .media .strip span { width: 84px; }
+    nav .links { gap: 12px; }
+    .pill { font-size: 0; width: 10px; height: 10px; padding: 0; flex: none; }
+    .pill.on { background: var(--good); } .pill.off { background: var(--gold); }
+    .hero::after { background: linear-gradient(0deg, rgba(4, 18, 27, .95) 10%, rgba(4, 18, 27, .55) 70%, rgba(4, 18, 27, .3)); }
+  }
+</style>
 <script type="importmap">
 {
   "imports": {
@@ -81,47 +141,233 @@
     "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
     "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
-    "meshoptimizer/simplifier": "https://cdn.jsdelivr.net/npm/meshoptimizer@0.22.0/meshopt_simplifier.module.js",
     "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"
   }
 }
 </script>
 </head>
 <body>
-<div id="loader"><div class="box"><h1>OPEN OCEAN</h1><div class="bar"><i id="bar"></i></div><p id="status">Initialising WebGPU…</p></div></div>
-
-<div id="panel">
-  <header id="panelHead"><b>Ocean</b><span id="fps">– fps</span></header>
-  <div class="body">
-    <div class="row"><label>Tuna <span id="vTuna"></span></label><input id="tuna" type="range" min="200" max="4096" step="1"></div>
-    <div class="row"><label>Reef fish <span id="vReef"></span></label><input id="reef" type="range" min="0" max="2048" step="1"></div>
-    <div class="row"><label>Jellyfish <span id="vJelly"></span></label><input id="jelly" type="range" min="0" max="520" step="1"></div>
-    <div class="row"><label>Sea state <span id="vSea"></span></label><input id="sea" type="range" min="0" max="2" step="0.01"></div>
-    <div class="row"><label>Water clarity <span id="vClarity"></span></label><input id="clarity" type="range" min="0" max="1" step="0.01"></div>
-    <div class="row"><label>Sun elevation <span id="vSun"></span></label><input id="sun" type="range" min="4" max="85" step="0.5"></div>
-    <div class="row"><label>Render scale <span id="vScale"></span></label><input id="scale" type="range" min="0.4" max="1" step="0.05"></div>
-    <div class="toggles">
-      <label><input id="godrays" type="checkbox" checked> God rays</label>
-      <label><input id="bloom" type="checkbox" checked> Bloom</label>
-      <label><input id="shadows" type="checkbox" checked> Shadows</label>
-      <label><input id="scare" type="checkbox" checked> Cursor scares</label>
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#top"><i></i>Open Tuna <b>Studio</b></a>
+    <div class="links">
+      <a href="#demo" class="hide-m">Demo</a>
+      <a href="#projects">Projects</a>
+      <a href="#how" class="hide-m">How it works</a>
+      <a href="EDITOR.md" target="_blank" rel="noopener">Guide</a>
     </div>
-    <div class="btns2">
-      <button id="cine" class="wide">Cinematic</button>
-      <button id="breach" class="wide">Breach!</button>
-    </div>
-    <div class="btns">
-      <button data-cam="reef">Reef</button>
-      <button data-cam="school">School</button>
-      <button data-cam="surface">Surface</button>
-      <button data-cam="aerial">Aerial</button>
-    </div>
+    <span class="pill" id="status">…</span>
   </div>
-</div>
-<div id="captions"></div>
-<div id="scrollspace"></div>
-<div id="help"><b>Drag</b> orbit · <b>Wheel</b> zoom · <b>WASD / QE</b> swim · <b>Move cursor</b> through the school to scatter it · <b>Click</b> the scene to take the camera</div>
+</nav>
 
-<script type="module" src="./src/main.js"></script>
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="kicker">Immersive web stories · WebGPU</div>
+    <h1>Scroll-driven <em>ocean stories</em>, designed on a timeline.</h1>
+    <p class="lede">A living 3D ocean with schools, whales and water you can shape. Place media and 3D models on a timeline, connect your CMS, and build a site you can host anywhere.</p>
+    <div class="actions">
+      <button class="btn primary" data-act="new"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M7 2h2v5h5v2H9v5H7V9H2V7h5z"/></svg>New project</button>
+      <button class="btn" data-act="open"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3h5l1.5 1.5h6.5v8.5h-13z"/></svg>Open .tuna file</button>
+      <a class="btn" href="index.html" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>Watch the demo</a>
+    </div>
+    <div class="note" id="note"></div>
+  </div>
+</header>
+
+<main>
+  <section class="block" id="demo">
+    <div class="wrap">
+      <div class="sh"><div><div class="kicker">Start from the demo</div><h2>Thai Union · 50 years</h2></div>
+        <p>Our pre-made scene: everything the studio can do in one story. Open a copy and take it apart. The original stays untouched.</p></div>
+      <div class="demo">
+        <div class="media"><div class="strip"><span style="background-image:url(studio/hero.jpg)"></span><span style="background-image:url(studio/journey.jpg)"></span></div></div>
+        <div class="body">
+          <h3>From the open ocean to the table</h3>
+          <ul>
+            <li>A 2000-fish GPU school, sharks, whales and turtles on paths</li>
+            <li>Water tentacles that draw a glowing “50” at golden hour</li>
+            <li>Shader layers: glass cards, liquid type, parallax and 3D models</li>
+            <li>A camera that dives, surfaces and follows the school as you scroll</li>
+          </ul>
+          <div class="row">
+            <button class="btn primary small" data-act="demo-copy">Open a copy in the editor</button>
+            <a class="btn small" href="index.html" target="_blank" rel="noopener">Watch it</a>
+          </div>
+          <div class="team">Team only: <a href="index.html?edit">edit the original</a> (the repository’s story, saved to git).</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="projects">
+    <div class="wrap">
+      <div class="sh"><div><div class="kicker">Your work</div><h2>Projects</h2></div>
+        <p>Every project is a <b>.tuna</b> file: story, media and preview in one file. Keep it anywhere and open it on any computer running the studio.</p></div>
+      <div class="empty" id="pempty"></div>
+      <div class="grid" id="plist"></div>
+    </div>
+  </section>
+
+  <section class="block" id="how">
+    <div class="wrap">
+      <div class="sh"><div><div class="kicker">How it works</div><h2>From idea to a live site</h2></div></div>
+      <div class="steps">
+        <div class="step"><i>i.</i><h4>Design on a timeline</h4><p>Camera keys, captions, shader layers, 3D models and creature paths, in story time. Scene view to place, Game view to see what visitors see.</p></div>
+        <div class="step"><i>ii.</i><h4>Connect your content</h4><p>Bind text and images to a CMS or API with <code>{{bindings}}</code>. Scenes can repeat per product, so the site grows when the CMS does.</p></div>
+        <div class="step"><i>iii.</i><h4>Save &amp; share</h4><p>Ctrl+S writes your .tuna file. Autosave, checkpoints and restore keep every version. Send the file to a teammate.</p></div>
+        <div class="step"><i>iv.</i><h4>Build the site</h4><p>One click exports a standalone site, with no editor inside, ready for any host over HTTPS.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Open Tuna Studio · WebGPU · runs in Chrome / Edge</span>
+    <span><a href="EDITOR.md" target="_blank" rel="noopener">Editor guide</a> · <a href="docs/projects-build-data.md" target="_blank" rel="noopener">Projects, build &amp; data</a> · <a href="docs/deploy.md" target="_blank" rel="noopener">Deploying the studio</a></span>
+  </div>
+</footer>
+
+<div class="modal" id="newdlg">
+  <form class="dlg" id="newform">
+    <h3>New project</h3>
+    <label>Name<input type="text" id="pname" placeholder="e.g. Japan launch" maxlength="60" autocomplete="off" required></label>
+    <label class="opt"><input type="radio" name="tpl" value="blank" checked><span>Blank<small>The ocean, a camera and an empty timeline.</small></span></label>
+    <label class="opt"><input type="radio" name="tpl" value="demo"><span>Copy of the demo<small>The Thai Union story with all its media, to adapt.</small></span></label>
+    <div class="row"><button type="button" class="btn small" data-act="close">Cancel</button><button type="submit" class="btn primary small">Create</button></div>
+  </form>
+</div>
+<div class="drop" id="drop">Drop a .tuna file to open it</div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { unpackTuna, openTunaFile, blankTuna, editorURL } from './src/editor/project.js';
+
+const $ = (s) => document.querySelector(s);
+let server = false;
+
+function toast(msg, err = false, ms = 4000) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = `toast on${err ? ' err' : ''}`;
+  clearTimeout(toast.timer);
+  if (ms) toast.timer = setTimeout(() => { t.className = 'toast'; }, ms);
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+async function ping() {
+  try {
+    const r = await fetch('./__editor/ping', { cache: 'no-store' });
+    server = r.ok && (await r.json()).save === true;
+  } catch { server = false; }
+  const st = $('#status');
+  st.textContent = server ? 'Studio server connected' : 'Read-only';
+  st.className = `pill ${server ? 'on' : 'off'}`;
+  const notes = [];
+  if (!server) notes.push('Creating and saving projects needs the studio server: run “Open Editor” on your computer, or use your team’s studio address.');
+  if (!navigator.gpu) notes.push(isSecureContext ? 'This browser has no WebGPU. Use a current Chrome or Edge.' : 'WebGPU needs a secure page: open the studio over https:// (or localhost).');
+  $('#note').textContent = notes.join(' ');
+  document.querySelectorAll('[data-act="new"], [data-act="open"], [data-act="demo-copy"]').forEach((b) => { b.disabled = !server; });
+}
+
+async function loadProjects() {
+  const list = $('#plist');
+  let items = [];
+  if (server) {
+    try { items = (await (await fetch('./__editor/projects', { cache: 'no-store' })).json()).projects; } catch { /* keep empty */ }
+  }
+  $('#pempty').textContent = server ? (items.length ? '' : 'No projects yet. Create one, open a .tuna file, or start from the demo.') : 'Your projects show here when the studio server is running.';
+  const card = (p) => {
+    const b = document.createElement('button');
+    b.className = 'pcard';
+    b.title = `Open ${p.name}`;
+    b.innerHTML = `<div class="th">${p.thumb ? `<img src="./${esc(p.thumb)}?v=${p.mtime}" alt="" loading="lazy">` : esc((p.name || '?').trim().charAt(0).toUpperCase())}</div>
+      <div class="meta"><b>${esc(p.name)}</b><small>Edited ${new Date(p.mtime * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</small></div>`;
+    b.addEventListener('click', () => { location.href = editorURL(p.project); });
+    return b;
+  };
+  const add = document.createElement('button');
+  add.className = 'pcard new';
+  add.innerHTML = '<span>+</span>New project';
+  add.disabled = !server;
+  add.addEventListener('click', openNew);
+  list.replaceChildren(...items.map(card), ...(server ? [add] : []));
+}
+
+// ---- new project
+function openNew() {
+  if (!server) return;
+  $('#newdlg').classList.add('on');
+  setTimeout(() => $('#pname').focus(), 0);
+}
+function closeNew() { $('#newdlg').classList.remove('on'); }
+async function create(name, tpl) {
+  toast(tpl === 'demo' ? 'Copying the demo…' : 'Creating…', false, 0);
+  try {
+    let slug;
+    if (tpl === 'demo') {
+      const r = await fetch(`./__editor/project/new?from=repo&name=${encodeURIComponent(name)}`, { method: 'POST', body: '' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      slug = j.project;
+    } else {
+      slug = (await unpackTuna(blankTuna(name), name, { progress: (t) => toast(t, false, 0) })).slug;
+    }
+    location.href = editorURL(slug);
+  } catch (e) { toast(`Couldn’t create it: ${e.message}`, true, 8000); }
+}
+$('#newform').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('#pname').value.trim() || 'Untitled';
+  const tpl = new FormData(e.target).get('tpl');
+  closeNew();
+  create(name, tpl);
+});
+$('#newdlg').addEventListener('pointerdown', (e) => { if (e.target.id === 'newdlg') closeNew(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNew(); });
+
+// ---- open a .tuna
+async function open(fileOrHandle) {
+  if (!server) return toast('Opening a .tuna needs the studio server', true);
+  toast(`Opening ${fileOrHandle.name}…`, false, 0);
+  try {
+    const slug = await openTunaFile(fileOrHandle, { progress: (t) => toast(t, false, 0), warn: (m) => toast(m, true, 6000) });
+    location.href = editorURL(slug);
+  } catch (e) { toast(`Couldn’t open ${fileOrHandle.name}: ${e.message}`, true, 8000); }
+}
+async function pick() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await window.showOpenFilePicker({ types: [{ description: 'Open Tuna project', accept: { 'application/octet-stream': ['.tuna'] } }] });
+      if (h) return open(h);
+    } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.tuna' });
+  input.addEventListener('change', () => { if (input.files[0]) open(input.files[0]); });
+  input.click();
+}
+let depth = 0;
+addEventListener('dragenter', (e) => { if ([...e.dataTransfer.types].includes('Files')) { depth++; $('#drop').classList.add('on'); } });
+addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; $('#drop').classList.remove('on'); } });
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', (e) => {
+  e.preventDefault();
+  depth = 0;
+  $('#drop').classList.remove('on');
+  const f = [...e.dataTransfer.files].find((x) => /\.tuna$/i.test(x.name));
+  if (f) open(f); else if (e.dataTransfer.files.length) toast('Only .tuna project files open here', true);
+});
+
+document.addEventListener('click', (e) => {
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (act === 'new') openNew();
+  else if (act === 'open') pick();
+  else if (act === 'close') closeNew();
+  else if (act === 'demo-copy') create('Thai Union demo', 'demo');
+});
+
+await ping();
+await loadProjects();
+</script>
 </body>
 </html>
