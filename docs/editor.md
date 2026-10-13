@@ -6,7 +6,7 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 
 | File | Role |
 |---|---|
-| `editor.js` | `Editor`: DOM shell (top bar + project button, left Scene / Assets / Data tabs (`showTab`), viewport, inspector, timeline, resizable panels), menus (`menuFile/Edit/View/Help`), right-click menus (`contextItems(target)`), selection (`sels` / `sel`, `select(sel, mode)`), locks, `commit` / undo / redo (diffs, see below), play modes (+ In–Out loop), keyboard + clipboard events, Copy ref / links (`copyLink`), groups / lanes, path waypoints. Bulk editing comes from `edit-ops.js` |
+| `editor.js` | `Editor`: DOM shell (top bar + project button + avatars + activity ticker, left Scene / Assets / Data / History tabs (`showTab`), viewport + rewind bar, inspector, timeline, resizable panels), menus (`menuFile/Edit/View/Help`), right-click menus (`contextItems(target)`), selection (`sels` / `sel`, `select(sel, mode)`), locks (`lockedBy`), `commit` / undo / redo (per person), live hooks (`adoptServer`, `applyRemote`, `renderPresence`), rewind (`enterPreview` / `exitPreview` / `previewDiff`), play modes (+ In–Out loop), keyboard + clipboard events, Copy ref / links (`copyLink`), groups / lanes, path waypoints. Bulk editing comes from `edit-ops.js` |
 | `timeline-view.js` | `TimelineView`: one canvas covering the ruler (chapters, notes, playhead, END flag), rows (`layout()`: groups → indented members, lanes with clips packed into sub-rows by `pack()`, collapsed rows → `drawSummary`), the performance lane, hit testing (`hit` → `hitBar` / `hitTrack`), dragging (scrub, keys, clip edges / body incl. moving between lanes, END, markers), snapping, zoom / pan, drops of files / assets |
 | `inspector.js` | `Inspector`: property panels per selection (project, track, group / lane `container`, key, caption, chapter, note, layer + layer key, path + waypoint, object). Field widgets bind getters / setters; `input` = live (`ed.changed()`), `change` / drag end = undo step (`ed.commit()`); read-only when locked |
 | `layer-tools.js` | `LayerTools`: add layers (file / URL / HTML / text / glass / model / asset), `LOOKS` presets, parallax, auto-key (`keyAt`), Game-view picking / dragging / scaling (DOM layers by element, GPU layers by `Layers.rect`), drops on the viewport / timeline (`dropOnTimeline`) |
@@ -17,9 +17,12 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
 | `build.js` | `SiteBuilder`: File ▸ Build site — collects the runtime (import crawl from `src/main.js`, no `src/editor/`), models, used assets → zip / folder |
 | `data-panel.js` | `DataPanel`: the left **Data** tab — sources, status, JSON tree, binding menu, sample / headers dialogs |
 | `thumbs.js` | `ModelThumbs`: turntable previews of GLBs rendered on the editor's renderer (24 frames into a webp strip, Cache API), `spin(asset)` element |
-| `doc.js` | The story as **entities** (`doc`, `meta`, `settings`, `params`, `order`, `t:<track>`, `k:<track>:<id>`, `c:<track>:<id>`, `ch:<id>`, `n:<id>`) and **changes** `{e, set: {field: [before, after]}} \| {e, add} \| {e, del}`: `ensureIds`, `roundAll`, `entities`, `diff` / `diffDocs`, `apply` (in place, returns what really changed), `invert`, `stillValid`, `summarize` (undo labels) |
+| `doc.js` | The story as **entities** (`doc`, `meta`, `settings`, `params`, `order`, `t:<track>`, `k:<track>:<id>`, `c:<track>:<id>`, `ch:<id>`, `n:<id>`) and **changes** `{e, set: {field: [before, after]}} \| {e, add} \| {e, del}`: `ensureIds`, `roundAll`, `entities`, `diff` / `diffDocs`, `apply` (in place, returns what really changed), `invert`, `stillValid`, `summarize` (History labels). **Mirrored in `tools/collab.py`** — change both |
+| `sync.js` | `Sync`: live team editing against the studio server — join (`sync/state`), push committed edits in order (a queue, retried while offline), long-poll the edit stream, presence (who / playhead / selection), field marks so a remote edit never overwrites a pending / later edit of mine. `live` stays false without the server |
+| `history-panel.js` | `HistoryPanel`: the left **History** tab — every edit (who, when, label), rewind preview (`editor.enterPreview`), *Restore this version* (`sync/restore`), *Undo just this* (`sync/revert`), the rewind slider |
 | `edit-ops.js` | Bulk editing, **mixed into `Editor.prototype`**: `timedSelection`, clipboard v3 (`clipboardOf` / `copy` / `cut` / `paste` / `pasteValues`, system clipboard events, cross-project media via `asset-import`), `cloneSelection` (Alt-drag), `deleteSelection`, `duplicate`, `nudge`, `scaleTiming` / `scaleDialog`, `alignToPlayhead`, `distribute`, `splitAtPlayhead` / `splitBar`, select all / after / in range, In / Out (`range`, `loop`), `insertTime` / `deleteTime` (ripple), `replaceAsset`, `colorItems`, `multiItems` (right-click on a multi-selection) |
 | `import.js` | `Importer`: File ▸ Import into this story — reads a .tuna / story.json, picks tracks / marks, uploads its media (`upload?dir=`), merges via `paste()` (optionally after `insertTime`) |
+| `library.js` | `Library`: team snippets (`/__editor/library*`): save the selection, insert at the playhead (media via `asset-import?from=lib:<id>`) |
 | `check.js` | `Checker`: File ▸ Check project — missing media (relink), unknown `{{source}}` bindings, timing problems, duplicate binds, ignored stretches, invisible layers, empty captions, slow moments (`editor.perf`), open notes, locks. `summary()` feeds the Build dialog |
 | `recorder.js` | `Recorder`: File ▸ Record a review video — plays at 1×, composites the canvas (`app.onFrame`) + the visible captions into a 2D canvas, `MediaRecorder` → MP4 (avc3/avc1) or WebM, saved from a click in the "ready" dialog |
 | `menu.js` | context menus / drop-downs (`openMenu`), modal dialogs (`dialog`) |
@@ -33,19 +36,24 @@ The designer's guide is [EDITOR.md](../EDITOR.md). This doc covers how the edito
   rebuild from `version`.
 - `editor.commit(label?)` ends an edit. It gives new items ids (`ensureIds`), rounds numbers like the file
   (`roundAll`), and **diffs `editor.base`** (the story as last committed) against the data: those changes are ONE
-  step — pushed on the undo stack, applied to `base`, labelled (`summarize` unless a label is given), and the
-  browser draft / autosave bookkeeping runs. No change, no step.
-- **Undo / redo** (`step`): invert the last step, keep only the parts that still hold the values it set
-  (`stillValid` against `base`), apply, commit (onto the other stack). Objects are changed in place, so selections
-  keep working; the result is selected.
+  step — pushed on *my* undo stack, applied to `base`, sent to the server (`sync.push`, live), labelled for the
+  History (`summarize` unless a label is given). No change, no step.
+- **Undo / redo** (`step`): invert my last step, keep only the parts nobody changed since (`stillValid` against
+  `base`), apply, commit (onto the other stack). Others' edits are never undone. The result is selected.
+- **Remote edits** (`applyRemote`): applied to the data — except fields I'm changing right now (data ≠ base there) —
+  and to `base`. Objects are changed in place, so selections and drags keep working.
 - **Ids:** every key / clip / chapter / note has a short random `id`, tracks have theirs. Anything that creates
   items must not reuse an id (copies go through `fresh()` / `copyTrack()`); `ensureIds` fixes duplicates at commit,
   and on load matches id-less items to identical ones of the current story (so a restored version keeps ids).
+- **Rewind / compare** (`enterPreview(text, {label, sub, restore})`): the timeline and viewport show another
+  version; `realData()` is still the story (remote edits keep landing there, `current()` serializes it). Every
+  edit is refused (`isLocked` is true, `commit` → `previewRefuse()` reloads the preview copy). `previewDiff()`
+  outlines what changed since.
 - **Locks:** every mutating action must check `isLocked(sel)` / `guard()` (both cover the whole multi-selection).
-  Locks are inherited from the lane / group (`tl.lockedTrack`).
+  Locks are inherited from the lane / group (`tl.lockedTrack`); `lockedBy` records who (`lockOwner`).
 - **Selection:** `editor.sels` (everything selected), `editor.sel` (the primary one, shown by the inspector),
   `isSel(x)` (by object). `select(sel, mode)` with `mode` `'add'` / `'toggle'`, `selectMany`, `selectEntities(keys)`,
-  `keyOf(sel)` (entity key). Shapes:
+  `keyOf(sel)` (entity key — presence). Shapes:
 
   | Selection | Shape |
   |---|---|
@@ -77,7 +85,10 @@ changes, and `viewSize()` gives the render size.
 ## Saving
 
 See [dev-server.md](dev-server.md).
-
+- **Live** (the studio server answers `ping` with `sync: true`): `sync.start()` joins and adopts the server's story
+  (`adoptServer`). There is nothing to save — `saves.dirty` = edits not sent yet, autosave / drafts / conflict
+  dialogs are off, Save writes the `.tuna` (projects) or just says it's saved, and leaving only warns about unsent
+  edits.
 - **Save** posts to `/__editor/save` with `X-Base-Hash` (FNV-1a of the story.json bytes this tab loaded or last
   saved). A 409 means the file changed outside the editor: autosave pauses and a dialog offers *Load theirs*
   (undoable) or *Keep mine* (`X-Force: 1`).

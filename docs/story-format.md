@@ -17,7 +17,9 @@ and the school are simulated, so they converge rather than jump.
   "meta": { "title": "…", "duration": 150, "scrollPerSecond": 15 },  // page height = duration × scrollPerSecond vh
   "settings": { "tunaCount": 2000, "params": { "post.exposure": 1.05, … } },  // constants for PARAMS
   "chapters": [ { "t": 0, "name": "Underwater" }, … ],   // labels for people (editor ruler, Copy ref)
-  "notes": [ { "t": 60, "text": "…" } ],                  // feedback left at moments — read them when asked
+  "notes": [ { "t": 60, "text": "…", "author": "Mai", "at": 1760400000000,   // review comments at moments —
+               "replies": [ { "author": "Ben", "at": …, "text": "…" } ],        // read them when asked
+               "resolved": true, "resolvedBy": "Ben", "review": true } ],      // review: left from a review link
   "tracks": [ … ],                                          // drawn top to bottom in the editor, see below
   "sources": [ { "id": "products", "url": "https://…", "refresh": 60, "sample": { … } } ]  // live data, see below
 }
@@ -27,16 +29,17 @@ In a `.tuna` project the file is `projects/<slug>/story.json`, and `assets/…` 
 Version 1 files (positions as progress 0..1) are migrated on load (`migrate()` in timeline.js).
 
 **Ids.** Every track has an `id`; every key, caption clip, chapter and note has a short random `id` too
-(`"id": "k3f9a2"`, written at the end of the object). They're how undo finds an item again — **keep them when you
-edit**. A new item may leave `id` out: the editor gives it one (an item identical to one in the previous version
-gets that one's id back). Never copy an item together with its id.
+(`"id": "k3f9a2"`, written at the end of the object). They're how undo, live editing and the History find an item
+again — **keep them when you edit**. A new item may leave `id` out: the editor / studio server gives it one (an item
+identical to one in the previous version gets that one's id back). Never copy an item together with its id.
 
 Common track fields:
 - `id` — unique.
 - `type`
 - `label` — the name shown in the editor.
 - `mute: true` — ignored by the story.
-- `locked: true` — the editor won't change it. Respect it.
+- `locked: true` — the editor won't change it. Respect it. `lockedBy: "Mai"` — who locked it (shown as *Locked by
+  Mai*); keys, clips, chapters and notes can carry both too.
 - `color: "#4fb8ff"` — the editor's colour for the row (no effect on the site).
 - `collapsed: true` — a thin row in the editor.
 - `parent: <group id>` — the group it belongs to.

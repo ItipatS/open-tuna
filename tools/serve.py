@@ -41,6 +41,12 @@ assets/, saves/. Paths in requests / replies are relative to that folder; the to
     GET  /__editor/git/status            {branch, upstream, changes}                       (demos only)
     POST /__editor/git/commit            body {message} -> commits that demo's folder        (demos only)
     POST /__editor/git/push              pushes the current branch                         (demos only)
+    GET|POST /__editor/sync/...          live team editing: shared story, edit log, presence, rewind (tools/collab.py)
+    GET  /__editor/library               the team's snippets (reusable pieces of timeline) {snippets: [{id, name, author, …}]}
+    GET  /__editor/library/get?id=       one snippet (a clipboard: {items, tracks, t0})
+    POST /__editor/library/save?project=&name=&author=   body = clipboard JSON; the media it uses is copied along
+    POST /__editor/library/delete?id=    delete a snippet
+    (asset-import?from=lib:<id> copies a snippet's media into a project)
 """
 import base64
 import datetime
@@ -56,10 +62,13 @@ import threading
 import urllib.parse
 import webbrowser
 
+import collab
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECTS = os.path.join(ROOT, 'projects')
 DEMOS = os.path.join(ROOT, 'demos')
 MODELS = os.path.join(ROOT, 'models')
+LIBRARY = os.path.join(ROOT, 'library', 'snippets')  # the team's snippets: library/snippets/<id>/{snippet.json, assets/}
 UPLOAD_EXT = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'mp4', 'webm', 'mov', 'm4v', 'html', 'htm', 'mp3', 'ogg', 'wav', 'json', 'glb', 'gltf'}
 SLUG = re.compile(r'[a-z0-9][a-z0-9-]{0,62}')
 KEEP_AUTO = 100
@@ -211,6 +220,58 @@ def project_list(folder, prefix):
     return out
 
 
+def snippet_dir(sid):
+    if not SLUG.fullmatch(sid or ''):
+        raise ValueError('bad snippet id')
+    d = os.path.join(LIBRARY, sid)
+    if not os.path.isdir(d):
+        raise ValueError('no such snippet')
+    return d
+
+
+def library_list():
+    out = []
+    if not os.path.isdir(LIBRARY):
+        return out
+    for sid in os.listdir(LIBRARY):
+        f = os.path.join(LIBRARY, sid, 'snippet.json')
+        if not SLUG.fullmatch(sid) or not os.path.isfile(f):
+            continue
+        try:
+            with open(f, encoding='utf-8') as fh:
+                sn = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        out.append({'id': sid, 'name': sn.get('name') or sid, 'author': sn.get('author') or '', 'time': sn.get('time') or 0,
+                    'from': sn.get('fromProject') or '', 'items': len(sn.get('items') or []), 'tracks': len(sn.get('tracks') or []), 'span': sn.get('span') or 0})
+    out.sort(key=lambda x: -x['time'])
+    return out
+
+
+def library_save(P, q, clip):
+    """A clipboard (src/editor/edit-ops.js) -> library/snippets/<id>/ with the project's media it refers to."""
+    if not isinstance(clip, dict) or clip.get('v') != 3:
+        raise ValueError('expected an Open Tuna clipboard (v3)')
+    name = (q.get('name') or 'Snippet').strip()[:80]
+    base, n = slugify(name), 1
+    sid = base
+    while os.path.exists(os.path.join(LIBRARY, sid)):
+        n += 1
+        sid = f'{base}-{n}'
+    d = os.path.join(LIBRARY, sid)
+    os.makedirs(d)
+    for rel in sorted(set(re.findall(r'assets/[^"\'\s)<>]+', json.dumps(clip, ensure_ascii=False)))):
+        sp = os.path.normpath(os.path.join(P.root, rel))
+        if sp.startswith(P.assets + os.sep) and os.path.isfile(sp):
+            dst = os.path.normpath(os.path.join(d, rel))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(sp, dst)
+    clip.update(name=name, author=(q.get('author') or '')[:40], time=int(datetime.datetime.now().timestamp() * 1000), fromProject=P.slug)
+    clip.pop('project', None)
+    write(os.path.join(d, 'snippet.json'), json.dumps(clip, ensure_ascii=False, indent=1).encode())
+    return {'ok': True, 'id': sid}
+
+
 def slugify(name):
     return re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')[:48] or 'project'
 
@@ -323,13 +384,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return None
             return super().do_GET()
         try:
+            if path == '/__editor/library':
+                return self.reply(200, {'snippets': library_list()})
+            if path == '/__editor/library/get':
+                with open(os.path.join(snippet_dir(q.get('id', '')), 'snippet.json'), 'rb') as f:
+                    return self.raw(f.read())
             if path == '/__editor/projects':
                 return self.reply(200, {'projects': project_list(PROJECTS, ''), 'demos': project_list(DEMOS, 'demo/')})
             if path == '/__editor/ping':
                 P = Proj(q['project']) if q.get('project') else None
                 g = OPTS['git'] and bool(P and P.demo) and has_git()
-                return self.reply(200, {'ok': True, 'save': True, 'git': g, 'branch': git('branch', '--show-current')[1] if g else ''})
+                return self.reply(200, {'ok': True, 'save': True, 'sync': True, 'git': g, 'branch': git('branch', '--show-current')[1] if g else ''})
             P = Proj(q.get('project', ''))
+            if path.startswith('/__editor/sync/'):
+                return self.sync_get(P, path[len('/__editor/sync/'):], q)
             if path == '/__editor/list':
                 hist = []
                 if P.demo and has_git():
@@ -402,7 +470,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                 shutil.copyfile(os.path.join(src.root, t), os.path.join(d, t))
                         write(os.path.join(d, 'manifest.json'), json.dumps({'format': 'open-tuna', 'version': 1, 'name': q.get('name') or slug, 'created': datetime.datetime.now().isoformat(timespec='seconds')}, indent=2).encode())
                     return self.reply(200, {'ok': True, 'project': slug})
+                if path == '/__editor/library/delete':
+                    shutil.rmtree(snippet_dir(q.get('id', '')))
+                    return self.reply(200, {'ok': True})
                 P = Proj(q.get('project', ''))
+                if path == '/__editor/library/save':
+                    return self.reply(200, library_save(P, q, json.loads(self.body() or b'{}')))
+                if path.startswith('/__editor/sync/'):
+                    return self.sync_post(P, path[len('/__editor/sync/'):], q)
                 if path == '/__editor/put':
                     if P.demo:
                         raise ValueError('put only writes into projects/')
@@ -459,8 +534,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.reply(200, {'ok': True, 'file': P.rel(p)})
                 if path == '/__editor/asset-import':
                     fr = q.get('from', '')
-                    src = Proj(fr)
-                    sroot, sassets = src.root, src.assets
+                    if fr.startswith('lib:'):
+                        sroot = snippet_dir(fr[4:])
+                        sassets = os.path.join(sroot, 'assets')
+                    else:
+                        src = Proj(fr)
+                        sroot, sassets = src.root, src.assets
                     rel = (q.get('file') or '').replace('\\', '/')
                     sp = os.path.normpath(os.path.join(sroot, rel))
                     if not sp.startswith(sassets + os.sep) or not os.path.isfile(sp):
@@ -510,6 +589,42 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.reply(200 if code == 0 else 400, {'ok': code == 0, 'output': out, 'error': '' if code == 0 else out})
         except Exception as e:  # noqa: BLE001 - report to the editor
             return self.reply(400, {'ok': False, 'error': str(e)})
+        return self.reply(404, {'ok': False, 'error': 'unknown endpoint'})
+
+    # ---- live team editing (tools/collab.py)
+    def live(self, P):
+        return collab.live(P, fnv1a, write, stamp)
+
+    def sync_get(self, P, op, q):
+        L = self.live(P)
+        if op == 'poll':
+            with L.cv:
+                return self.reply(200, L.poll(int(q.get('since', 0)), q.get('epoch', ''), int(q.get('pv', -1))))
+        with L.cv:
+            if op == 'state':
+                return self.reply(200, L.state())
+            if op == 'history':
+                return self.reply(200, L.history(int(q['before']) if q.get('before') else None, min(500, int(q.get('limit', 200)))))
+            if op == 'at':
+                return self.reply(200, L.at(int(q.get('seq', 0))))
+            if op == 'op':
+                return self.reply(200, L.light(L.op(int(q.get('seq', 0))), True))
+        return self.reply(404, {'ok': False, 'error': 'unknown endpoint'})
+
+    def sync_post(self, P, op, q):
+        L = self.live(P)
+        body = json.loads(self.body() or b'{}')
+        if not isinstance(body, dict):
+            raise ValueError('expected a JSON object')
+        with L.cv:
+            if op == 'push':
+                return self.reply(200, L.push(body))
+            if op == 'presence':
+                return self.reply(200, L.hello(body))
+            if op == 'restore':
+                return self.reply(200, L.restore(int(q.get('seq', 0)), str(body.get('user') or ''), str(body.get('color') or '')))
+            if op == 'revert':
+                return self.reply(200, L.revert(int(q.get('seq', 0)), str(body.get('user') or ''), str(body.get('color') or '')))
         return self.reply(404, {'ok': False, 'error': 'unknown endpoint'})
 
     def log_message(self, fmt, *args):

@@ -58,6 +58,18 @@ await page.screenshot({ path: 'shot.png' });
   canvas (`#ed-tlwrap canvas`). Row positions come from `__ocean.editor.timeline.rows` / `.X(t)`. Simulate file
   drops with a `DataTransfer` + `DragEvent` dispatched on the target.
 
+## Live editing tests
+
+- With serve.py every edit is **saved at once** (no autosave delay) and logged in the project's
+  `saves/history.jsonl`. Test in a throwaway project (`POST project/new?from=demo/thai-union`), never a demo.
+- Set the name before the page loads, or a "what's your name?" dialog opens:
+  `page.evaluateOnNewDocument(() => localStorage.setItem('openTuna.user', JSON.stringify({ name: 'Mai' })))`.
+- Two people = two browser contexts (separate localStorage): `const ctx = await browser.createBrowserContext()`.
+  Wait for presence with `__ocean.editor.sync.others.length`, for an edit with a `waitForFunction` on the data.
+- Accept dialogs (`page.on('dialog', (d) => d.accept())`) so a "Leave site?" prompt can't hang the teardown.
+- Useful: `ed.sync.{live, seq, pending, online, others}`, `ed.undoStack`, `await ed.sync.history()`,
+  `ed.historyPanel.show(op)` + `ed.preview` / `ed.previewDiff()` / `ed.exitPreview()`, `ed.sels`, `ed.timedSelection()`.
+
 ## Hygiene (important)
 
 - **The editor autosaves into the project's story.json.** A test that edits a demo in the editor must undo everything

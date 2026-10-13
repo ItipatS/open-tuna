@@ -90,8 +90,11 @@ src/creatures.js      animated GLB wrapper, SwimPath, Hunter src/particles.js   
 src/jellies.js        procedural jellyfish                   src/vegetation.js  seagrass
 src/models.js         GLTF loading / baking / material conversion        src/director.js  lab-mode camera
 src/editor/           the editor (editor.html only) — docs/editor.md; project.js (.tuna), build.js (export),
-                      doc.js (story entities / changes, undo), edit-ops.js (bulk editing)
+                      doc.js (story entities / changes), sync.js (live team editing), edit-ops.js (bulk editing)
+src/review.js         play.html?…&review: "Leave a note" for reviewers (notes land in the shared story)
 tools/serve.py|.ps1   studio servers (projects, saves, uploads, ranges, git for demos) — docs/dev-server.md
+tools/collab.py       live team editing for serve.py: shared story, edit log (saves/history.jsonl), presence, rewind
+library/              the team's snippets (gitignored, made by the editor on the studio server)
 models/               the tool's built-in GLB models (creatures, coral)
 demos/<id>/           demo projects: story.json, manifest.json, thumb.jpg, assets/, saves/checkpoints/ (committed)
 demos/index.json      the demo list for the start screen when there's no server (GitHub Pages) — add new demos here
@@ -114,6 +117,9 @@ EDITOR.md  HANDOFF.md  docs/
    plus code that reads it (docs/ai-workflows.md). Tool code stays generic; project content stays in the project.
 5. **Keep the docs true.** When you change behaviour, update the doc that describes it, EDITOR.md for user-facing
    features, and HANDOFF.md's state.
-6. **Two servers, one API.** `tools/serve.py` and `tools/serve.ps1` must stay in sync.
+6. **Two servers, one API.** `tools/serve.py` and `tools/serve.ps1` must stay in sync — except live team editing,
+   review notes and snippets (`tools/collab.py`), which are serve.py only: serve.ps1 leaves `sync`
+   out of `ping` and the editor falls back to saving files. `src/editor/doc.js` and `tools/collab.py` are one model
+   in two languages (including the story.json writer): change both.
 7. **Ids in story.json.** Keys, clips, chapters and notes carry an `id`: keep it when editing, omit it on new items
    (docs/story-format.md).

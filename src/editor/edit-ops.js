@@ -22,7 +22,7 @@ export const TRACK_COLORS = { Red: '#ff6b6b', Orange: '#ff9f43', Yellow: '#ffd16
 // a copy without identity: no id, no lock
 function fresh(o) {
   const c = clone(o);
-  delete c.id; delete c.locked;
+  delete c.id; delete c.locked; delete c.lockedBy;
   return c;
 }
 
@@ -70,8 +70,8 @@ export const editOps = {
     const c = fresh(t);
     c.id = `${t.type}-${uid()}`;
     c.label = label ?? `${t.label || t.type} copy`;
-    for (const k of c.keys ?? []) { delete k.id; delete k.locked; }
-    for (const k of c.clips ?? []) { delete k.id; delete k.locked; }
+    for (const k of c.keys ?? []) { delete k.id; delete k.locked; delete k.lockedBy; }
+    for (const k of c.clips ?? []) { delete k.id; delete k.locked; delete k.lockedBy; }
     return c;
   },
 
@@ -154,7 +154,7 @@ export const editOps = {
       const set = s.track.type === 'group' || s.track.type === 'lane' ? [s.track, ...this.timeline.contents(s.track)] : [s.track];
       for (const t of set) if (!whole.has(t)) { whole.add(t); tracks.push({ ...fresh(t), id: t.id }); }
     }
-    for (const t of tracks) { for (const k of t.keys ?? []) { delete k.locked; } for (const k of t.clips ?? []) { delete k.locked; } }
+    for (const t of tracks) { for (const k of t.keys ?? []) { delete k.locked; delete k.lockedBy; } for (const k of t.clips ?? []) { delete k.locked; delete k.lockedBy; } }
     for (const s of list) {
       if (s.kind === 'track' || s.kind === 'object' || (s.track && whole.has(s.track))) continue;
       items.push({ kind: s.kind, track: s.track ? ref(s.track) : null, item: fresh(s.item) });
@@ -190,6 +190,7 @@ export const editOps = {
   async paste(into, { at, original = false, clip = this.clipboard, label } = {}) {
     const c = normalize(clip);
     if (!c) return this.toast('Nothing to paste — copy something first', true);
+    if (this.preview) return this.previewRefuse();
     const d = this.tl.data, tracks = d.tracks;
     const off = original ? 0 : r4((at ?? this.time) - c.t0);
     const made = [];
@@ -287,7 +288,7 @@ export const editOps = {
     const c = normalize(this.clipboard);
     if (!c || !c.items.length) return this.toast('Copy a key or caption first', true);
     if (!this.guard()) return;
-    const SKIP = new Set(['t', 'a', 'b', 'id', 'locked']);
+    const SKIP = new Set(['t', 'a', 'b', 'id', 'locked', 'lockedBy']);
     let n = 0;
     for (const s of this.sels) {
       if (s.kind !== 'key' && s.kind !== 'clip') continue;
@@ -608,6 +609,7 @@ export const editOps = {
       { label: `Cut ${n} items`, shortcut: `${mod}X`, disabled: L, onClick: () => this.cut() },
       { label: 'Duplicate at playhead', shortcut: `${mod}D`, onClick: () => this.duplicate() },
       { label: 'Paste special', items: this.pasteSpecialItems() },
+      { label: 'Save as snippet…', disabled: !this.saves.server, onClick: () => this.library.saveDialog() },
       '-',
       { label: `Move here (${fmtTime(t)})`, disabled: L, onClick: () => { const sp = this.selSpan(); if (sp) this.nudge(t - sp.a); } },
       { label: 'Align starts to the playhead', disabled: L, onClick: () => this.alignToPlayhead() },

@@ -20,8 +20,10 @@ import { Saves } from './saves.js';
 import { LayerTools } from './layer-tools.js';
 import { AssetsPanel } from './assets-panel.js';
 import { DataPanel } from './data-panel.js';
+import { HistoryPanel } from './history-panel.js';
 import { editOps } from './edit-ops.js';
 import { Importer } from './import.js';
+import { Library } from './library.js';
 import { Checker } from './check.js';
 import { Recorder } from './recorder.js';
 import { ProjectFiles } from './project.js';
@@ -30,8 +32,9 @@ import { SiteBuilder } from './build.js';
 import { PROJECT, playURL, editorURL } from '../project.js';
 import { listPaths } from '../data.js';
 import { PARAMS, DRIVERS, ACTORS } from '../story.js';
-import { EASES, fmtTime, migrate } from '../timeline.js';
-import { ensureIds, roundAll, clone, diffDocs, apply, invert, stillValid, entities, summarize, itemOf, parseKey } from './doc.js';
+import { EASES, fmtTime, migrate, serializeStory } from '../timeline.js';
+import { ensureIds, roundAll, clone, diffDocs, apply, invert, stillValid, entities, summarize, itemOf, same, parseKey } from './doc.js';
+import { Sync, loadUser, saveUser, colorFor, initials } from './sync.js';
 
 const ASPECTS = { '16:9': 16 / 9, '16:10': 16 / 10, '21:9': 21 / 9, '4:3': 4 / 3, '9:19.5': 9 / 19.5, free: 0 };
 const CLIP_KEY = 'openTuna.clipboard.v2'; // (also edit-ops.js)
@@ -51,9 +54,12 @@ export class Editor {
     roundAll(this.tl.data);
     this.tl.changed();
     this.base = clone(this.tl.data);
-    this.undoStack = []; // edits: { changes, label }
+    this.undoStack = []; // my own edits: { changes, label } (undo only ever touches what I did)
     this.redoStack = [];
     this.edits = 0; // committed edits this session
+    this.preview = null; // rewind / compare: { real, data, text, label, diff } while looking at another version
+    this.user = loadUser() ?? { name: '', color: '#9aa4b2' };
+    this.sync = new Sync(this);
     this.time = 0; // playhead (s)
     this.playing = false;
     this.playFrom = 0;
@@ -80,6 +86,7 @@ export class Editor {
     this.thumbs = new ModelThumbs(this.app.renderer);
     this.builder = new SiteBuilder(this);
     this.importer = new Importer(this);
+    this.library = new Library(this);
     this.checker = new Checker(this);
     this.recorder = new Recorder(this);
     this.buildDOM();
@@ -89,6 +96,7 @@ export class Editor {
     this.lt = new LayerTools(this);
     this.assets = new AssetsPanel(this, this.$assets);
     this.dataPanel = new DataPanel(this, this.$data);
+    this.historyPanel = new HistoryPanel(this, this.$history);
     this.buildOutliner();
     this.bindKeys();
     this.bindClipboard();
@@ -102,12 +110,13 @@ export class Editor {
     // closing / reloading the tab with unsaved work: the browser's "Leave site? Changes you made may not be saved"
     addEventListener('beforeunload', (e) => { if (!this.leaving && this.project.unsaved) { e.preventDefault(); e.returnValue = ''; } });
     this.syncTitle();
+    if (!this.user.name) setTimeout(() => this.whoDialog(true), 400);
   }
 
   get hi() { return this.undoStack.length; } // (older tests: `while (ed.hi > 0) ed.undo()`)
   get sceneView() { return this.view === 'scene' && !this.playing; }
   get duration() { return this.tl.duration; }
-  current() { return this.tl.serialize(); }
+  current() { return serializeStory(this.realData()); } // the story (not a version being looked at)
   get mod() { return mod; }
 
   // ------------------------------------------------------------------ layout
@@ -154,6 +163,8 @@ export class Editor {
       h('div', { id: 'ed-mode' }, this.$mode.scene, this.$mode.game),
       this.$readout,
       h('div', { class: 'grow' }),
+      this.$activity = h('div', { id: 'ed-activity' }),
+      this.$people = h('div', { id: 'ed-people' }),
       this.$status,
       btn('Copy ref', () => this.copyRef(), { ico: 'copy', title: 'Copy a precise reference to this moment — paste it to Claude' }),
       this.$fps,
@@ -163,16 +174,18 @@ export class Editor {
     this.$outliner = h('div');
     this.$assets = h('div', { style: 'display:none' });
     this.$data = h('div', { style: 'display:none' });
-    const panes = { scene: this.$outliner, assets: this.$assets, data: this.$data };
+    this.$history = h('div', { style: 'display:none' });
+    const panes = { scene: this.$outliner, assets: this.$assets, data: this.$data, history: this.$history };
     this.showTab = (name) => {
       for (const [k, el] of Object.entries(panes)) el.style.display = k === name ? '' : 'none';
       this.$ltabs.querySelectorAll('.ltab').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
       if (name === 'assets') this.assets?.refresh();
       if (name === 'data') { this.dataPanel.seen = ''; this.dataPanel.tick(); }
+      if (name === 'history') this.historyPanel.open();
     };
     const tab = (name, el) => h('button', { class: 'ltab', 'data-tab': name, onclick: () => this.showTab(name) }, el);
-    this.$ltabs = h('div', { class: 'ed-h ltabs' }, tab('scene', 'Scene'), tab('assets', 'Assets'), tab('data', 'Data'));
-    const left = h('aside', { id: 'ed-left' }, this.$ltabs, this.$outliner, this.$assets, this.$data);
+    this.$ltabs = h('div', { class: 'ed-h ltabs' }, tab('scene', 'Scene'), tab('assets', 'Assets'), tab('data', 'Data'), tab('history', 'History'));
+    const left = h('aside', { id: 'ed-left' }, this.$ltabs, this.$outliner, this.$assets, this.$data, this.$history);
     left.querySelector('.ltab').classList.add('on');
 
     const aspect = h('select', { title: 'Game view frame' }, Object.keys(ASPECTS).map((k) => h('option', { value: k }, k === 'free' ? 'Free aspect' : k)));
@@ -189,7 +202,8 @@ export class Editor {
     this.$badge = h('div', { id: 'ed-badge' });
     this.$toast = h('div', { id: 'ed-toast' });
     this.$wrap = h('div', { id: 'ed-wrap' }, this.$stage);
-    const view = h('main', { id: 'ed-view' }, tabs, this.$wrap, this.$toast);
+    this.$previewBar = h('div', { id: 'ed-previewbar', style: 'display:none' });
+    const view = h('main', { id: 'ed-view' }, tabs, this.$previewBar, this.$wrap, this.$toast);
     this.$scrollbar = h('div', { id: 'ed-scrollbar', title: 'Drag to scroll (like the browser scrollbar)' }, h('i'));
     this.$stage.append(renderer.domElement, document.getElementById('captions'), this.$badge, this.$scrollbar);
     this.bindSitePlay();
@@ -387,6 +401,7 @@ export class Editor {
       { label: 'Build site… (standalone, for any host)', onClick: () => this.builder.dialog() },
       { label: 'Preview (play.html) at this moment ↗', onClick: () => this.openSite() },
       { label: 'Copy link to this moment (for the team)', onClick: () => this.copyLink() },
+      { label: 'Copy review link (comments on the site)', onClick: () => this.copyLink(true) },
       { label: 'Snapshot (PNG of the viewport)', onClick: () => this.snapshot() },
       { label: this.recorder.rec ? 'Stop recording' : 'Record a review video… (MP4)', onClick: () => this.recorder.dialog() },
     ];
@@ -404,6 +419,7 @@ export class Editor {
       { label: `Paste at ${fmtTime(this.time)}`, shortcut: `${mod}V`, onClick: () => this.paste(), disabled: !this.clipboard },
       { label: 'Paste special', items: this.pasteSpecialItems() },
       { label: 'Duplicate at playhead', shortcut: `${mod}D`, onClick: () => this.duplicate(), disabled: !any },
+      { label: 'Snippets', items: this.library.menuItems() },
       { label: n > 1 ? `Delete ${n} items` : 'Delete', shortcut: 'Del', onClick: () => this.deleteSelection(), disabled: !s || s.kind === 'object' || locked, danger: true },
       '-',
       { label: 'Select all', shortcut: `${mod}A`, onClick: () => this.selectAll() },
@@ -820,7 +836,7 @@ export class Editor {
   isSel(x) { return this.selItems.has(x); }
   get multi() { return this.sels.length > 1; }
 
-  // entity keys of the selection (src/editor/doc.js)
+  // entity keys of the selection (src/editor/doc.js) — presence, history
   keyOf(s) {
     if (!s || s.kind === 'object') return null;
     if (s.kind === 'track') return `t:${s.track.id}`;
@@ -853,7 +869,7 @@ export class Editor {
     this.selectMany(items.slice(0, 500));
   }
 
-  // after undo: forget selected things that are gone
+  // after other people's edits / undo: forget selected things that are gone
   validateSelection() {
     const d = this.tl.data;
     const alive = (q) => {
@@ -869,25 +885,39 @@ export class Editor {
     if (keep.length !== this.sels.length) { this.sels = keep; this.select(keep.at(-1) ?? null, keep.length ? 'add' : undefined); }
   }
 
-  // locked: the item itself, or the track it lives on
+  // locked: the item itself, or the track it lives on (and everything while looking at an older version)
   isLocked(s) {
+    if (this.preview) return true;
     if (!s || s.kind === 'object') return false;
     return !!(s.item?.locked || (s.track && this.tl.lockedTrack(s.track)));
   }
 
-  toggleLock() {
+  // who locked it ("" = unknown / an old lock)
+  lockOwner(s) {
+    const own = s?.kind === 'track' ? s.track : s?.item;
+    if (own?.locked) return own.lockedBy || '';
+    const t = s?.track && (s.track.locked ? s.track : this.tl.laneOf(s.track)?.locked ? this.tl.laneOf(s.track) : this.tl.groupOf(s.track));
+    return t?.lockedBy || '';
+  }
+
+  async toggleLock() {
     const s = this.sel;
     if (!s || s.kind === 'object') return;
+    if (this.preview) return this.previewRefuse();
     const targets = (this.multi ? this.sels : [s]).filter((q) => q.kind !== 'object');
     const own = (q) => (q.kind === 'track' ? q.track : q.item);
     const locking = !own(s).locked;
-    if (locking && s.track?.locked && s.kind !== 'track') return this.toast('The whole track is locked — unlock the track', true);
+    if (locking && s.track?.locked && s.kind !== 'track') return this.toast(`The whole track is locked${s.track.lockedBy ? ` by ${s.track.lockedBy}` : ''} — unlock the track`, true);
+    if (!locking) {
+      const others = [...new Set(targets.map((q) => own(q).lockedBy).filter((n) => n && n !== this.user.name))];
+      if (others.length && !(await this.confirm(`Locked by ${others.join(', ')}`, `${others.join(' and ')} locked this — probably because they're working on it. Unlock it anyway?`, 'Unlock anyway'))) return;
+    }
     for (const q of targets) {
       const o = own(q);
-      if (locking) o.locked = true; else delete o.locked;
+      if (locking) { o.locked = true; if (this.user.name) o.lockedBy = this.user.name; } else { delete o.locked; delete o.lockedBy; }
     }
     this.commit(`${locking ? 'Locked' : 'Unlocked'} ${targets.length > 1 ? `${targets.length} items` : this.describe(s)}`);
-    this.toast(locking ? 'Locked' : 'Unlocked');
+    this.toast(locking ? `Locked${this.user.name ? ` by ${this.user.name}` : ''} — nobody can change it until it's unlocked` : 'Unlocked');
   }
 
   describe(s) {
@@ -910,10 +940,12 @@ export class Editor {
 
   // refuses (with a message) when the selection is locked
   guard(s = this.sel) {
+    if (this.preview) { this.previewRefuse(); return false; }
     const list = s === this.sel && this.multi ? this.sels : [s];
     const bad = list.find((q) => this.isLocked(q));
     if (bad) {
-      this.toast('Locked — right-click ▸ Unlock (or press L) to change it', true);
+      const who = this.lockOwner(bad);
+      this.toast(`Locked${who ? ` by ${who}` : ''} — right-click ▸ Unlock (or press L) to change it`, true);
       return false;
     }
     return true;
@@ -970,10 +1002,11 @@ export class Editor {
     this.timeline.draw();
   }
 
-  // finish an edit: whatever changed since the last commit becomes ONE undo step, + draft / autosave bookkeeping.
-  // `label` names it in the Edit menu ("Undo Moved 3 keys").
+  // finish an edit: whatever changed since the last commit becomes ONE step — my undo stack, the shared story
+  // (live: sent to the server), draft + autosave bookkeeping. `label` names it in the History ("Moved 3 keys").
   commit(label, { stack, stackLabel } = {}) {
     this.tl.changed();
+    if (this.preview) return this.previewRefuse();
     ensureIds(this.tl.data);
     roundAll(this.tl.data);
     const changes = diffDocs(this.base, this.tl.data);
@@ -988,6 +1021,7 @@ export class Editor {
       this.redoStack = [];
     }
     this.edits++;
+    this.sync.push(changes, label);
     this.afterEdit(this.tl.serialize());
   }
 
@@ -1011,15 +1045,16 @@ export class Editor {
     this.setTime(this.time);
   }
 
-  // Undo / redo: the inverse of the last step (only what still has the value that step gave it)
+  // Undo / redo MY last edit. Only the parts nobody else changed since are taken back (their later edit wins).
   undo() { this.step(this.undoStack, this.redoStack, 'Undo'); }
   redo() { this.step(this.redoStack, this.undoStack, 'Redo'); }
   step(from, to, verb) {
+    if (this.preview) return this.previewRefuse();
     const s = from.pop();
     if (!s) return;
     this.tl.changed();
-    const { keep } = stillValid(invert(s.changes), entities(this.base));
-    if (!keep.length) { this.toast(`${verb}: “${s.label}” — nothing left to change`, true, 5000); return; }
+    const { keep, dropped } = stillValid(invert(s.changes), entities(this.base));
+    if (!keep.length) { this.toast(`${verb}: “${s.label}” — someone else has changed it since, so it was left as it is`, true, 5000); return; }
     apply(this.tl.data, keep);
     const prev = this.sels;
     this.commit(`${verb}: ${s.label}`, { stack: to, stackLabel: s.label });
@@ -1028,11 +1063,12 @@ export class Editor {
     if (!this.sels.length) { this.sels = prev; this.validateSelection(); this.select(this.sels.at(-1) ?? null, this.sels.length ? 'add' : undefined); }
     this.afterData();
     this.inspector.show();
-    this.toast(`${verb}: ${s.label}`);
+    this.toast(dropped ? `${verb}: ${s.label} — partly: someone else changed some of it since (kept their version)` : `${verb}: ${s.label}`, !!dropped);
   }
 
   // replace the whole story (open / restore / import) — one undo step. Unchanged items keep their ids.
   loadText(text, label) {
+    if (this.preview) this.exitPreview();
     const data = migrate(JSON.parse(text));
     if (!Array.isArray(data.tracks)) throw new Error('not a story file (no tracks)');
     ensureIds(data, this.tl.data);
@@ -1042,8 +1078,50 @@ export class Editor {
     this.afterData();
     this.timeline.fit();
     this.select(null);
-    this.toast(`Loaded ${label} — ${mod}Z to undo, Save to keep it`);
+    this.toast(`Loaded ${label} — ${mod}Z to undo${this.sync.live ? '' : ', Save to keep it'}`);
   }
+
+  // ------------------------------------------------------------------ live: the shared story
+  // the story from the server (joining, or after a reconnect): it becomes `base`; `reapply` = my edits it hadn't got
+  adoptServer(text, reapply = []) {
+    const data = migrate(JSON.parse(text));
+    const real = this.realData();
+    const local = diffDocs(this.base, real); // edits in progress (not committed yet)
+    this.base = clone(data);
+    const mine = [...reapply, ...local];
+    if (serializeStory(real) !== text || mine.length) {
+      ensureIds(data, real);
+      if (this.preview) this.preview.real = data; else this.tl.set(data);
+      if (mine.length) apply(this.realData(), mine);
+      this.tl.changed();
+    }
+    this.saves.adopted(text);
+    if (mine.length && !this.preview) this.commit('Re-sent after reconnecting');
+    this.validateSelection();
+    this.afterData();
+    this.refreshAddTrack();
+    this.timeline.draw();
+    this.inspector.show();
+    this.syncButtons();
+  }
+
+  // someone else's edit (from the server, in its order)
+  applyRemote(changes) {
+    const real = this.realData(), base = this.base;
+    const val = (d, e, f) => (e === 'order' ? d.tracks.map((t) => t.id) : itemOf(d, e)?.[f] ?? null);
+    // a field I'm changing right now (dragging, typing — not committed yet) keeps my value
+    apply(real, changes, { skip: (e, f) => !same(val(real, e, f), val(base, e, f)) });
+    apply(base, changes);
+    if (this.preview) { this.preview.diff = null; } else this.tl.changed();
+    this.validateSelection();
+    this.afterData();
+    this.refreshAddTrack();
+    if (!this.$right.contains(document.activeElement)) this.inspector.show(); else this.inspector.refresh();
+    this.renderPresence();
+    this.timeline.draw();
+  }
+
+  realData() { return this.preview ? this.preview.real : this.tl.data; }
 
   // the track K / "+ Key" adds to: the selected camera / curve track, else the camera
   keyTrack() {
@@ -1109,7 +1187,7 @@ export class Editor {
   }
 
   addNote() {
-    const n = { t: r4(this.time), text: '' };
+    const n = { t: r4(this.time), text: '', ...(this.user.name ? { author: this.user.name } : {}), at: Date.now() };
     this.tl.data.notes.push(n);
     this.commit('Added a note');
     this.select({ kind: 'note', item: n });
@@ -1297,6 +1375,11 @@ export class Editor {
       this.syncTitle();
       this.dataPanel?.tick();
       this.inspector.refresh();
+      const a = this.sync.activity, fresh = a && now - a.at < 7000;
+      if (fresh !== this.$activity.classList.contains('on') || (fresh && this.$activity.dataset.at !== String(a.at))) {
+        this.$activity.classList.toggle('on', !!fresh);
+        if (fresh) { this.$activity.dataset.at = String(a.at); this.$activity.replaceChildren(h('i', { style: `background:${a.color || '#9aa4b2'}` }), h('b', {}, a.user), ` ${a.label}`); }
+      }
     }
   }
 
@@ -1332,7 +1415,7 @@ export class Editor {
       const frame = e.shiftKey ? 1 : 1 / 30;
       switch (e.code) {
         case 'Space': e.preventDefault(); this.playing ? this.pause() : this.play('site'); break;
-        case 'Escape': if (this.recorder.rec) this.recorder.stop(); else if (this.playing) this.stop(); else this.select(null); break;
+        case 'Escape': if (this.recorder.rec) this.recorder.stop(); else if (this.playing) this.stop(); else if (this.preview) this.exitPreview(); else this.select(null); break;
         case 'Home': this.pause(); this.setTime(0); break;
         case 'End': this.pause(); this.setTime(this.duration); break;
         case 'ArrowLeft': e.preventDefault(); if (e.altKey) { this.nudge(-frame); break; } this.pause(); this.setTime(this.time - frame); break;
@@ -1384,6 +1467,127 @@ export class Editor {
       ['WASD QE', 'Fly (Scene view, Shift = fast)'], ['Right-click', 'Options for anything'], ['Ctrl + wheel', 'Zoom timeline'], ['Shift + wheel', 'Pan timeline'], ['Shift + drag', 'Move without snapping'],
     ];
     dialog({ title: 'Keyboard shortcuts', body: h('div', { class: 'ed-help' }, rows.map(([k, v]) => h('div', {}, h('kbd', {}, k), ` ${v}`))), buttons: [{ label: 'Close', primary: true }] });
+  }
+
+  // ------------------------------------------------------------------ team: who you are, who else is here
+  whoDialog(first = false) {
+    const input = h('input', { type: 'text', value: this.user.name, placeholder: 'e.g. Mai', maxLength: 32 });
+    const ok = () => {
+      const name = input.value.trim().replace(/\s+/g, ' ');
+      if (!name) { input.focus(); return false; }
+      this.user = { name, color: colorFor(name) };
+      saveUser(this.user);
+      this.renderPresence();
+      this.sync.hello();
+      return true;
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && ok()) d.close(); });
+    const d = dialog({
+      title: first ? 'Welcome — what’s your name?' : 'Your name',
+      body: [h('p', {}, 'Your team sees it next to your edits in the History, on things you lock (“Locked by …”) and on your notes.'), input],
+      buttons: [{ label: first ? 'Later' : 'Cancel' }, { label: 'OK', primary: true, onClick: ok }],
+    });
+  }
+
+  // avatars of everyone in this project + the rings / playheads of the others on the timeline
+  renderPresence() {
+    const others = this.sync.others;
+    const me = this.sync.live || this.user.name ? [this.avatar({ user: this.user.name || 'You', color: this.user.color }, true)] : [];
+    this.$people.replaceChildren(...me, ...others.slice(0, 8).map((p) => this.avatar(p)), ...(others.length > 8 ? [h('span', { class: 'more' }, `+${others.length - 8}`)] : []));
+    const m = new Map();
+    for (const p of others) for (const e of p.sel || []) { const o = itemOf(this.tl.data, e); if (o) m.set(o, p); }
+    this.remoteSel = m;
+    this.timeline.draw();
+  }
+
+  avatar(p, me = false) {
+    const title = me ? `You${p.user && p.user !== 'You' ? ` (${p.user})` : ''}${this.sync.live ? ` · live with ${this.sync.others.length} other${this.sync.others.length === 1 ? '' : 's'}` : ''} — click to change your name`
+      : `${p.user} — at ${fmtTime(p.t ?? 0)}${p.preview ? ` · looking at an older version` : ''}${p.playing ? ' · playing' : ''}${p.sel?.length ? ` · ${p.sel.length} selected` : ''}. Click: go to their playhead`;
+    return h('button', { class: `ed-av${me ? ' me' : ''}`, style: `--c:${p.color || '#9aa4b2'}`, title, onclick: () => (me ? this.whoDialog() : this.jumpTo(p)) }, initials(p.user));
+  }
+
+  jumpTo(p) {
+    this.pause();
+    this.setTime(p.t ?? 0);
+    const x = this.timeline.X(this.time);
+    if (x < 220 || x > this.timeline.W - 30) this.timeline.zoomTo(this.time - (this.timeline.v1 - this.timeline.v0) / 2, this.time + (this.timeline.v1 - this.timeline.v0) / 2);
+    this.toast(`At ${p.user}’s playhead (${fmtTime(this.time)})`);
+  }
+
+  // ------------------------------------------------------------------ rewind / compare: look at another version
+  // The timeline and viewport show `text` (read-only); remote edits keep landing in the real story meanwhile.
+  // restore() makes it the current story again (an undoable edit everyone gets).
+  enterPreview(text, { label = 'an older version', sub = '', restore = null } = {}) {
+    if (this.playing) this.pause();
+    this.tl.changed();
+    if (!this.preview) {
+      if (diffDocs(this.base, this.tl.data).length) this.commit(); // keep what's in progress
+      this.preview = { real: this.tl.data };
+    }
+    const data = migrate(JSON.parse(text));
+    Object.assign(this.preview, { data, text, label, sub, restore, diff: null });
+    this.tl.set(data);
+    this.sels = [];
+    this.select(null);
+    this.setTime(this.time);
+    this.renderPreviewBar();
+    this.syncMode();
+  }
+
+  exitPreview() {
+    if (!this.preview) return;
+    const real = this.preview.real;
+    this.preview = null;
+    this.tl.set(real);
+    this.renderPreviewBar();
+    this.select(null);
+    this.afterData();
+    this.refreshAddTrack();
+    this.renderPresence();
+    this.historyPanel.mark();
+    this.syncMode();
+  }
+
+  previewRefuse() {
+    if (this.preview?.text) { // undo whatever the gesture changed in the preview copy
+      this.tl.set(migrate(JSON.parse(this.preview.text)));
+      this.preview.data = this.tl.data;
+      this.preview.diff = null;
+    }
+    this.toast('You’re looking at an older version — “Back to now” to edit, or “Restore this version”', true);
+  }
+
+  // what changed between the version on screen and now: { marks: Map(obj -> 'gone' | 'changed'), added, gone, changed }
+  previewDiff() {
+    const P = this.preview;
+    if (!P) return null;
+    if (!P.diff) {
+      const marks = new Map();
+      let added = 0, gone = 0, changed = 0;
+      for (const c of diffDocs(P.data, P.real)) {
+        if (!c.e.includes(':')) { if (c.e !== 'order') changed++; continue; }
+        const o = itemOf(P.data, c.e);
+        if (c.add) added++;
+        else if (c.del) { gone++; if (o) marks.set(o, 'gone'); } else { changed++; if (o) marks.set(o, 'changed'); }
+      }
+      P.diff = { marks, added, gone, changed };
+    }
+    return P.diff;
+  }
+
+  renderPreviewBar() {
+    const P = this.preview, bar = this.$previewBar;
+    if (!P) { bar.style.display = 'none'; bar.replaceChildren(); this.$root.classList.remove('previewing'); return; }
+    const d = this.previewDiff();
+    const since = [d.changed && `${d.changed} changed`, d.added && `${d.added} added`, d.gone && `${d.gone} deleted`].filter(Boolean).join(' · ') || 'nothing';
+    bar.style.display = '';
+    this.$root.classList.add('previewing');
+    bar.replaceChildren(
+      h('span', { class: 'ic' }, '⏪'),
+      h('div', { class: 'tx' }, h('b', {}, `Viewing ${P.label}`), h('small', {}, `${P.sub ? `${P.sub} · ` : ''}since then: ${since} (outlined on the timeline: amber = changed since, red = deleted since). Read-only.`)),
+      P.restore ? btn('Restore this version', async () => { const r = P.restore; this.exitPreview(); await r(); }, { cls: 'primary', title: 'Make the story what it was then — an edit everyone gets, and you can undo it' }) : null,
+      btn('Back to now', () => this.exitPreview(), { title: 'Esc' }),
+    );
   }
 
   // ------------------------------------------------------------------ sharing
@@ -1441,10 +1645,12 @@ export class Editor {
     }
   }
 
-  // a link that opens this project in the editor at this moment (for a teammate)
-  async copyLink() {
-    const link = new URL(`${editorURL(PROJECT)}&t=${this.time.toFixed(2)}`, location.href).href;
-    try { await navigator.clipboard.writeText(link); this.toast(`Link to ${fmtTime(this.time)} copied`); } catch { this.toast(link, false, 15000); }
+  // a link that opens this project at this moment: in the editor (a teammate lands on the same frame), or the site
+  // with the review button (people outside the editor leave notes that show up here live)
+  async copyLink(review = false) {
+    const t = review ? this.tl.warp(this.time, this.story.previewItem) : this.time;
+    const link = new URL(review ? `${playURL(PROJECT, t.toFixed(2))}&review` : `${editorURL(PROJECT)}&t=${this.time.toFixed(2)}`, location.href).href;
+    try { await navigator.clipboard.writeText(link); this.toast(review ? 'Review link copied — people who open it can pause and leave a note at any moment' : `Link to ${fmtTime(this.time)} copied`); } catch { this.toast(link, false, 15000); }
   }
 
   // the site's time for this moment (stretch regions: the previewed item's cycle)

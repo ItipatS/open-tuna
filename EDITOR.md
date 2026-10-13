@@ -36,6 +36,40 @@ repository, saved to git) or a project file such as *Japan launch.tuna*. Click i
 - A `.tuna` holds the story, every file in its Assets tab, its checkpoints and a preview picture. Send it by email
   or put it on a shared drive. Anyone with the editor can open it.
 
+## Working as a team
+
+When the studio runs on its server (the launchers, or your company's studio address), everyone who opens the same
+project is **editing the same story, live**, like a shared document:
+
+- **Who's here.** Coloured circles in the top bar are the people in this project (yours has a dashed ring: click it
+  to change your name). Their playheads are dotted lines with their initials on the ruler, and a coloured ring shows
+  what each of them has selected. Click someone's circle to jump to their playhead.
+- **Edits arrive by themselves.** When Mai moves a key, it moves on your screen a moment later; the top bar shows
+  *“Mai · Moved 3 keys on Camera”*. If you both change the same thing at once, the later change wins (if you change
+  *different* things on the same key, both stay).
+- **Nothing to save.** The top bar says **● Live · saved**: every edit is on the studio server as soon as you make
+  it. Ctrl+S still writes your own `.tuna` copy of a project. If the server can't be reached, it says
+  *⚠ Offline · 2 edits waiting*: keep the tab open and they're sent when it's back.
+- **Undo is yours.** Ctrl+Z takes back *your* last edit, never someone else's. If a teammate has changed the same
+  thing since, their version is kept and you're told.
+- **Locked by Mai.** Lock what you're working on (**L**, right-click ▸ Lock, or the padlock): it shows your
+  initials, and *Locked by Mai* when someone hovers it. Others can't change it; unlocking someone else's lock asks
+  first.
+- **History (rewind).** The **History** tab lists every edit by everyone: who, when, what. Click one (or drag the
+  *Rewind* slider) to see the story as it was right after it: the viewport and timeline show that version,
+  read-only, with what changed since outlined (amber = changed, red = deleted). **Restore this version** makes the
+  story that again (one edit, in the History too). **Undo** on a row takes back just that one edit; later edits by
+  anyone stay. Esc or **Back to now** returns.
+- **Notes are review comments.** A note shows who wrote it; select it to **reply**, and **Resolve ✓** when it's
+  done (resolved notes are dimmed). **File ▸ Copy review link** gives a link to the website with a **Leave a note**
+  button: a client or manager can pause anywhere and comment without the editor, and the note appears on your
+  timeline at that moment.
+- **File ▸ Copy link to this moment** links a teammate straight to the same moment in the editor.
+
+Editing `story.json` outside the editor (Claude, a git pull) also shows up live, as an edit by *Story file*.
+Without the studio server (opening the files from disk, or the Windows PowerShell server) the editor works alone
+and saves files as before (see *Saving* below).
+
 ## Build the website
 
 **File ▸ Build site…** makes a standalone copy of the story, as it is now, with nothing of the editor in it. Choose
@@ -174,10 +208,11 @@ that fit (right-click part of a multi-selection for options that apply to all of
 
 ## Locking
 
-Lock things you're happy with so nobody drags them by accident. Use right-click ▸ **Lock**, press **L**,
-or click the small padlock next to a track's name to lock the whole track. Locked items show a padlock
-and an orange outline. They can't be moved, edited or deleted until you unlock them. Locks are saved
-in `story.json`, so they apply to everyone.
+Lock things you're happy with (or that you're working on) so nobody drags them by accident. Use right-click ▸
+**Lock**, press **L**, or click the small padlock next to a track's name to lock the whole track. Locked items show
+a padlock and an orange outline, and remember **who** locked them (*Locked by Mai*, initials next to the padlock).
+They can't be moved, edited or deleted until they're unlocked; unlocking someone else's lock asks first. Locks are
+saved in `story.json`, so they apply to everyone.
 
 ## Common jobs
 
@@ -194,17 +229,23 @@ and set its size and height. Drag the bar to time it. Use **+ Caption** to add o
 at the moments you want and set each key's value.
 
 **Leave feedback.** Press **+ Note** at the moment something should change ("tentacle pops in here,
-should grow smoothly"). Notes are saved in `story.json`, so a developer or Claude can read them.
-**File ▸ Copy link to this moment** gives a link that opens the editor at the same second.
+should grow smoothly"). Notes carry your name, teammates can reply and resolve them, and they're saved in
+`story.json`, so a developer or Claude can read them. People without the editor can leave notes through a review
+link (File ▸ Copy review link).
 
 **Bring in another project.** **File ▸ Import into this story…** (or drop a `.tuna` on the timeline ▸ *Import into
 this story*): tick the chapters, tracks, lanes and groups you want, and place them at the playhead (on top of what's
 there, or pushing everything after it later) or at their original times. Its media files are copied in. Camera
 keys and captions merge into yours; a parameter you already animate gets its keys merged. One Ctrl+Z undoes it.
 
+**Reuse a piece (snippets).** Select a few things ▸ right-click ▸ **Save as snippet…** (a logo reveal, a leap beat,
+a pair of captions). **Edit ▸ Snippets** lists the team's snippets: pick one to insert it at the playhead, in any
+project, with its media. Snippets live on the studio server (`library/`).
+
 **Check before you hand over.** **File ▸ Check project…** lists what would look broken or confuse someone:
 missing media files (with *Relink…*), `{{bindings}}` to data sources that don't exist, things after the end of the
-story, two tracks fighting over one parameter, invisible layers, empty captions, slow moments, notes and locks. *Build site* shows the same count. In the Assets tab, right-click a file ▸ **Replace everywhere
+story, two tracks fighting over one parameter, invisible layers, empty captions, slow moments, open notes and who
+has what locked. *Build site* shows the same count. In the Assets tab, right-click a file ▸ **Replace everywhere
 with…** swaps it in every layer at once.
 
 **A video for people without WebGPU.** **File ▸ Record a review video…** plays the story (or the In–Out range) at
@@ -323,8 +364,12 @@ Once the site is handed over, the customer only edits the CMS. Design the parts 
 
 ## Saving: you can't really lose work
 
+**On the studio server everything is saved live** (see *Working as a team*): the table below is how saving
+works without it, plus the safety nets that always exist.
+
 | What | How |
 |---|---|
+| **Live** | On the studio server: every edit is saved as you make it (*● Live · saved*), and the **History** tab has every edit by everyone. Ctrl+S writes your `.tuna` copy. |
 | **Save** | **Ctrl+S** (or Save). Writes `story.json`. The top bar says *Saved 3:15 PM* or *Unsaved changes*. |
 | **Changed elsewhere** | If `story.json` changed on disk since you opened the editor (Claude edited it, a git pull, another tab), saving is paused and you're asked: **Load theirs** (your version stays in undo) or **Keep mine**. Nothing gets overwritten silently. |
 | **Leaving with unsaved work** | A **•** in the tab title means unsaved changes. Closing or reloading the tab asks *“Leave site?”*. Going Home / opening another project asks **Save changes?** — *Save*, *Don’t save* (your edits stay in the studio’s copy of the project, only the .tuna file isn’t updated) or *Cancel*. |
@@ -336,7 +381,7 @@ Once the site is handed over, the customer only edits the CMS. Design the parts 
 | **Import / Export** | File ▸ Import / Export a story JSON, to send one by chat or try someone else's. |
 | **Git** (demos only) | File ▸ **Commit to git…** commits the demo's folder (story, checkpoints, `assets/`; never code) with your message. Tick *Also push* to upload to GitHub. Pushing the **main** branch updates the **public** website, and the dialog warns you about that. |
 
-Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps). The Edit menu names the step (*Undo Moved 3 keys*).
+Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps) — your own edits only.
 
 ## Shortcuts
 
@@ -344,7 +389,7 @@ Undo / redo: **Ctrl+Z / Ctrl+Y** (300 steps). The Edit menu names the step (*Und
 `, .` previous / next key · `K` add key · `L` lock · `Del` delete · `Ctrl C / X / V` copy / cut / paste ·
 `Ctrl Shift V` paste special · `Ctrl D` duplicate · `Ctrl A` select all · Shift-click / Ctrl-click add / toggle ·
 drag empty space: box select · `Alt`-drag a copy · `Alt ← →` nudge · `S` split · `I / O` In / Out (`Alt X` clears) ·
-`Shift Del` delete the In–Out time · `Ctrl Z / Y` undo / redo · `Ctrl S` save · `Ctrl Shift S`
+`Shift Del` delete the In–Out time · `Ctrl Z / Y` undo / redo your last edit · `Ctrl S` save · `Ctrl Shift S`
 checkpoint · `Ctrl O` open a .tuna · `1 / 2` Scene / Game · `F` fit timeline. Help ▸ Keyboard shortcuts shows them all.
 
 ## What the editor doesn't do (yet)

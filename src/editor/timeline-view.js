@@ -3,10 +3,12 @@
 // range zooms from a fraction of a second to hours. Drawn on one canvas; hit-tested by hand.
 // Selection: click; Shift-click adds, Ctrl / Cmd-click toggles; drag on empty space draws a box. Dragging anything
 // selected moves the whole selection; Alt-drag drags a copy; the bracket on the ruler (2+ selected) stretches the
-// selection's timing.
+// selection's timing. Teammates show up as coloured playheads and rings around what they have selected; while
+// looking at an older version (History), what changed since is outlined.
 import { h } from './dom.js';
 import { evalCurve, evalClip, fmtTime } from '../timeline.js';
 import { PARAMS } from '../story.js';
+import { initials } from './sync.js';
 
 const HEAD = 210; // track header width (px)
 const CH = 20; // chapter band height
@@ -153,7 +155,7 @@ export class TimelineView {
 
   rowAt(y) { return this.rows?.find((q) => y + this.scrollY >= q.y && y + this.scrollY < q.y + q.h) ?? null; }
 
-  locked(track, item) { return !!((track && this.ed.tl.lockedTrack(track)) || item?.locked); }
+  locked(track, item) { return !!(this.ed.preview || (track && this.ed.tl.lockedTrack(track)) || item?.locked); }
 
   // overlapping clips in a lane go on separate sub-rows (first free row, by start time)
   pack(members) {
@@ -233,7 +235,16 @@ export class TimelineView {
     if (xe < W) { ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.fillRect(Math.max(HEAD, xe), RULER, W, H); }
     if (xe > HEAD && xe < W) { ctx.fillStyle = COL.end; ctx.fillRect(xe - 0.5, RULER, 1.5, H); }
     for (const c of tl.data.chapters) { const x = this.X(c.t); if (x > HEAD) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x, RULER, 1, H); } }
-    for (const n of tl.data.notes) { const x = this.X(n.t); if (x > HEAD) { ctx.fillStyle = 'rgba(255,209,102,0.22)'; ctx.fillRect(x, RULER, 1, H); } }
+    for (const n of tl.data.notes) { const x = this.X(n.t); if (x > HEAD) { ctx.fillStyle = n.resolved ? 'rgba(255,209,102,0.08)' : 'rgba(255,209,102,0.22)'; ctx.fillRect(x, RULER, 1, H); } }
+    // teammates' playheads
+    for (const p of ed.sync.others) {
+      const x = this.X(p.t ?? 0);
+      if (x < HEAD || x > W) continue;
+      ctx.fillStyle = p.color || '#9aa4b2';
+      ctx.globalAlpha = 0.55;
+      for (let yy = RULER; yy < H; yy += 6) ctx.fillRect(x - 0.5, yy, 1.5, 3);
+      ctx.globalAlpha = 1;
+    }
     const px = this.X(ed.time);
     if (px >= HEAD) { ctx.fillStyle = COL.play; ctx.fillRect(px - 0.5, RULER, 1.5, H); }
     if (this.dropAt) {
@@ -271,6 +282,30 @@ export class TimelineView {
     ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.3;
     ctx.beginPath(); ctx.arc(x, y - 2.5, 2.6, Math.PI, 0); ctx.stroke();
     ctx.fillRect(x - 3.8, y - 2.5, 7.6, 6);
+    ctx.restore();
+  }
+
+  // a teammate's ring around what they have selected; while rewinding, what changed since (amber) / is gone (red)
+  ring(obj, x, y, w, hh) {
+    const { ctx, ed } = this;
+    const p = ed.remoteSel?.get(obj), m = ed.preview ? ed.previewDiff()?.marks.get(obj) : null;
+    if (!p && !m) return;
+    ctx.save();
+    ctx.globalAlpha = 1;
+    if (m) {
+      ctx.strokeStyle = m === 'gone' ? '#ff5d5d' : '#f5c542'; ctx.lineWidth = 2;
+      ctx.setLineDash(m === 'gone' ? [4, 3] : []);
+      ctx.strokeRect(x - 2, y - 2, w + 4, hh + 4);
+      ctx.setLineDash([]);
+    }
+    if (p) {
+      ctx.strokeStyle = p.color || '#9aa4b2'; ctx.lineWidth = 2;
+      ctx.strokeRect(x - 3.5, y - 3.5, w + 7, hh + 7);
+      ctx.font = '600 8px Inter, system-ui, sans-serif';
+      const tag = initials(p.user), tw = ctx.measureText(tag).width + 5;
+      ctx.fillStyle = p.color || '#9aa4b2'; ctx.fillRect(x + w + 3.5 - tw, y - 12, tw, 9);
+      ctx.fillStyle = '#111'; ctx.fillText(tag, x + w + 6 - tw, y - 7.5);
+    }
     ctx.restore();
   }
 
@@ -317,18 +352,24 @@ export class TimelineView {
     ctx.font = t.type === 'group' ? '600 11px Inter, "Segoe UI", system-ui, sans-serif' : r.h <= THIN ? '10px Inter, system-ui, sans-serif' : '11px Inter, "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = t.type === 'group' ? '#eef2f7' : '#d9dee6';
     const n = t.type === 'group' || t.type === 'lane' ? this.contents(t).filter((m) => m.type !== 'lane').length : 0;
-    ctx.fillText(this.ellipsis(`${t.label || t.id}${n ? `  (${n})` : ''}`, HEAD - lx - 50), lx, my);
+    const who = t.locked && t.lockedBy ? initials(t.lockedBy) : '';
+    ctx.fillText(this.ellipsis(`${t.label || t.id}${n ? `  (${n})` : ''}`, HEAD - lx - 50 - (who ? 16 : 0)), lx, my);
     ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
     ctx.globalAlpha = 1;
-    // lock toggle
+    // lock toggle (+ who locked it)
     const kx = HEAD - 38;
-    if (t.locked) this.lockIcon(kx, my + 1, '#ffb35c');
-    else { ctx.globalAlpha = 0.28; this.lockIcon(kx, my + 1, '#8b93a0'); ctx.globalAlpha = 1; }
+    if (t.locked) {
+      this.lockIcon(kx, my + 1, '#ffb35c');
+      if (who) { ctx.font = '600 8px Inter, system-ui, sans-serif'; ctx.fillStyle = '#ffb35c'; ctx.fillText(who, kx - 8 - ctx.measureText(who).width, my + 1); ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif'; }
+    } else { ctx.globalAlpha = 0.28; this.lockIcon(kx, my + 1, '#8b93a0'); ctx.globalAlpha = 1; }
     // mute toggle
     const mx = HEAD - 16;
     ctx.beginPath(); ctx.arc(mx, my, 4.5, 0, Math.PI * 2);
     ctx.strokeStyle = t.mute ? '#5d6470' : c; ctx.lineWidth = 1.5; ctx.stroke();
     if (!t.mute) { ctx.fillStyle = c; ctx.fill(); }
+    // a teammate has this track selected
+    const p = this.ed.remoteSel?.get(t);
+    if (p) { ctx.fillStyle = p.color; ctx.fillRect(HEAD - 4, y + 1, 3, r.h - 3); }
   }
 
   diamond(x, y, s, fill, stroke) {
@@ -348,6 +389,7 @@ export class TimelineView {
       const s = this.sel(k);
       this.diamond(x, cy, s ? 7 : 6, s ? '#ffffff' : k.locked ? '#7d8a99' : c, s ? COL.play : '#0d1a26');
       if (k.locked) this.lockIcon(x, cy - 12, '#ffb35c');
+      this.ring(k, x - 7, cy - 7, 14, 14);
       if (labels) { ctx.fillStyle = '#8b93a0'; ctx.fillText(String(i + 1), x + 9, cy); }
     });
   }
@@ -369,6 +411,7 @@ export class TimelineView {
       const s = this.sel(k), x = this.X(k.t);
       this.diamond(x, Y(k.v), s ? 6.5 : 5, s ? '#ffffff' : k.locked ? '#9a8d6b' : c, s ? COL.play : '#2a2000');
       if (k.locked) this.lockIcon(x + 9, Y(k.v) - 6, '#ffb35c');
+      this.ring(k, x - 6, Y(k.v) - 6, 12, 12);
     }
     if (PARAMS[t.bind]) { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillText(`${+evalCurve(t.keys, ed.time).toFixed(2)}`, Math.max(HEAD + 4, this.X(ed.time) + 6), y + 9); }
   }
@@ -399,6 +442,7 @@ export class TimelineView {
     ctx.fillStyle = '#d9dee6';
     const label = `${t.bind}${t.ease === 'gate' ? '' : ` · ${t.ease || 'linear'}`}`;
     if (x1 - x0 > 40) ctx.fillText(this.ellipsis(label, Math.min(x1, this.W) - Math.max(x0, HEAD) - 12), Math.max(x0, HEAD) + 6, y + hgt / 2);
+    this.ring(t, x0, top, x1 - x0, bh);
   }
 
   // a stretch region: one designed cycle, repeated once per CMS item on the site
@@ -410,6 +454,7 @@ export class TimelineView {
     ctx.fillStyle = '#ffe2c2';
     const label = `↻ ${t.label || 'Repeat per item'} · ${t.list || 'no list'} · ×${n} → ${n === 0 ? 'skipped on the site' : n === 1 ? 'once' : `+${fmtTime((n - 1) * per, 0)} on the site`} · item ${Math.min(n, ed.story.previewItem + 1)}/${n}`;
     if (x1 - x0 > 40) ctx.fillText(this.ellipsis(label, Math.min(x1, this.W) - Math.max(x0, HEAD) - 12), Math.max(x0, HEAD) + 6, cy);
+    this.ring(t, x0, y + 4, x1 - x0, hgt - 8);
   }
 
   drawCaptions(t, y, hgt) {
@@ -418,6 +463,7 @@ export class TimelineView {
       const x0 = this.X(cl.a), x1 = this.X(cl.b);
       if (x1 < HEAD || x0 > this.W) continue;
       this.bar(x0, x1, y + 4, hgt - 8, c, this.sel(cl), cl.locked || t.locked);
+      this.ring(cl, x0, y + 4, x1 - x0, hgt - 8);
       let tx = Math.max(x0, HEAD) + 6;
       if (cl.locked) { this.lockIcon(tx + 3, y + hgt / 2 + 1, '#ffb35c'); tx += 12; }
       ctx.fillStyle = '#e8dcf5';
@@ -448,8 +494,10 @@ export class TimelineView {
       for (const k of t.keys) {
         const s = this.sel(k), kx = this.X(k.t);
         this.diamond(kx, cy, s ? 6.5 : 5, s ? '#ffffff' : k.locked ? '#7d8a99' : c, s ? COL.play : '#0d1a18');
+        this.ring(k, kx - 6, cy - 6, 12, 12);
       }
     }
+    this.ring(t, x0, y + 4, x1 - x0, hgt - 8);
   }
 
   drawPerf(y, hgt) {
@@ -496,6 +544,7 @@ export class TimelineView {
       if (c.locked) { this.lockIcon(tx + 3, 2 + (CH - 3) / 2 + 1, '#ffb35c'); tx += 12; }
       ctx.fillStyle = '#cfe3f5';
       if (x1 - x0 > 30) ctx.fillText(this.ellipsis(c.name, Math.min(x1, W) - tx - 6), tx, 2 + (CH - 3) / 2);
+      this.ring(c, x0, 2, Math.min(x1 - x0, 60), CH - 3);
     });
     // In / Out range
     const rg = ed.range;
@@ -530,7 +579,7 @@ export class TimelineView {
     }
     // the selection's span: drag its ends to stretch / squeeze the timing
     const sp = this.span();
-    if (sp) {
+    if (sp && !ed.preview) {
       const x0 = this.X(sp.a), x1 = this.X(sp.b);
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
       ctx.fillRect(x0, SPAN_Y + 2, x1 - x0, 1.5);
@@ -540,13 +589,13 @@ export class TimelineView {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     if (this.v0 < 0) ctx.fillRect(HEAD, 0, this.X(0) - HEAD, RULER);
     if (this.v1 > D) ctx.fillRect(this.X(D), 0, W, RULER);
-    // notes
+    // notes (resolved ones are dimmed)
     for (const n of tl.data.notes) {
       const x = this.X(n.t), s = this.sel(n);
       ctx.beginPath(); ctx.moveTo(x, RULER - 1); ctx.lineTo(x, RULER - 15); ctx.lineTo(x + 9, RULER - 11); ctx.lineTo(x, RULER - 7);
-      ctx.fillStyle = s ? '#ffffff' : n.locked ? '#c9a24d' : COL.note; ctx.fill();
+      ctx.fillStyle = s ? '#ffffff' : n.resolved ? '#6b6346' : n.locked ? '#c9a24d' : COL.note; ctx.fill();
       if (s || this.hover?.item === n) {
-        const txt = this.ellipsis(`${n.locked ? '🔒 ' : ''}${n.text || 'note'}`, 260), tw = ctx.measureText(txt).width;
+        const txt = this.ellipsis(`${n.locked ? '🔒 ' : ''}${n.author ? `${n.author}: ` : ''}${n.text || 'note'}${n.replies?.length ? ` (+${n.replies.length})` : ''}${n.resolved ? ' ✓' : ''}`, 300), tw = ctx.measureText(txt).width;
         ctx.fillStyle = 'rgba(20,22,26,0.95)'; ctx.fillRect(x + 12, RULER - 19, tw + 10, 15);
         ctx.fillStyle = COL.note; ctx.fillText(txt, x + 17, RULER - 11.5);
       }
@@ -557,6 +606,18 @@ export class TimelineView {
     ctx.fillRect(xe - 0.5, 0, 1.5, RULER);
     ctx.beginPath(); ctx.moveTo(xe, CH + 2); ctx.lineTo(xe + 10, CH + 6); ctx.lineTo(xe, CH + 10); ctx.closePath(); ctx.fill();
     ctx.fillText(`END ${fmtTime(D, 0)}`, xe + 13, CH + 6);
+    // teammates' playheads: a flag with their initials
+    ctx.font = '600 8px Inter, system-ui, sans-serif';
+    for (const p of ed.sync.others) {
+      const x = this.X(p.t ?? 0);
+      if (x < HEAD - 10 || x > W + 10) continue;
+      const tag = initials(p.user), tw = ctx.measureText(tag).width + 6;
+      ctx.fillStyle = p.color || '#9aa4b2';
+      ctx.fillRect(x - 0.5, CH, 1.5, RULER - CH);
+      ctx.fillRect(x - tw / 2, RULER - 12, tw, 10);
+      ctx.fillStyle = '#111'; ctx.fillText(tag, x - tw / 2 + 3, RULER - 7);
+    }
+    ctx.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
     // playhead
     const x = this.X(ed.time);
     ctx.fillStyle = COL.play;
@@ -586,7 +647,7 @@ export class TimelineView {
     const tl = this.ed.tl, D = this.D;
     if (y < RULER) {
       if (x < HEAD) return { type: 'ruler' };
-      const sp = this.span();
+      const sp = !this.ed.preview && this.span();
       if (sp && y >= SPAN_Y - 3 && y <= SPAN_Y + 10) {
         if (Math.abs(x - this.X(sp.a)) < 6) return { type: 'spanA', span: sp };
         if (Math.abs(x - this.X(sp.b)) < 6) return { type: 'spanB', span: sp };
@@ -774,11 +835,13 @@ export class TimelineView {
         break;
       case 'header':
         if (hit.fold) {
+          if (ed.preview) { ed.previewRefuse(); break; }
           if (hit.track.collapsed) delete hit.track.collapsed; else hit.track.collapsed = true;
           ed.commit(hit.track.collapsed ? 'Collapsed a row' : 'Expanded a row');
           break;
         }
         if (hit.mute) {
+          if (ed.preview) { ed.previewRefuse(); break; }
           if (hit.track.mute) delete hit.track.mute; else hit.track.mute = true;
           ed.commit();
         }
@@ -807,7 +870,7 @@ export class TimelineView {
         break;
     }
     // Alt-drag: drag a copy (the originals stay)
-    if (e.altKey && this.drag && /^(group|key|marker|body)$/.test(this.drag.type)) {
+    if (e.altKey && this.drag && /^(group|key|marker|body)$/.test(this.drag.type) && !ed.preview) {
       const pairs = ed.cloneSelection();
       if (pairs.length) {
         const copyOf = new Map(pairs.map(([a, b]) => [a.item ?? a.track, b]));
@@ -916,12 +979,17 @@ export class TimelineView {
     if (d.type === 'box' || d.type === 'rangeA' || d.type === 'rangeB' || d.type === 'pan') this.draw();
   }
 
-  // hover text
+  // hover text: who locked it, who has it selected
   tip(hit) {
     if (!hit) return '';
     const ed = this.ed, s = this.selOf(hit);
     const parts = [];
-    if (s && ed.isLocked(s)) parts.push('Locked');
+    if (s && !ed.preview && ed.isLocked(s)) { const who = ed.lockOwner(s); parts.push(`Locked${who ? ` by ${who}` : ''}`); }
+    const obj = hit.item ?? hit.track;
+    const p = obj && ed.remoteSel?.get(obj);
+    if (p) parts.push(`${p.user} has this selected`);
+    const m = ed.preview && obj ? ed.previewDiff()?.marks.get(obj) : null;
+    if (m) parts.push(m === 'gone' ? 'Deleted since this version' : 'Changed since this version');
     if (hit.type === 'spanA' || hit.type === 'spanB') parts.push('Drag to stretch / squeeze the timing of everything selected (Shift: no snapping)');
     if (hit.type === 'lane') parts.push('Drag to select everything in a box · Shift adds · Ctrl/Cmd toggles');
     return parts.join(' · ');

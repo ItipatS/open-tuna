@@ -498,6 +498,9 @@ async function main() {
 
   window.__ocean = { camera, controls, tuna, reef, hump, blue, sharks, turtles, presets, director, school, renderer, scene, seagrass, snow, bubbles, jellies, splash, sun, opts, buildPost, story, tentacles, timeline, layers, data };
 
+  // play.html?project=…&review: a "Leave a note" button — notes land in the shared story (the editors see them live)
+  if (!IS_BUILD && PAGE === 'play' && story && PROJECT && params.has('review')) import('./review.js').then((m) => m.startReview(story)).catch(() => {});
+
   if (EDIT) {
     const { Editor } = await import('./editor/editor.js');
     editor = new Editor({

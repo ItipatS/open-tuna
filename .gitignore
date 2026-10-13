@@ -6,3 +6,5 @@ Thumbs.db
 **/saves/auto/
 projects/
 __pycache__/
+library/
+**/saves/history.jsonl

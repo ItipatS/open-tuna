@@ -121,13 +121,15 @@ export class ProjectFiles {
   // the story differs from what's in the .tuna file on disk (a project never saved to a file counts once it's edited)
   get tunaDirty() {
     if (!this.isFile) return false;
-    return this.savedHash ? this.savedHash !== fnv1a(this.ed.current()) : this.ed.hi > 0;
+    return this.savedHash ? this.savedHash !== fnv1a(this.ed.current()) : this.ed.edits > 0;
   }
 
   // anything that closing the tab now would lose (or leave out of the .tuna): unsaved edits, an out-of-date .tuna,
   // an upload / save still running. Drives the browser's "Leave site?" prompt, the Save changes dialog and the • title.
   get unsaved() {
     const s = this.ed.saves;
+    // live: the shared story on the server has everything — only edits not sent yet would be lost
+    if (s.live) return !!(s.dirty || s.inflight > 0 || this.packing);
     return !!(s.dirty || this.tunaDirty || s.busy || s.inflight > 0 || this.packing);
   }
 

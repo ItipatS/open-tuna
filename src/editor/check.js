@@ -1,7 +1,7 @@
 // File ▸ Check project: what would look broken on the site, or trip up a teammate — missing media files, references to
 // data sources that don't exist, things placed after the story's end, empty / backwards clips, two tracks driving the
 // same parameter, overlapping repeat regions, invisible layers, empty captions, slow moments (measured fps), open
-// notes and what's locked. Each problem has "Go to" (selects it, moves the playhead) and, where it's
+// review notes and who has what locked. Each problem has "Go to" (selects it, moves the playhead) and, where it's
 // obvious, a fix. Also shown before File ▸ Build site.
 import { h, btn } from './dom.js';
 import { dialog } from './menu.js';
@@ -102,13 +102,13 @@ export class Checker {
     if (seen < 0.6) add('info', `Performance was measured for ${Math.round(seen * 100)}% of the story — play it through once (▶▶ at 1×) to see slow moments everywhere`);
 
     // the team
-    const open = d.notes.filter((n) => String(n.text ?? '').trim());
-    for (const n of open.slice(0, 30)) add('info', `Note at ${fmtTime(n.t)}: “${String(n.text).slice(0, 70)}”`, { kind: 'note', item: n });
-    let locked = 0;
-    const lk = (o) => { if (o.locked) locked++; };
+    const open = d.notes.filter((n) => !n.resolved && String(n.text ?? '').trim());
+    for (const n of open.slice(0, 30)) add('info', `Open note at ${fmtTime(n.t)}${n.author ? ` by ${n.author}` : ''}: “${String(n.text).slice(0, 70)}”${n.replies?.length ? ` (${n.replies.length} repl${n.replies.length === 1 ? 'y' : 'ies'})` : ''}`, { kind: 'note', item: n });
+    const locks = new Map();
+    const lk = (o) => { if (o.locked) { const who = o.lockedBy || 'someone (no name)'; locks.set(who, (locks.get(who) ?? 0) + 1); } };
     for (const t of tl.tracks) { lk(t); (t.keys ?? []).forEach(lk); (t.clips ?? []).forEach(lk); }
     d.chapters.forEach(lk); d.notes.forEach(lk);
-    if (locked) add('info', `${locked} locked item${locked === 1 ? '' : 's'}`);
+    for (const [who, n] of locks) add('info', `${n} item${n === 1 ? '' : 's'} locked by ${who}`);
     const muted = tl.tracks.filter((t) => t.mute);
     if (muted.length) add('info', `${muted.length} muted track${muted.length === 1 ? '' : 's'} (not on the site): ${muted.slice(0, 5).map(name).join(', ')}${muted.length > 5 ? '…' : ''}`);
     const order = { error: 0, warn: 1, info: 2 };

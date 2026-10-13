@@ -34,9 +34,11 @@ export class Inspector {
     this.fields = new Map();
     this.ro = ed.isLocked(s);
     const el = h('div', { class: 'ins' });
-    if (this.ro && !ed.multi) {
-      const own = s.kind === 'track' ? s.track : s.item;
-      el.append(h('div', { class: 'locked' }, h('span', {}, own?.locked ? '🔒 Locked' : '🔒 Its track is locked'),
+    if (ed.preview) {
+      el.append(h('div', { class: 'locked' }, h('span', {}, `⏪ Viewing ${ed.preview.label} — read-only`), btn('Back to now', () => ed.exitPreview())));
+    } else if (this.ro && !ed.multi) {
+      const own = s.kind === 'track' ? s.track : s.item, who = ed.lockOwner(s);
+      el.append(h('div', { class: 'locked' }, h('span', {}, `${own?.locked ? '🔒 Locked' : '🔒 Its track is locked'}${who ? ` by ${who}` : ''}`),
         btn('Unlock', () => (own?.locked ? ed.toggleLock() : ed.select({ kind: 'track', track: s.track })), { title: own?.locked ? 'L' : 'Select the track to unlock it' })));
     }
     if (ed.multi) this.multi(el);
@@ -159,7 +161,10 @@ export class Inspector {
       h('span', {}, label(it, i)[0]), h('span', {}, label(it, i)[1])))));
   }
 
-  setLock(o, v) { if (v) o.locked = true; else delete o.locked; }
+  // lock / unlock from a checkbox — remembers who locked it
+  setLock(o, v) {
+    if (v) { o.locked = true; if (this.ed.user.name) o.lockedBy = this.ed.user.name; } else { delete o.locked; delete o.lockedBy; }
+  }
 
   // a number shared by several items: blank ("—") while they differ; a new value goes to all of them
   mnum(label, objs, field, def, { step = 0.1, min = -Infinity, max = Infinity, dec = 2 } = {}) {
@@ -223,6 +228,7 @@ export class Inspector {
       mute.addEventListener('change', () => { for (const t of tracks) { if (mute.checked) t.mute = true; else delete t.mute; } ed.commit(`${mute.checked ? 'Muted' : 'Unmuted'} ${tracks.length} tracks`); });
       el.append(this.row('Mute', h('div', {}, mute)));
     }
+    if (ed.preview) return;
     this.sec(el, 'Timing');
     this.buttons(el,
       btn('Align to playhead', () => ed.alignToPlayhead(), { title: 'Every selected item starts at the playhead' }),
@@ -633,13 +639,34 @@ export class Inspector {
     this.buttons(el, this.free(btn('Go to', () => ed.setTime(c.t))), btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
   }
 
+  // a note = a review comment: who wrote it, a thread of replies, resolved or open
   note(el, n) {
     const { ed } = this;
-    this.header(el, 'Note', `note at ${fmtTime(n.t)}`);
-    el.append(this.text('Text', () => n.text, (v) => { n.text = v; }, { area: true, placeholder: 'e.g. “tentacle pops in here — should grow smoothly”' }));
+    const when = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
+    this.header(el, n.resolved ? 'Note · resolved' : 'Note', `${n.author ? `${n.author} · ` : ''}${fmtTime(n.t)}${n.at ? ` · ${when(n.at)}` : ''}`);
+    el.append(this.text('Text', () => n.text, (v) => { n.text = v; if (!n.author && ed.user.name) n.author = ed.user.name; if (!n.at) n.at = Date.now(); }, { area: true, placeholder: 'e.g. “tentacle pops in here — should grow smoothly”' }));
     el.append(this.time('At (s)', () => n.t, (v) => { n.t = v; }));
-    el.append(h('div', { class: 'hint' }, 'Notes are saved in story.json — ask Claude to “check the notes in story.json” and it will read them.'));
-    this.buttons(el, this.free(btn('Go to', () => ed.setTime(n.t))), btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
+    const replies = n.replies ?? [];
+    if (replies.length) {
+      this.sec(el, `Replies (${replies.length})`);
+      el.append(h('div', { class: 'thread' }, replies.map((r) => h('div', { class: 'rp' }, h('b', {}, r.author || 'Someone'), h('small', {}, ` ${when(r.at)}`), h('div', {}, r.text)))));
+    }
+    if (!this.ro) {
+      const box = h('textarea', { rows: 2, placeholder: ed.user.name ? `Reply as ${ed.user.name}…` : 'Reply…' });
+      const send = () => {
+        const text = box.value.trim();
+        if (!text) return;
+        n.replies = [...(n.replies ?? []), { author: ed.user.name || 'Someone', at: Date.now(), text }];
+        ed.commit(`Replied to a note${n.author ? ` by ${n.author}` : ''}`);
+        ed.inspector.show();
+      };
+      box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } });
+      el.append(h('div', { class: 'reply' }, box, btn('Reply', send, { title: 'Ctrl/Cmd+Enter' })));
+    }
+    this.buttons(el, this.free(btn('Go to', () => ed.setTime(n.t))),
+      btn(n.resolved ? 'Reopen' : 'Resolve ✓', () => { if (n.resolved) { delete n.resolved; delete n.resolvedBy; } else { n.resolved = true; if (ed.user.name) n.resolvedBy = ed.user.name; } ed.commit(n.resolved ? 'Resolved a note' : 'Reopened a note'); }),
+      btn('Delete', () => ed.deleteSelection(), { cls: 'danger' }));
+    el.append(h('div', { class: 'hint' }, `${n.resolved ? `Resolved${n.resolvedBy ? ` by ${n.resolvedBy}` : ''}. ` : ''}Notes are review comments saved in the story — your team sees them live, and Claude reads them when you ask it to “check the notes in story.json”.`));
   }
 
   object(el, o) {

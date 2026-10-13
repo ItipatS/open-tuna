@@ -3,7 +3,8 @@
 // browser draft, import), export, and git commit / push. Without the dev server (e.g. GitHub Pages) it
 // falls back to the File System Access API / downloads, and the browser draft. In a .tuna project (?project=)
 // everything goes to its working copy in projects/<slug>/, and a manual Save also writes the .tuna file
-// (src/editor/project.js).
+// (src/editor/project.js). With the live studio server (ping says `sync`) there is nothing to save: every edit goes to
+// the shared story as it's made (src/editor/sync.js) — Save then only writes the .tuna file of a project.
 import { h, btn, download } from './dom.js';
 import { dialog } from './menu.js';
 import { editorAPI, PROJECT } from '../project.js';
@@ -51,7 +52,8 @@ export class Saves {
     this.autosave = a; // seconds; 0 = off
   }
 
-  get dirty() { return this.ed.current() !== this.saved; }
+  get live() { return this.ed.sync.live; }
+  get dirty() { return this.live ? this.ed.sync.pending > 0 : this.ed.current() !== this.saved; }
 
   async ping() {
     try {
@@ -59,8 +61,20 @@ export class Saves {
       this.server = r.save === true;
       this.git = !!r.git;
       this.branch = r.branch || '';
+      if (r.sync && PROJECT) {
+        try { await this.ed.sync.start(); } catch (e) { this.ed.toast(`Live editing is off (${e.message}) — saving to the file instead`, true, 8000); }
+      }
     } catch { this.server = false; }
     this.ed.syncButtons();
+    this.ed.renderPresence();
+  }
+
+  // the shared story as the server has it (live)
+  adopted(text) {
+    this.saved = text;
+    this.baseHash = fnv1a(text);
+    this.conflict = false;
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ }
   }
 
   setAutosave(sec) {
@@ -73,6 +87,7 @@ export class Saves {
   // called on every committed edit
   edited(text) {
     this.lastEdit = performance.now();
+    if (this.live) return; // the server has it
     try {
       if (text !== this.saved) localStorage.setItem(DRAFT_KEY, JSON.stringify({ text, time: Date.now() }));
       else localStorage.removeItem(DRAFT_KEY);
@@ -82,7 +97,7 @@ export class Saves {
   // called about once a second: autosave when there are changes and the user paused editing for 2 s
   tick() {
     const now = performance.now();
-    if (!this.autosave || !this.server || this.busy || this.conflict || !this.dirty) return;
+    if (this.live || !this.autosave || !this.server || this.busy || this.conflict || !this.dirty) return;
     if (now - this.lastAuto < this.autosave * 1000 || now - this.lastEdit < 2000) return;
     this.lastAuto = now;
     this.save({ auto: true });
@@ -98,6 +113,12 @@ export class Saves {
   }
 
   async save({ auto = false, force = false } = {}) {
+    if (this.live) {
+      if (auto) return;
+      if (this.ed.project?.isFile) return this.ed.project.saveTuna();
+      this.ed.toast(this.ed.sync.pending ? 'Sending your last edits…' : 'All saved — every edit goes to the shared story as you make it (File ▸ Save checkpoint for a named version)');
+      return;
+    }
     const text = this.ed.current();
     if (this.conflict && !force) return this.conflictDialog();
     this.busy = true;
@@ -165,6 +186,13 @@ export class Saves {
   }
 
   status() {
+    if (this.live) {
+      const S = this.ed.sync, n = S.pending;
+      if (!S.online) return { text: `⚠ Offline${n ? ` · ${n} edit${n === 1 ? '' : 's'} waiting` : ''}`, cls: 'dirty', title: 'Can’t reach the studio server. Your edits are kept here and sent when it’s back — don’t close this tab.' };
+      if (n) return { text: 'Saving…', cls: '', title: 'Sending your edits to the shared story' };
+      const tuna = this.ed.project?.tunaDirty ? ` Save (${this.ed.mod}S) writes a copy to ${this.ed.project.fileName}.` : '';
+      return { text: '● Live · saved', cls: 'ok', title: `Live: the story is shared with everyone in this project, and every edit is saved on the studio server as you make it. History tab: every edit, rewind.${tuna}` };
+    }
     if (this.conflict) return { text: '⚠ Changed on disk — click Save', cls: 'dirty' };
     if (this.dirty) return { text: this.autosave && this.server ? 'Unsaved · autosave on' : 'Unsaved changes', cls: 'dirty' };
     if (this.ed.project?.tunaDirty) return { text: `${this.savedAt ? `${this.auto ? 'Autosaved' : 'Saved'} ${clock(this.savedAt)} · ` : ''}.tuna not saved`, cls: 'warn', title: `Changes are kept in the project’s working copy. Save (Ctrl+S) also writes ${this.ed.project.fileName}.` };

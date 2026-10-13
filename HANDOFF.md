@@ -146,12 +146,14 @@ Working end to end, zero console errors, 60 fps (capped) above water / ~47 fps u
 11. Editor next steps (if the designer asks): keyframe more things (tuna counts / school position, tentacle look
     params, colour grade), easing curve editor for keys, audio track for music sync, layer masks / blend modes,
     text layers with brand fonts once brand assets arrive, nested sequences (a timeline inside a clip).
-12. Editor (2026-10-14): multi-select and bulk editing (box select, group move, Alt-drag copies, stretch timing,
-    split, nudge, align / distribute, In–Out + loop, ripple insert / delete time, paste special, clipboard across
-    projects / computers), Import into this story (.tuna merge), Check project, Replace asset everywhere, Copy link
-    to a moment, review video recording; ids on every item and diff-based undo. **Team platform work lives on the
-    `team-platform` branch** (live shared editing, presence, *Locked by …*, History / rewind, review notes, snippets) —
-    owner's rule: editor work goes to `main`, platform work to that branch.
+12. Team platform (2026-10-14, the owner wants the tool usable by a team): done — live shared editing on the studio
+    server (presence, per-person undo, *Locked by …*, History with rewind / restore / undo-one-edit, review notes +
+    review links, notes with replies / resolve), multi-select and bulk editing (box select, group move, Alt-drag
+    copies, stretch timing, split, nudge, align / distribute, In–Out + loop, ripple insert / delete time, paste
+    special, clipboard across projects / computers), Import into this story (.tuna merge), team snippets, Check
+    project, Replace asset everywhere, Copy link to a moment, review video recording. Not done: real user accounts
+    (names are typed in; the server password is the only access control), live editing on serve.ps1, conflict
+    UI beyond last-writer-wins per field, editing two projects' histories together (branches / merge).
 
 ## Tuning knobs (where to change things)
 

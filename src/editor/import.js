@@ -45,6 +45,7 @@ export class Importer {
 
   async open(file) {
     const ed = this.ed;
+    if (ed.preview) return ed.previewRefuse();
     let src;
     try { src = await this.read(file); } catch (e) { return ed.toast(`Can’t import ${file.name}: ${e.message}`, true, 7000); }
     const S = src.story, D = S.meta?.duration ?? 60;

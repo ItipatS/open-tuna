@@ -33,7 +33,10 @@ designer must then press Ctrl+S to write it into their .tuna file. If they send 
 unzip it, edit `story.json`, zip it back (keep `manifest.json`). See [projects-build-data.md](projects-build-data.md).
 Below, `story.json` means that file.
 
-The designer may have the editor open, and it **autosaves story.json about every minute**.
+The designer (often several of them) may have the editor open. On the studio server (`tools/serve.py`) the story is
+**edited live**: every edit is written to story.json at once, and **your change to the file shows up in their
+editors within a second**, as an edit by *Story file* in the History tab (undoable there). Without live editing
+the editor autosaves about every minute.
 
 1. `git diff -- demos/<id>/story.json` first (demos). Uncommitted changes there are the designer's work. Keep them.
 2. Edit the current file. Prefer a small Node script that loads it through the project's own `Timeline` class and
@@ -51,11 +54,15 @@ The designer may have the editor open, and it **autosaves story.json about every
    Hand edits are fine too, as long as the result stays valid JSON with the same field names.
    **Keep the `id`s** of keys, clips, chapters and notes you change; leave `id` out on items you add (they get one).
    Don't copy an item with its id.
-3. **Respect `locked: true`.** The designer locked those items. Don't change them unless asked to.
-4. After writing, tell the user: *"reload the editor, or choose **Load theirs** when it says story.json changed"*.
-   The server refuses saves from a tab that loaded an older file (409), so nothing is silently lost. But until
-   they reload, their tab shows the old story.
-5. Keep backups for yourself in your scratch space if you run destructive scripts. **Never** delete `saves/auto/*`.
+3. **Respect `locked: true`** (`lockedBy` says who). The designer locked those items. Don't change them unless asked to.
+4. After writing: with live editing, nothing to do — tell the user it's in, and that it's one *Story file* edit in
+   the History if they want it undone. Without it, tell them: *"reload the editor, or choose **Load theirs** when it
+   says story.json changed"* (the server refuses saves from a tab that loaded an older file, so nothing is silently
+   lost).
+5. **Review notes** (`notes`) now carry `author`, `replies`, `resolved`: work on the unresolved ones, and say which
+   ones you handled (don't resolve them yourself unless asked).
+6. Keep backups for yourself in your scratch space if you run destructive scripts. **Never** delete `saves/auto/*` or
+   `saves/history.jsonl`.
 
 ## Common changes
 

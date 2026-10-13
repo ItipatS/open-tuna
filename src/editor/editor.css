@@ -295,15 +295,54 @@ html.edit #panel, html.edit #help, html.edit #scrollspace { display: none !impor
 .ins .pv { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .ins .pv .ed-btn { height: 22px; padding: 0 8px; }
 
-/* ---- timeline filter, inspector extras ---- */
+/* ---- team: avatars, activity, rewind bar, history ---- */
+#ed-people { display: flex; align-items: center; gap: 3px; }
+.ed-av { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--c); background: color-mix(in srgb, var(--c) 30%, #15171b); color: #fff; font: 600 9px Inter, system-ui, sans-serif; letter-spacing: .02em; cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.ed-av.me { border-style: dashed; }
+.ed-av:hover { background: var(--c); color: #111; }
+#ed-people .more { font-size: 10px; color: var(--dim); margin-left: 2px; }
+#ed-activity { font-size: 11px; color: var(--dim); max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity .4s; display: flex; align-items: center; gap: 5px; }
+#ed-activity.on { opacity: 1; }
+#ed-activity i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+#ed-activity b { color: var(--text); font-weight: 600; }
+#ed-previewbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 7px 10px; background: #3a2f12; border-bottom: 1px solid #806423; color: #ffe7a8; }
+#ed-previewbar .ic { font-size: 16px; }
+#ed-previewbar .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#ed-previewbar .tx small { color: #d9c48d; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ed-previewbar .ed-btn { height: 26px; }
+#ed.previewing { --mode: #f5c542; }
+.ed-hist { display: flex; flex-direction: column; gap: 4px; padding: 8px; font-size: 12px; }
+.ed-hist .hd { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 2px 4px; }
+.ed-hist .scrub { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 11px; padding: 2px; }
+.ed-hist .scrub input { flex: 1; }
+.ed-hist .sec { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; margin: 8px 2px 2px; }
+.ed-hist .rows { display: flex; flex-direction: column; gap: 1px; }
+.ed-hist .hr { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.ed-hist .hr:hover { background: var(--panel2); }
+.ed-hist .hr.on { border-color: #f5c542; background: #2e2a1c; }
+.ed-hist .hr.hnow.on { border-color: var(--good); background: #1c2a20; }
+.ed-hist .hr.local { cursor: default; justify-content: space-between; }
+.ed-hist .dot { width: 20px; height: 20px; border-radius: 50%; flex: none; font: 600 8px Inter, system-ui, sans-serif; font-style: normal; color: #111; display: inline-flex; align-items: center; justify-content: center; }
+.ed-hist .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ed-hist .tx .lb, .ed-hist .tx b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ed-hist .tx small { color: var(--dim); font-size: 10px; }
+.ed-hist .hr .ed-btn { height: 22px; font-size: 10px; padding: 0 6px; visibility: hidden; }
+.ed-hist .hr:hover .ed-btn { visibility: visible; }
+.ed-hist .more { padding: 6px 2px; }
 .ed-filter { flex: none; height: 24px; width: 130px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 6px; color: var(--text); padding: 0 8px; font-size: 11px; }
-/* the mode switch never squeezes; the rest of the top bar gives way */
+.ins .thread { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+.ins .thread .rp { background: var(--panel2); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+.ins .thread .rp small { color: var(--dim); }
+.ins .reply { display: flex; gap: 6px; align-items: flex-end; margin: 4px 0 8px; }
+.ins .reply textarea { flex: 1; resize: vertical; }
+/* the top bar holds more now (avatars, activity): the mode switch never squeezes, the rest gives way */
 #ed-mode { flex: none; }
 #ed-mode .m small { white-space: nowrap; }
 #ed-readout { min-width: 110px; flex: 0 1 auto; }
+#ed-activity { flex: 0 1 220px; min-width: 0; }
 #ed-status { flex: none; }
 .ltab { padding: 0 2px; letter-spacing: 0; }
-@media (max-width: 1500px) { #ed-tlbar .hint { display: none; } }
+@media (max-width: 1500px) { #ed-activity { display: none; } #ed-tlbar .hint { display: none; } }
 .imp-list { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px; margin: 8px 0; display: flex; flex-direction: column; }
 .imp-r { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
 .imp-r:hover { background: var(--panel2); }

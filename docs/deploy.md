@@ -63,12 +63,16 @@ Restart=always
 
 ## Things to know
 
-- **No user accounts.** Everyone with the password can open and change every project on that server. Two people
-  editing the same project are protected by the save-conflict check (*Load theirs / Keep mine*), but it isn't
-  real-time collaboration.
-- **Where work lives:** `projects/<slug>/` holds the working copy of every project opened or created on the server.
-  Ctrl+S also writes the `.tuna` to the designer's own computer. **Back up `projects/`** (and `saves/`): they're
-  gitignored.
+- **Team editing is live.** Everyone who opens the same project edits one shared story in real time (presence,
+  *Locked by …*, per-person undo, a History of every edit with rewind, review notes from `play.html?…&review`
+  links). It needs `tools/serve.py` (the PowerShell server has no live editing). The editor keeps a long-poll
+  request open for up to 25 s: the proxy must not buffer it or time out sooner (nginx: `proxy_buffering off` as
+  above, `proxy_read_timeout` ≥ 60s — the default).
+- **No user accounts.** Everyone with the password can open and change every project on that server. Names in the
+  editor (locks, notes, History) are what each person typed in — a courtesy, not a login.
+- **Where work lives:** `projects/<slug>/` holds the working copy of every project opened or created on the server,
+  with its edit log in `saves/history.jsonl`; the team's snippets are in `library/`. Ctrl+S also writes the `.tuna`
+  to the designer's own computer. **Back up `projects/`, `library/` and the demos' `saves/`**: they're gitignored.
 - **Demos** (`demos/<id>/`) are part of the tool. The home page's *Open a copy* never touches them; *edit the
   original demo* does. Consider `--no-git` plus file permissions if the demos must stay fixed.
 - **It's a small threaded stdlib server** made for a team, not for public traffic. Serve built sites from a real
