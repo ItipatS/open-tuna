@@ -141,7 +141,7 @@ export class ProjectFiles {
       dialog({
         title: `Save changes to ${file}?`,
         body: [h('p', {}, this.isFile
-          ? 'Your latest edits are not in your .tuna file yet. If you don’t save, they stay only in the studio’s working copy of the project.'
+          ? `Your latest edits are not in your .tuna file yet. If you don’t save, they stay only in ${this.ed.saves.local ? 'this browser' : 'the studio’s working copy of the project'}${this.ed.saves.local && this.ed.saves.dirty ? ' — and the last ones not even there' : ''}.`
           : 'Your latest edits are not saved. If you don’t save, they are lost.')],
         buttons: [
           { label: 'Cancel', onClick: () => end(null) },

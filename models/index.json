@@ -1,0 +1,45 @@
+{
+  "about": "The tool's built-in models, for the editor's Assets tab when there's no studio server (the browser studio, sw.js). tools/serve.py lists models/ itself. Add an entry when you add a model.",
+  "models": [
+    {
+      "file": "models/blue_whale_-_textured.glb",
+      "size": 3784260
+    },
+    {
+      "file": "models/coral_fish.glb",
+      "size": 1858384
+    },
+    {
+      "file": "models/coral_piece.glb",
+      "size": 3083192
+    },
+    {
+      "file": "models/game-ready_humpback_whale.glb",
+      "size": 2539720
+    },
+    {
+      "file": "models/model_50a_-_hawksbill_sea_turtle.glb",
+      "size": 3631696
+    },
+    {
+      "file": "models/model_54a_-_caribbean_reef_shark.glb",
+      "size": 3699152
+    },
+    {
+      "file": "models/prins_jellyfish.glb",
+      "size": 1809104
+    },
+    {
+      "file": "models/starfish__sarcophyton_-_agisoftnaturechallenge.glb",
+      "size": 32171760
+    },
+    {
+      "file": "models/tuna_fish.glb",
+      "size": 3254988
+    },
+    {
+      "file": "models/underwater_environment.glb",
+      "size": 56044200
+    }
+  ]
+}

@@ -8,6 +8,15 @@ Every response is `Cache-Control: no-store`, so editors and tests always see the
 Static GETs support **byte ranges (206)**, which Chrome needs to seek in videos (scrubbed videos). The listen backlog
 is 128 (the page fetches many modules and models at once).
 
+## The browser studio (`sw.js`)
+
+On a plain file host there's no server, so `src/backend.js` registers `sw.js` (scope: the tool's folder) and every
+page waits for it (`backendReady`) before its first request. The service worker implements the same endpoints as
+below (except git, sync and library) over IndexedDB and serves `projects/<slug>/…` (with byte ranges) from it; demos
+are read from the host, read-only. `ping` answers `{local: true}`: the editor then turns autosave off. If a real
+server answers `ping` on the same address, the worker passes everything through and the pages unregister it.
+**Keep it in sync with serve.py** when you change an endpoint.
+
 ## Endpoints (`/__editor/…`)
 
 Story endpoints need **`project=<id>`**: `demo/<id>` → `demos/<id>/` (demos, committed) or `<slug>` →

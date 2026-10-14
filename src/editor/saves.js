@@ -3,7 +3,8 @@
 // browser draft, import), export, and git commit / push. Without the dev server (e.g. GitHub Pages) it
 // falls back to the File System Access API / downloads, and the browser draft. In a .tuna project (?project=)
 // everything goes to its working copy in projects/<slug>/, and a manual Save also writes the .tuna file
-// (src/editor/project.js).
+// (src/editor/project.js). In the browser studio (a plain file host, sw.js) the working copy lives in this browser:
+// there is no autosave, Save writes the working copy and the .tuna file, and leaving with unsaved work warns.
 import { h, btn, download } from './dom.js';
 import { dialog } from './menu.js';
 import { editorAPI, PROJECT } from '../project.js';
@@ -57,6 +58,7 @@ export class Saves {
     try {
       const r = await apiJson('ping');
       this.server = r.save === true;
+      this.local = !!r.local; // the browser studio (sw.js): no autosave
       this.git = !!r.git;
       this.branch = r.branch || '';
     } catch { this.server = false; }
@@ -82,7 +84,7 @@ export class Saves {
   // called about once a second: autosave when there are changes and the user paused editing for 2 s
   tick() {
     const now = performance.now();
-    if (!this.autosave || !this.server || this.busy || this.conflict || !this.dirty) return;
+    if (this.local || !this.autosave || !this.server || this.busy || this.conflict || !this.dirty) return;
     if (now - this.lastAuto < this.autosave * 1000 || now - this.lastEdit < 2000) return;
     this.lastAuto = now;
     this.save({ auto: true });
@@ -166,8 +168,8 @@ export class Saves {
 
   status() {
     if (this.conflict) return { text: '⚠ Changed on disk — click Save', cls: 'dirty' };
-    if (this.dirty) return { text: this.autosave && this.server ? 'Unsaved · autosave on' : 'Unsaved changes', cls: 'dirty' };
-    if (this.ed.project?.tunaDirty) return { text: `${this.savedAt ? `${this.auto ? 'Autosaved' : 'Saved'} ${clock(this.savedAt)} · ` : ''}.tuna not saved`, cls: 'warn', title: `Changes are kept in the project’s working copy. Save (Ctrl+S) also writes ${this.ed.project.fileName}.` };
+    if (this.dirty) return { text: this.autosave && this.server && !this.local ? 'Unsaved · autosave on' : `Unsaved changes — ${this.ed.mod}S to save`, cls: 'dirty' };
+    if (this.ed.project?.tunaDirty) return { text: `${this.savedAt ? `${this.auto ? 'Autosaved' : 'Saved'} ${clock(this.savedAt)} · ` : ''}.tuna not saved`, cls: 'warn', title: `Changes are kept in the project’s working copy${this.local ? ' (in this browser)' : ''}. Save (Ctrl+S) also writes ${this.ed.project.fileName}.` };
     if (this.savedAt) return { text: `${this.auto ? 'Autosaved' : 'Saved'} ${clock(this.savedAt)}`, cls: 'ok' };
     return { text: this.server === false ? 'No editor server (Save downloads)' : 'Saved', cls: '' };
   }

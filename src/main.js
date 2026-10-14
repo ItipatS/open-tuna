@@ -21,6 +21,7 @@ import { Timeline } from './timeline.js';
 import { Layers } from './layers.js';
 import { createWaterTentacles } from './tentacles.js';
 import { BASE, IS_BUILD, PAGE, PROJECT } from './project.js';
+import { backendReady } from './backend.js';
 import { DataHub } from './data.js';
 
 // Per-model orientation overrides (flip = the artist's pivot/forward axis points the wrong way).
@@ -62,6 +63,7 @@ async function main() {
   const EDIT = !IS_BUILD && PAGE === 'editor'; // editor.html: the timeline editor around the project (src/editor/)
   // the studio's pages need a project (?project=demo/thai-union | <slug>); without one, go to the studio home
   if (!IS_BUILD && !LAB && !PROJECT) { location.replace('./'); return; }
+  if (!IS_BUILD) await backendReady; // projects/<slug>/… may come from the browser studio (sw.js)
   let editor = null;
   document.documentElement.classList.add(LAB ? 'lab' : EDIT ? 'edit' : 'story');
 

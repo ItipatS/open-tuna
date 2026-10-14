@@ -374,7 +374,8 @@ export class Editor {
       { label: P.isFile ? 'Save .tuna as…' : 'Save a copy as .tuna…', onClick: () => P.saveTuna({ as: true }), disabled: !s.server },
       { label: 'Save checkpoint…', shortcut: `${mod}⇧S`, onClick: () => s.checkpointDialog(), disabled: !s.server },
       { label: 'Restore a version…', onClick: () => s.openDialog() },
-      { label: 'Autosave', items: [0, 30, 60, 300].map((v) => ({ label: v ? (v < 60 ? `Every ${v} s` : `Every ${v / 60} min`) : 'Off', checked: A === v, onClick: () => s.setAutosave(v) })) },
+      s.local ? { label: 'Autosave — off here (projects are kept in this browser: save with Ctrl+S)', disabled: true }
+        : { label: 'Autosave', items: [0, 30, 60, 300].map((v) => ({ label: v ? (v < 60 ? `Every ${v} s` : `Every ${v / 60} min`) : 'Off', checked: A === v, onClick: () => s.setAutosave(v) })) },
       { label: 'Revert to saved file', onClick: () => s.revert(), disabled: !s.dirty },
       '-',
       { label: 'Import into this story… (.tuna / story.json)', onClick: () => this.importer.pick(), disabled: !s.server },

@@ -20,6 +20,13 @@ website you can upload anywhere: that export is what a customer gets, never the 
 The Mac launcher needs Python 3 (`xcode-select --install`). On Windows it uses Python if it's
 installed, otherwise a built-in PowerShell server, so there's nothing to install.
 
+**On a web address with no studio server** (the tool uploaded as plain files to a web host), the studio still works,
+**in your browser**: the home page says *In this browser*. Projects and their media are kept by the browser, there
+is **no autosave**, and **Ctrl+S** saves your work and writes the **.tuna** file to your computer. Closing or leaving
+with unsaved work warns you. The .tuna is the real file: keep it and share it; clearing the site's browser data
+removes the browser's copies. Git isn't available there, and demos can't be edited in place (start a project from
+one instead).
+
 ## Projects: .tuna files
 
 The button next to **OPEN TUNA** in the top bar shows what you're editing: *Repo story* (the site in this

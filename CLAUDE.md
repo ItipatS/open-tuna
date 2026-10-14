@@ -92,6 +92,8 @@ src/models.js         GLTF loading / baking / material conversion        src/dir
 src/editor/           the editor (editor.html only) — docs/editor.md; project.js (.tuna), build.js (export),
                       doc.js (story entities / changes, undo), edit-ops.js (bulk editing)
 tools/serve.py|.ps1   studio servers (projects, saves, uploads, ranges, git for demos) — docs/dev-server.md
+sw.js, src/backend.js the browser studio: the same API from IndexedDB when the tool is hosted as plain files
+models/index.json     list of the built-in models (for the browser studio) — add new models here
 models/               the tool's built-in GLB models (creatures, coral)
 demos/<id>/           demo projects: story.json, manifest.json, thumb.jpg, assets/, saves/checkpoints/ (committed)
 demos/index.json      the demo list for the start screen when there's no server (GitHub Pages) — add new demos here

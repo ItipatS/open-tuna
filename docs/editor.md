@@ -77,6 +77,8 @@ changes, and `viewSize()` gives the render size.
 ## Saving
 
 See [dev-server.md](dev-server.md).
+- **Browser studio** (`saves.local`, ping says `local`): no autosave (the File menu says so), Save writes the
+  working copy in the browser and then the .tuna file; `project.unsaved` keeps the leave warnings.
 
 - **Save** posts to `/__editor/save` with `X-Base-Hash` (FNV-1a of the story.json bytes this tab loaded or last
   saved). A 409 means the file changed outside the editor: autosave pauses and a dialog offers *Load theirs*

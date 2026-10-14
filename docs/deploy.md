@@ -1,5 +1,14 @@
 # Deploying the studio on a company server
 
+**Plain file hosting works too.** Upload the repository as it is (no build step) to any HTTPS web host or bucket,
+in any sub-folder, leaving out `.git/`, `node_modules/`, `projects/` and `saves/auto/`. With no studio server
+answering, the pages start the **browser studio** (`sw.js`, a service worker registered by `src/backend.js`): it
+answers the same `/__editor/*` API from IndexedDB, so creating / opening projects, uploads, checkpoints, `.tuna`
+files and Build site all work — per browser, with no autosave (Ctrl+S writes the working copy and the .tuna file).
+Git and live team editing need the real server below. The host must serve `sw.js` from the tool's folder (any static
+host does). When you add a built-in model, add it to `models/index.json` too.
+
+
 The studio is this repository served by `tools/serve.py` (the same server the launchers start). The home page is
 `/`, the editor `editor.html?project=…`, the player `play.html?project=…`. Built sites (File ▸ Build site) don't need
 any of this: they're static files for any host — that's what customers get.
